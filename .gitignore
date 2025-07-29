@@ -5,3 +5,4 @@ share/
 Lib/
 */__pycache__/
 dataset/
+__pycache__/
