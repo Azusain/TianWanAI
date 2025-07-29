@@ -1,3 +1,6 @@
-# pytorch-gpu
+# dont forget pytorch-gpu
 ultralytics
 opencv-python
+flask
+loguru
+gunicorn
