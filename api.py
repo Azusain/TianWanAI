@@ -33,7 +33,7 @@ class ServiceStatus(Enum):
         elif err_no == ServiceStatus.NO_OBJECT_DETECTED.value:
             return 'NO_OBJECT_DETECTED'
 
-class GestureService():
+class YoloDetectionService():
     def __init__(self, model_path, imgsz) -> None:
         self.version = "0.0.1"
         self.path = model_path
@@ -64,16 +64,30 @@ class GestureService():
         )
         
     def Predict(self, img):
-        return self.model.predict(
-            source=img, 
-            imgsz=self.imgsz,
-            half=self.is_half,
-            verbose=False
-        )
+      results = self.model.predict(
+          source=img, 
+          imgsz=self.imgsz,
+          half=self.is_half,
+          verbose=False
+      )
+      # containing multiple boxes' coordinates
+      box = results[0].boxes 
+      score = None
+      xyxyn = None
+      # if target exists.
+      if box.cls.numel() != 0:  
+        score = float(box.conf)
+        xyxyn = box.xyxyn
+      return score, xyxyn
 
-    def Response(self, err_no, label=None, score=None, xyxyn=None):
-        err_msg = ServiceStatus.stringify(err_no)
-        if err_no != 0:
+    def Response(self, errno, score=None, xyxyn=None):
+        if score is not None:
+            errno = ServiceStatus.SUCCESS.value
+        elif errno is None: 
+            errno = ServiceStatus.NO_OBJECT_DETECTED.value
+              
+        err_msg = ServiceStatus.stringify(errno)
+        if errno != 0:
             logger.error(err_msg)
         else:
             logger.success(err_msg + f" - open: {score}")
@@ -85,9 +99,10 @@ class GestureService():
             top     = xyxyn[1]
             width   = xyxyn[2] - xyxyn[0]
             height  = xyxyn[3] - xyxyn[1]
+            
         return {
             "log_id": uuid4(),
-            "err_no": err_no,
+            "err_no": errno,
             "err_msg": err_msg,
             "api_version": VERSION_API,
             "model_version": self.version,
@@ -101,3 +116,4 @@ class GestureService():
                 }
             }]
         }
+        

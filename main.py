@@ -13,7 +13,7 @@ from enum import Enum
 from uuid import uuid4 as uuid4
 
 # project 
-from api import ServiceStatus, GestureService
+from api import ServiceStatus, YoloDetectionService
 
 # logger
 from loguru import logger
@@ -44,13 +44,6 @@ def validate_img_format():
     except binascii.Error: 
         return None, ServiceStatus.INVALID_IMAGE_FORMAT.value
 
-def get_service(model_name, imgsz):
-    if model_name == "gesture":
-        return GestureService(
-        model_path="", 
-        imgsz=imgsz
-    )
-
 # model:
 #   - gesture
 #   - tshirt
@@ -70,35 +63,28 @@ def create_app(model, imgsz=640):
     
     app = Flask(__name__)
 
-    service = get_service(model, imgsz)
+    service = YoloDetectionService(model, imgsz)
+
 
     # router settings, no trailing slash so that:
     #   /GeneralClassifyService == /GeneralClassifyService/
-    @app.route('/Gesture', methods=['POST'])
+    @app.route('/gesture', methods=['POST'])
+    @app.route('/ponding', methods=['POST'])
+    @app.route('/mouse', methods=['POST'])
     def detect():
         img, errno = validate_img_format()
         if img is None:
-            service.Response(err_no=errno)
-
-        # inference 
-        results = service.Predict(img)  # each result represents a classification of a single image,
-        box = results[0].boxes          # containing multiple boxes' coordinates
-        score = None
-        xyxyn = None
-        if box.cls.numel() != 0:  # if target exists.
-            score = float(box.conf)
-            xyxyn = box.xyxyn
-
-        # send results back       
-        if score is not None:
-            err_no = ServiceStatus.SUCCESS.value
-        else: 
-            err_no = ServiceStatus.NO_OBJECT_DETECTED.value                
+            return service.Response(err_no=errno)
+        # inference.
+        # each result represents a classification of a single image,
+        # containing multiple boxes' coordinates
+        score, xyxyn = service.Predict(img)
         return service.Response(
-            err_no=err_no,
+            err_no=errno,
             score=score,
             xyxyn=xyxyn
         )
+    
 
 
 
