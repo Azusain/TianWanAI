@@ -26,11 +26,11 @@ def validate_img_format():
     except Exception:         
         return None, ServiceStatus.INVALID_CONTENT_TYPE.value
         
-    # check if the json data contains certain key: 'image'
+    # check if the json data contains certain key: 'image'.
     if not req.__contains__('image') or req['image'] == '':         
         return None, ServiceStatus.MISSING_IMAGE_DATA.value
     
-    # check whether the image data has a valid format 
+    # check whether the image data has a valid format.
     bin_data = None
     try:
         if type(req['image']) is not str:
@@ -64,7 +64,6 @@ def create_app(model, imgsz=640):
     app = Flask(__name__)
 
     service = YoloDetectionService(model, imgsz)
-
 
     # router settings, no trailing slash so that:
     #   /GeneralClassifyService == /GeneralClassifyService/
