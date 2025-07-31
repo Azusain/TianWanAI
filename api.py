@@ -8,6 +8,8 @@ from uuid import uuid4 as uuid4
 # model
 from ultralytics import YOLO
 import torch
+from transformers import YolosImageProcessor, YolosForObjectDetection
+
 
 # logger
 from loguru import logger
@@ -90,7 +92,7 @@ class YoloDetectionService():
         if errno != 0:
             logger.error(err_msg)
         else:
-            logger.success(err_msg + f" - open: {score}")
+            logger.success(err_msg + f" - score: {score}")
         
         left, top, width, height = None, None, None, None
         if score is not None and xyxyn is not None:
@@ -117,3 +119,73 @@ class YoloDetectionService():
             }]
         }
         
+class TshirtDetectionService():
+    def __init__(self, model_dir_path, imgsz) -> None:
+      self.version = "0.0.1"
+      self.path = model_dir_path
+      self.imgsz = imgsz
+      self.feature_extractor = YolosImageProcessor.from_pretrained(
+        model_dir_path, local_files_only=True, size={"shortest_edge": imgsz, "longest_edge": imgsz}  
+      )
+      self.model = YolosForObjectDetection.from_pretrained(model_dir_path, local_files_only=True)
+        
+    def Predict(self, img):
+      encoding = self.feature_extractor(images=img, return_tensors="pt")
+      with torch.no_grad():
+          outputs = self.model(**encoding)
+      scores = outputs.logits.softmax(-1)[0, :, :-1]  
+      labels = scores.argmax(-1)
+      scores = scores.max(-1).values
+      boxes = outputs.pred_boxes[0]
+      threshold = 0.5
+      selected = torch.where(scores > threshold)
+      selected_scores = scores[selected]
+      selected_labels = labels[selected]
+      selected_boxes = boxes[selected]
+      w, h = img.size
+      pixel_boxes = []
+      for box in selected_boxes:
+          cx, cy, bw, bh = box
+          x1 = (cx - bw / 2) * w
+          x2 = (cx + bw / 2) * w
+          y1 = (cy - bh / 2) * h
+          y2 = (cy + bh / 2) * h
+          pixel_boxes.append([x1.item(), y1.item(), x2.item(), y2.item()])
+      return selected_scores, selected_labels, pixel_boxes
+
+    def Response(self, errno, score=None, xyxyn=None):
+        if score is not None:
+            errno = ServiceStatus.SUCCESS.value
+        elif errno is None: 
+            errno = ServiceStatus.NO_OBJECT_DETECTED.value
+              
+        err_msg = ServiceStatus.stringify(errno)
+        if errno != 0:
+            logger.error(err_msg)
+        else:
+            logger.success(err_msg + f" - tshirt: {score}")
+        
+        left, top, width, height = None, None, None, None
+        if score is not None and xyxyn is not None:
+            xyxyn = xyxyn[0].tolist() 
+            left    = xyxyn[0]
+            top     = xyxyn[1]
+            width   = xyxyn[2] - xyxyn[0]
+            height  = xyxyn[3] - xyxyn[1]
+            
+        return {
+            "log_id": uuid4(),
+            "err_no": errno,
+            "err_msg": err_msg,
+            "api_version": VERSION_API,
+            "model_version": self.version,
+            "results": [{
+                "score": score,
+                "location": {
+                    "left": left,
+                    "top": top,
+                    "width": width,
+                    "height": height
+                }
+            }]
+        }
