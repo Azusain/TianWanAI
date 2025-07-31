@@ -70,7 +70,7 @@ def create_app(model, imgsz=640):
     @app.route('/gesture', methods=['POST'])
     @app.route('/ponding', methods=['POST'])
     @app.route('/mouse', methods=['POST'])
-    def detect():
+    def YoloDetect():
         img, errno = validate_img_format()
         if img is None:
             return service.Response(err_no=errno)
@@ -84,11 +84,50 @@ def create_app(model, imgsz=640):
             xyxyn=xyxyn
         )
     
+    @app.route('/tshirt', methods=['POST'])
+    def TshirtDetect():
+      img, errno = validate_img_format()
+      if img is None:
+          return {
+            "log_id": uuid4(),
+            "err_no": errno,
+            "err_msg": ServiceStatus.stringify(errno),
+          }
 
-
-
-
-
+      H, W = img.shape[:2]
+      selected_scores, selected_labels, pixel_boxes = service.Predict(img)
+      results = []
+      for score, label_idx, bbox in zip(selected_scores, selected_labels, pixel_boxes):
+          label_name = model.config.id2label[label_idx.item()]
+          if "t-shirt" in label_name:
+              x1, y1, x2, y2 = bbox
+              width_px = x2 - x1
+              height_px = y2 - y1
+              cx = x1 + width_px / 2
+              cy = y1 + height_px / 2
+              cxn = cx / W
+              cyn = cy / H
+              width_n = width_px / W
+              height_n = height_px / H
+              left_n = cxn - width_n / 2
+              top_n = cyn - height_n / 2
+              results.append({
+                  "score": float(score),
+                  "location": {
+                      "left": left_n,
+                      "top": top_n,
+                      "width": width_n,
+                      "height": height_n
+                  }
+              })
+      return {
+        "log_id": uuid4(),
+        "err_no": errno,
+        "err_msg": ServiceStatus.stringify(errno),
+        "api_version": "0.0.1",
+        "model_version": "0.0.1",
+        "results": results
+      }
 
 
 

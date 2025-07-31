@@ -6,7 +6,7 @@ from transformers import YolosImageProcessor, YolosForObjectDetection
 
 THRESHHOLD = 0.5
 
-def inference(image, model):
+def inference(image, model, feature_extractor):
   encoding = feature_extractor(images=image, return_tensors="pt")
   with torch.no_grad():
       outputs = model(**encoding)
@@ -41,11 +41,9 @@ if __name__ == "__main__":
   )
   model = YolosForObjectDetection.from_pretrained(model_dir, local_files_only=True)
 
-
   # inference.
   image = Image.open("image.png").convert("RGB")
-  selected_scores, selected_labels, pixel_boxes = inference(image, model)
-
+  selected_scores, selected_labels, pixel_boxes = inference(image, model, feature_extractor)
 
   # draw results.
   image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
