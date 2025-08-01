@@ -1,5 +1,6 @@
 # api packages
 import binascii
+from sre_constants import SUCCESS
 from flask import Flask, request
 from uuid import uuid4 as uuid4
 import base64
@@ -12,6 +13,7 @@ import cv2
 from uuid import uuid4 as uuid4
 
 # project 
+from __SmokeFire.smoke import SmokeFileDetector
 from api import ServiceStatus, YoloDetectionService
 
 # logger
@@ -62,8 +64,10 @@ def create_app(model, imgsz=640):
     
     app = Flask(__name__)
 
-    service = YoloDetectionService(model, imgsz)
-
+    yolo_service = YoloDetectionService(model, imgsz)
+    smoke_service = SmokeFileDetector(model='__SmokeFire/weights/smoke.pt')
+    
+  
     # router settings, no trailing slash so that:
     #   /GeneralClassifyService == /GeneralClassifyService/
     @app.route('/gesture', methods=['POST'])
@@ -72,12 +76,12 @@ def create_app(model, imgsz=640):
     def YoloDetect():
         img, errno = validate_img_format()
         if img is None:
-            return service.Response(err_no=errno)
+            return yolo_service.Response(err_no=errno)
         # inference.
         # each result represents a classification of a single image,
         # containing multiple boxes' coordinates
-        score, xyxyn = service.Predict(img)
-        return service.Response(
+        score, xyxyn = yolo_service.Predict(img)
+        return yolo_service.Response(
             err_no=errno,
             score=score,
             xyxyn=xyxyn
@@ -94,7 +98,7 @@ def create_app(model, imgsz=640):
           }
 
       H, W = img.shape[:2]
-      selected_scores, selected_labels, pixel_boxes = service.Predict(img)
+      selected_scores, selected_labels, pixel_boxes = yolo_service.Predict(img)
       results = []
       for score, label_idx, bbox in zip(selected_scores, selected_labels, pixel_boxes):
           label_name = model.config.id2label[label_idx.item()]
@@ -128,8 +132,8 @@ def create_app(model, imgsz=640):
         "results": results
       }
 
-    @app.route('/fall', methods=['POST'])
-    def FallDetect():
+    @app.route('/smoke', methods=['POST'])
+    def SmokeDetect():
       img, errno = validate_img_format()
       if img is None:
           return {
@@ -137,9 +141,22 @@ def create_app(model, imgsz=640):
             "err_no": errno,
             "err_msg": ServiceStatus.stringify(errno),
           }
-      return {}
-
-
+      
+      # inference.
+      errno = ServiceStatus.SUCCESS.value
+      # input cv2 format image.
+      batch_results = smoke_service.Inference([img])
+      if len(batch_results) == 0:
+        errno = ServiceStatus.NO_OBJECT_DETECTED
+        
+      return {
+        "log_id": uuid4(),
+        "err_no": errno,
+        "err_msg": ServiceStatus.stringify(errno),
+        "api_version": "0.0.1",
+        "model_version": "0.0.1",
+        "results": batch_results[0]
+      }
 
     return app
 
