@@ -9,7 +9,6 @@ import numpy as np
 import cv2
 
 # api
-from enum import Enum
 from uuid import uuid4 as uuid4
 
 # project 
@@ -129,7 +128,16 @@ def create_app(model, imgsz=640):
         "results": results
       }
 
-
+    @app.route('/fall', methods=['POST'])
+    def FallDetect():
+      img, errno = validate_img_format()
+      if img is None:
+          return {
+            "log_id": uuid4(),
+            "err_no": errno,
+            "err_msg": ServiceStatus.stringify(errno),
+          }
+      return {}
 
 
 
