@@ -73,14 +73,14 @@ class YoloDetectionService():
           verbose=False
       )
       # containing multiple boxes' coordinates
-      box = results[0].boxes 
+      boxes = results[0].boxes 
       score = None
       xyxyn = None
       # if target exists.
-      if box.cls.numel() != 0:  
-        score = float(box.conf)
-        xyxyn = box.xyxyn
-      return score, xyxyn
+      if boxes.cls.numel() != 0:  
+        score = float(boxes.conf)
+        xyxyn = boxes.xyxyn
+      return score, xyxyn, boxes.cls
 
     def Response(self, errno, score=None, xyxyn=None):
         if score is not None:
