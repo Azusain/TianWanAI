@@ -23,16 +23,16 @@ class ServiceStatus(Enum):
     INVALID_IMAGE_FORMAT = -3
     NO_OBJECT_DETECTED = -4
     
-    def stringify(err_no):
-        if err_no == ServiceStatus.SUCCESS.value:
+    def stringify(errno):
+        if errno == ServiceStatus.SUCCESS.value:
             return 'SUCCESS'
-        elif err_no == ServiceStatus.INVALID_CONTENT_TYPE.value:
+        elif errno == ServiceStatus.INVALID_CONTENT_TYPE.value:
             return'INVALID_CONTENT_TYPE'
-        elif err_no == ServiceStatus.MISSING_IMAGE_DATA.value: 
+        elif errno == ServiceStatus.MISSING_IMAGE_DATA.value: 
             return 'MISSING_IMAGE_DATA'    
-        elif err_no == ServiceStatus.INVALID_IMAGE_FORMAT.value:
+        elif errno == ServiceStatus.INVALID_IMAGE_FORMAT.value:
             return'INVALID_IMAGE_FORMAT'
-        elif err_no == ServiceStatus.NO_OBJECT_DETECTED.value:
+        elif errno == ServiceStatus.NO_OBJECT_DETECTED.value:
             return 'NO_OBJECT_DETECTED'
 
 class YoloDetectionService():
@@ -104,7 +104,7 @@ class YoloDetectionService():
             
         return {
             "log_id": uuid4(),
-            "err_no": errno,
+            "errno": errno,
             "err_msg": err_msg,
             "api_version": VERSION_API,
             "model_version": self.version,
@@ -175,7 +175,7 @@ class TshirtDetectionService():
             
         return {
             "log_id": uuid4(),
-            "err_no": errno,
+            "errno": errno,
             "err_msg": err_msg,
             "api_version": VERSION_API,
             "model_version": self.version,

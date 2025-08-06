@@ -1,8 +1,10 @@
 # api packages
-from ast import mod
 import binascii
 from enum import Enum
-from sre_constants import SUCCESS
+import os
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '__SmokeFire')))
+
 from flask import Flask, request
 from uuid import uuid4 as uuid4
 import base64
@@ -15,11 +17,12 @@ import cv2
 from uuid import uuid4 as uuid4
 
 # project 
-from __SmokeFire.smoke import SmokeFileDetector
 from api import ServiceStatus, YoloDetectionService, TshirtDetectionService
 
 # logger
 from loguru import logger
+
+
 
 class ModelType(Enum):
     GESTURE = "gesture"
@@ -77,7 +80,14 @@ def get_service(model_type: str):
 #   - ponding
 #   - smoke
 #   - fall
-def create_app(model_type, imgsz=640):
+def app():
+    model_type = os.environ.get('MODEL')
+    if model_type:
+      print(f"Using model: {model_type}")
+    else:
+      print("Environment variable `MODEL` not set")
+      return 
+  
     # runtime initiaization
     log_path = f"logs/{model_type}/" + "runtime_{time}.log"
     logger.add(
@@ -89,7 +99,8 @@ def create_app(model_type, imgsz=640):
     app = Flask(__name__)
 
     service, base = get_service(model_type)
-  
+    logger.info("server is up!")
+    
     # router settings, no trailing slash so that:
     #   /GeneralClassifyService == /GeneralClassifyService/
     @app.route('/gesture', methods=['POST'])
@@ -98,13 +109,13 @@ def create_app(model_type, imgsz=640):
     def YoloDetect():
         img, errno = validate_img_format()
         if img is None:
-            return service.Response(err_no=errno)
+            return service.Response(errno=errno)
         # inference.
         # each result represents a classification of a single image,
         # containing multiple boxes' coordinates
         score, xyxyn, _ = service.Predict(img)
         return service.Response(
-            err_no=errno,
+            errno=errno,
             score=score,
             xyxyn=xyxyn
         )
@@ -115,7 +126,7 @@ def create_app(model_type, imgsz=640):
       if img is None:
           return {
             "log_id": uuid4(),
-            "err_no": errno,
+            "errno": errno,
             "err_msg": ServiceStatus.stringify(errno),
           }
   
@@ -166,7 +177,7 @@ def create_app(model_type, imgsz=640):
         errno = ServiceStatus.NO_OBJECT_DETECTED.value
       return {
         "log_id": uuid4(),
-        "err_no": errno,
+        "errno": errno,
         "err_msg": ServiceStatus.stringify(errno),
         "api_version": "0.0.1",
         "model_version": "0.0.1",
@@ -179,7 +190,7 @@ def create_app(model_type, imgsz=640):
       if img is None:
           return {
             "log_id": uuid4(),
-            "err_no": errno,
+            "errno": errno,
             "err_msg": ServiceStatus.stringify(errno),
           }
 
@@ -217,7 +228,7 @@ def create_app(model_type, imgsz=640):
 
       return {
         "log_id": uuid4(),
-        "err_no": errno,
+        "errno": errno,
         "err_msg": ServiceStatus.stringify(errno),
         "api_version": "0.0.1",
         "model_version": "0.0.1",
@@ -230,7 +241,7 @@ def create_app(model_type, imgsz=640):
       if img is None:
           return {
             "log_id": uuid4(),
-            "err_no": errno,
+            "errno": errno,
             "err_msg": ServiceStatus.stringify(errno),
           }
       
@@ -243,7 +254,7 @@ def create_app(model_type, imgsz=640):
         
       return {
         "log_id": uuid4(),
-        "err_no": errno,
+        "errno": errno,
         "err_msg": ServiceStatus.stringify(errno),
         "api_version": "0.0.1",
         "model_version": "0.0.1",
@@ -252,5 +263,9 @@ def create_app(model_type, imgsz=640):
 
     return app
 
-# comment it if in production environment
-# create_app(model='models/dropdoor_0_1_0.pt').run(port=8901, debug=True, host='0.0.0.0')
+# test on Windows.
+if __name__ == "__main__":
+  os.environ["MODEL"] = "gesture"
+  app = app()
+  if app:
+    app.run(port=8080, debug=True, host='0.0.0.0')

@@ -11,6 +11,9 @@
 *.txt filter=lfs diff=lfs merge=lfs -text
 *.json filter=lfs diff=lfs merge=lfs -text
 *.bin filter=lfs diff=lfs merge=lfs -text
+*.dockerignore filter=lfs diff=lfs merge=lfs -text
+/Dockerfile filter=lfs diff=lfs merge=lfs -text
+*.bash filter=lfs diff=lfs merge=lfs -text
 *.py !text !filter !merge !diff
 *.go !text !filter !merge !diff
 *.md !text !filter !merge !diff
