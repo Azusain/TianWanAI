@@ -14,7 +14,6 @@ FROM nvidia/cuda:11.1.1-runtime-ubi8
 ENV WORKDIR=/root
 WORKDIR ${WORKDIR}
 COPY --from=builder ${WORKDIR} ${WORKDIR}
-
 ENV PATH="${WORKDIR}/venv/bin:$PATH"
 RUN echo "ZONE=Asia/Shanghai" >> /etc/sysconfig/clock         && \
     rm -f /etc/localtime                                      && \
