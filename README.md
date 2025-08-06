@@ -27,3 +27,13 @@
   # test on cpu
   docker run -p 8902:8902 -e NPROC=6 -e MODEL="gesture" tianwan
 ```
+
+### Tested Interface
+
+- gesture
+- mouse
+- ponding
+- smoke
+- tshirt
+- fall
+

@@ -78,7 +78,10 @@ class YoloDetectionService():
       xyxyn = None
       # if target exists.
       if boxes.cls.numel() != 0:  
-        score = float(boxes.conf)
+        if len(boxes.conf) == 1:
+          score = float(boxes.conf)
+        else:
+          score = boxes.conf
         xyxyn = boxes.xyxyn
       return score, xyxyn, boxes.cls
 
@@ -137,12 +140,12 @@ class TshirtDetectionService():
       labels = scores.argmax(-1)
       scores = scores.max(-1).values
       boxes = outputs.pred_boxes[0]
-      threshold = 0.5
+      threshold = 0.2
       selected = torch.where(scores > threshold)
       selected_scores = scores[selected]
       selected_labels = labels[selected]
       selected_boxes = boxes[selected]
-      w, h = img.size
+      h, w = img.shape[:2]
       pixel_boxes = []
       for box in selected_boxes:
           cx, cy, bw, bh = box
@@ -152,40 +155,3 @@ class TshirtDetectionService():
           y2 = (cy + bh / 2) * h
           pixel_boxes.append([x1.item(), y1.item(), x2.item(), y2.item()])
       return selected_scores, selected_labels, pixel_boxes
-
-    def Response(self, errno, score=None, xyxyn=None):
-        if score is not None:
-            errno = ServiceStatus.SUCCESS.value
-        elif errno is None: 
-            errno = ServiceStatus.NO_OBJECT_DETECTED.value
-              
-        err_msg = ServiceStatus.stringify(errno)
-        if errno != 0:
-            logger.error(err_msg)
-        else:
-            logger.success(err_msg + f" - tshirt: {score}")
-        
-        left, top, width, height = None, None, None, None
-        if score is not None and xyxyn is not None:
-            xyxyn = xyxyn[0].tolist() 
-            left    = xyxyn[0]
-            top     = xyxyn[1]
-            width   = xyxyn[2] - xyxyn[0]
-            height  = xyxyn[3] - xyxyn[1]
-            
-        return {
-            "log_id": uuid4(),
-            "errno": errno,
-            "err_msg": err_msg,
-            "api_version": VERSION_API,
-            "model_version": self.version,
-            "results": [{
-                "score": score,
-                "location": {
-                    "left": left,
-                    "top": top,
-                    "width": width,
-                    "height": height
-                }
-            }]
-        }
