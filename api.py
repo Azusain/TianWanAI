@@ -55,7 +55,8 @@ class YoloDetectionService():
         )
         self.model.to(self.device)
         self.is_half = (self.device == 'cpu')
-        
+        logger.info(f"device: {self.device.type}")
+
         # model pre-heating
         logger.debug("model preheating...")
         rand_data = torch.randn(1, 3, 640, 640)
@@ -131,7 +132,10 @@ class TshirtDetectionService():
         model_dir_path, local_files_only=True, size={"shortest_edge": imgsz, "longest_edge": imgsz}  
       )
       self.model = YolosForObjectDetection.from_pretrained(model_dir_path, local_files_only=True)
-        
+      device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+      self.model.to(device)
+      logger.info(f"device: {device.type}")
+      
     def Predict(self, img):
       encoding = self.feature_extractor(images=img, return_tensors="pt")
       with torch.no_grad():
