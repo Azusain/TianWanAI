@@ -132,12 +132,13 @@ class TshirtDetectionService():
         model_dir_path, local_files_only=True, size={"shortest_edge": imgsz, "longest_edge": imgsz}  
       )
       self.model = YolosForObjectDetection.from_pretrained(model_dir_path, local_files_only=True)
-      device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-      self.model.to(device)
-      logger.info(f"device: {device.type}")
+      self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+      self.model.to(self.device)
+      logger.info(f"device: {self.device.type}")
       
     def Predict(self, img):
       encoding = self.feature_extractor(images=img, return_tensors="pt")
+      encoding = {k: v.to(self.device) for k, v in encoding.items()}
       with torch.no_grad():
           outputs = self.model(**encoding)
       scores = outputs.logits.softmax(-1)[0, :, :-1]  
