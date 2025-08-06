@@ -213,7 +213,7 @@ def main():
     # Configuration
     INPUT_FOLDER = "input"
     OUTPUT_FOLDER = "output" 
-    SERVER_URL = "http://localhost:6006/tshirt"  # Change this to your server URL
+    SERVER_URL = "http://localhost:6006/ponding"  # Change this to your server URL
     
     # Create processor and run
     processor = ImageProcessor(INPUT_FOLDER, OUTPUT_FOLDER, SERVER_URL)
