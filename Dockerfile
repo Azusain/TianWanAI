@@ -1,5 +1,5 @@
 # builder.
-FROM nvidia/cuda:11.1.1-runtime-ubi8
+FROM nvidia/cuda:11.1.1-runtime-ubi8 AS builder
 ENV WORKDIR=/root
 WORKDIR ${WORKDIR}
 COPY . ${WORKDIR}
