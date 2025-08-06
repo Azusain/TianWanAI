@@ -7,7 +7,8 @@ RUN yum -y update                                                               
     curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.rpm.sh | bash  && \
     yum install -y git-lfs                                                                    && \
     git lfs install                                                                           && \
-    git lfs pull
+    git lfs pull                                                                              && \
+    git submodule update --init --recursive
 
 # runtime.
 FROM nvidia/cuda:11.1.1-runtime-ubi8
