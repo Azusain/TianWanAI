@@ -319,8 +319,8 @@ def app():
     return app
 
 # test on Windows.
-if __name__ == "__main__":
-  os.environ["MODEL"] = "smoke"
-  app = app()
-  if app:
-    app.run(port=8080, debug=True, host='0.0.0.0')
+# if __name__ == "__main__":
+#   os.environ["MODEL"] = "smoke"
+#   app = app()
+#   if app:
+#     app.run(port=8080, debug=True, host='0.0.0.0')

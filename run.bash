@@ -1,1 +1,1 @@
-gunicorn -w $NPROC --threads 4 -b 0.0.0.0:8080 'main:app()'
+gunicorn -w $NPROC --threads 1 -b 0.0.0.0:8080 'main:app()'
