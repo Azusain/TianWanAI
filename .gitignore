@@ -6,3 +6,7 @@ Lib/
 */__pycache__/
 dataset/
 __pycache__/
+pyvenv.cfg
+**/input/
+**/output/
+**/logs/

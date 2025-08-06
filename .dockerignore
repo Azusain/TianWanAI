@@ -1,0 +1,12 @@
+Scripts/
+Include/
+share/
+Lib/
+**/__pycache__/
+dataset/
+__pycache__/
+train.yaml/
+train.py/
+tools/
+pyvenv.cfg
+**/input/

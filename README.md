@@ -3,15 +3,27 @@
 
 #### Notes
 
-还未实现的服务：
+- GESTURE = "gesture"
+- PONDING = "ponding"
+- SMOKE = "smoke"
+- TSHIRT = "tshirt"
+- MOUSE = "mouse"
+- FALL = "fall"
 
-- 手势检测 √
-- 老鼠检测 √
-- 积水检测 √
-- 短袖检测 √
-- 摔倒检测 √
-- 烟雾检测 √
 
-并且还有:
 
-- 打包
+### BUILD
+
+```bash
+  docker build -t service:latest .
+```
+
+### RUN
+
+```bash
+  # gpu 
+  docker run -d -p 8902:8902 --gpus '"device=1"' --cpus=16 -e NPROC=6 -e MODEL="gesture" tianwan
+  
+  # test on cpu
+  docker run -p 8902:8902 -e NPROC=6 -e MODEL="gesture" tianwan
+```
