@@ -41,7 +41,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
-          file: ./Dockerfile_CUDA_12_6_0
+          file: ./Dockerfile_CUDA_12_6_3
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/tianwan:${{ env.VERSION }}
 
