@@ -6,7 +6,7 @@ COPY . ${WORKDIR}
 RUN apt -y update                                                                             && \
     curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash  && \
     apt install -y git-lfs                                                                    && \
-    rm -f .git/hooks                                                                          && \
+    rm -rf .git/hooks                                                                         && \
     git lfs install                                                                           && \
     git lfs pull                                                                              && \
     git submodule update --init --recursive
