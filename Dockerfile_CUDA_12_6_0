@@ -1,5 +1,5 @@
 # builder.
-FROM nvidia/cuda:11.1.1-runtime-ubi8 AS builder
+FROM nvidia/cuda:12.6.0-runtime-ubi8 AS builder
 ENV WORKDIR=/root
 WORKDIR ${WORKDIR}
 COPY . ${WORKDIR}
@@ -11,7 +11,7 @@ RUN yum -y update                                                               
     git submodule update --init --recursive
 
 # runtime.
-FROM nvidia/cuda:11.1.1-runtime-ubi8
+FROM nvidia/cuda:12.6.0-runtime-ubi8
 ENV WORKDIR=/root
 WORKDIR ${WORKDIR}
 COPY --from=builder ${WORKDIR} ${WORKDIR}
@@ -22,7 +22,7 @@ RUN echo "ZONE=Asia/Shanghai" >> /etc/sysconfig/clock         && \
     yum -y update                                             && \
     yum install python39 python39-pip -y                      && \
     python3.9 -m venv venv                                    && \
-    pip3 install torch==1.8.0+cu111 torchvision==0.9.0+cu111 torchaudio==0.8.0 -f https://download.pytorch.org/whl/torch_stable.html && \
+    pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126 && \
     yum install -y mesa-libGL                                 && \
     pip3 install -r requirements.txt                          && \
     yum clean all
