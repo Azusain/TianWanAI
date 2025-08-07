@@ -7,6 +7,7 @@ RUN apt -y update                                                               
     curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash  && \
     apt install -y git-lfs                                                                    && \
     git lfs install                                                                           && \
+    git lfs update --force                                                                    && \
     git lfs pull                                                                              && \
     git submodule update --init --recursive
 
