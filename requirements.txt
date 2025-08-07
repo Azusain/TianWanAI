@@ -4,5 +4,5 @@ opencv-python
 flask
 loguru
 gunicorn
-transformers==4.14.1
-numpy<2.0
+transformers
+numpy

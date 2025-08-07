@@ -37,3 +37,9 @@
 - tshirt
 - fall
 
+### Notes
+
+```bash
+  # Dockerfile_Cuda_11_1 is not applicable to this repo, 
+  # but it can be used for other projects.
+```
