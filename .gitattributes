@@ -18,6 +18,7 @@
 /Dockerfile_CUDA_11_1_1 filter=lfs diff=lfs merge=lfs -text
 /Dockerfile_CUDA_12_6_0 filter=lfs diff=lfs merge=lfs -text
 /Dockerfile_CUDA_12_6_3 filter=lfs diff=lfs merge=lfs -text
+/version filter=lfs diff=lfs merge=lfs -text
 *.py !text !filter !merge !diff
 *.go !text !filter !merge !diff
 *.md !text !filter !merge !diff
