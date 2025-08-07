@@ -13,15 +13,15 @@ RUN yum -y update                                                               
 # runtime.
 FROM nvidia/cuda:12.6.0-runtime-ubi8
 ENV WORKDIR=/root
-WORKDIR ${WORKDIR}
+WORKDIR ${WORKDIR}q
 COPY --from=builder ${WORKDIR} ${WORKDIR}
 ENV PATH="${WORKDIR}/venv/bin:$PATH"
 RUN echo "ZONE=Asia/Shanghai" >> /etc/sysconfig/clock         && \
     rm -f /etc/localtime                                      && \
     ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime   && \
     yum -y update                                             && \
-    yum install python39 python39-pip -y                      && \
-    python3.9 -m venv venv                                    && \
+    yum install python310 python310-pip -y                      && \
+    python3.10 -m venv venv                                    && \
     pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126 && \
     yum install -y mesa-libGL                                 && \
     pip3 install -r requirements.txt                          && \
