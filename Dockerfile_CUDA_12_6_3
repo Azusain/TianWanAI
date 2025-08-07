@@ -4,7 +4,7 @@ ENV WORKDIR=/root
 WORKDIR ${WORKDIR}
 COPY . ${WORKDIR}
 RUN apt -y update                                                                             && \
-    curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.rpm.sh | bash  && \
+    curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash  && \
     apt install -y git-lfs                                                                    && \
     git lfs install                                                                           && \
     git lfs pull                                                                              && \
