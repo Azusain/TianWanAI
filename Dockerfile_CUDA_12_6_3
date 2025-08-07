@@ -17,7 +17,7 @@ ENV WORKDIR=/root
 WORKDIR ${WORKDIR}
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime                          && \
     apt-get update                                                                   && \
-    apt-get install -y python3.11                                                    && \
+    apt-get install -y python3.11 python3-venv                                       && \
     python3.11 -m venv venv                                                          
 COPY --from=downloader ${WORKDIR} ${WORKDIR}                                    
 RUN . venv/bin/activate                                                              && \
