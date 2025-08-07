@@ -2,7 +2,11 @@ name: Build and Push Docker Image
 
 on:
   workflow_dispatch:
-
+    inputs:
+      tag:
+        description: "Docker Tag Name"
+        required: true
+        default: latest
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -34,4 +38,4 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/tianwan:latest
+          tags: ${{ secrets.DOCKER_USERNAME }}/tianwan:${{ github.event.inputs.tag }}
