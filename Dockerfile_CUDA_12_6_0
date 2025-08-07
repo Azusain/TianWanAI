@@ -13,7 +13,7 @@ RUN yum -y update                                                               
 # runtime.
 FROM nvidia/cuda:12.6.0-runtime-ubi8
 ENV WORKDIR=/root
-WORKDIR ${WORKDIR}q
+WORKDIR ${WORKDIR}
 COPY --from=builder ${WORKDIR} ${WORKDIR}
 ENV PATH="${WORKDIR}/venv/bin:$PATH"
 RUN echo "ZONE=Asia/Shanghai" >> /etc/sysconfig/clock         && \
