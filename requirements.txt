@@ -5,3 +5,4 @@ flask
 loguru
 gunicorn
 transformers
+numpy<2.0
