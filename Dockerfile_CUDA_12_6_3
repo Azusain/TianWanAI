@@ -14,14 +14,14 @@ RUN apt -y update                                                               
 # runtime.
 FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
 ENV WORKDIR=/root
+ENV PATH="${WORKDIR}/venv/bin:$PATH"
 WORKDIR ${WORKDIR}
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime                          && \
     apt-get update                                                                   && \
     apt-get install -y python3.11 python3.11-venv                                    && \
     python3.11 -m venv venv                                                          
 COPY --from=downloader ${WORKDIR} ${WORKDIR}                                    
-RUN . venv/bin/activate                                                              && \
-    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126 && \
+RUN pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126 && \
     # apt-get install -y libgl1-mesa-glx                                               && \
     pip install -r requirements.txt                                                  && \
     apt-get clean
