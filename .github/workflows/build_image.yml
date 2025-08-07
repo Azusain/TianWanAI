@@ -44,23 +44,23 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/tianwan:${{ github.event.inputs.tag }}
 
-notify:
-  needs: build
-  runs-on: ubuntu-latest
-  if: ${{ always() }}
-  steps:
-    - name: Notify Discord
-      uses: nobrayner/discord-webhook@v1
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        discord-webhook: ${{ secrets.DISCORD_WEBHOOK }}
-        title: "${{ github.repository }}: ${{ github.workflow }} - ${{ github.sha }}"
-        description: |
-          Workflow: ${{ github.workflow }}
-          Status: ${{ job.status }}
-          Repository: ${{ github.repository }}
-          Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        include-details: "false"
-        color-success: "#17cf48"
-        color-failure: "#eb4034"
-        color-cancelled: "#42daf5"
+  notify:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    steps:
+      - name: Notify Discord
+        uses: nobrayner/discord-webhook@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          discord-webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          title: "${{ github.repository }}: ${{ github.workflow }} - ${{ github.sha }}"
+          description: |
+            Workflow: ${{ github.workflow }}
+            Status: ${{ job.status }}
+            Repository: ${{ github.repository }}
+            Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          include-details: "false"
+          color-success: "#17cf48"
+          color-failure: "#eb4034"
+          color-cancelled: "#42daf5"
