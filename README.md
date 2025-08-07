@@ -22,10 +22,10 @@
 
 ```bash
   # gpu 
-  docker run -d -p 8902:8902 --gpus '"device=1"' --cpus=16 -e NPROC=6 -e MODEL="gesture" tianwan
+  docker run -d -p 8902:8080 --gpus '"device=1"' --cpus=16 -e NPROC=6 -e MODEL="gesture" tianwan
   
   # test on cpu
-  docker run -p 8902:8902 -e NPROC=6 -e MODEL="gesture" tianwan
+  docker run -p 8902:8080 -e NPROC=6 -e MODEL="gesture" tianwan
 ```
 
 ### Tested Interface
