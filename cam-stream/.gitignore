@@ -1,0 +1,13 @@
+# Output directory
+output/
+
+# Go build artifacts
+*.tmp
+
+# Test files
+test_pattern.mp4
+test_loop.mp4
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,10 @@
+{
+  "rtsp_url": "rtsp://localhost:8554/stream",
+  "server_url": "http://localhost:8080/tshirt",
+  "camera_name": "Camera-01",
+  "debug_mode": true,
+  "frame_rate": 1,
+  "output_width": 1920,
+  "output_height": 1080,
+  "web_port": 3000
+}
