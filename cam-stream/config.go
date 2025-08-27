@@ -8,22 +8,16 @@ import (
 
 // Config application configuration structure
 type Config struct {
-	RTSPUrl      string `json:"rtsp_url"`
-	ServerUrl    string `json:"server_url"`
-	CameraName   string `json:"camera_name"`
-	DebugMode    bool   `json:"debug_mode"`
-	FrameRate    int    `json:"frame_rate"`     // frames per second for sampling
-	OutputWidth  int    `json:"output_width"`  // output image width
-	OutputHeight int    `json:"output_height"` // output image height
-	WebPort      int    `json:"web_port"`       // web interface port
+	DebugMode    bool `json:"debug_mode"`
+	FrameRate    int  `json:"frame_rate"`     // frames per second for sampling
+	OutputWidth  int  `json:"output_width"`  // output image width
+	OutputHeight int  `json:"output_height"` // output image height
+	WebPort      int  `json:"web_port"`       // web interface port
 }
 
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		RTSPUrl:      "rtsp://admin:password@192.168.1.100:554/stream1",
-		ServerUrl:    "http://localhost:8080/tshirt",
-		CameraName:   "Camera-01",
 		DebugMode:    true,
 		FrameRate:    1, // 1 frame per second
 		OutputWidth:  1920,

@@ -5,125 +5,156 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"image"
-	"image/jpeg"
+	"io/ioutil"
+	"log"
 	"net/http"
 	"time"
 )
 
-// InferenceRequest inference request structure
-type InferenceRequest struct {
-	Image    string `json:"image"`
-	Filename string `json:"filename"`
-}
-
-// InferenceResponse inference response structure
-type InferenceResponse struct {
-	Errno   int                      `json:"errno"`
-	ErrMsg  string                   `json:"err_msg,omitempty"`
-	Results []InferenceDetectionResult `json:"results"`
-}
-
-// InferenceDetectionResult detection result
-type InferenceDetectionResult struct {
-	Score    float64                   `json:"score"`
-	Location InferenceDetectionLocation `json:"location"`
-	Class    string                    `json:"class,omitempty"` // optional classification info
-}
-
-// InferenceDetectionLocation detection location (normalized coordinates)
-type InferenceDetectionLocation struct {
-	Left   float64 `json:"left"`
-	Top    float64 `json:"top"`
-	Width  float64 `json:"width"`
-	Height float64 `json:"height"`
-}
-
-// InferenceClient AI inference client
+// InferenceClient handles communication with inference server
 type InferenceClient struct {
-	serverURL  string
-	httpClient *http.Client
+	serverURL string
+	client    *http.Client
 }
 
-// NewInferenceClient creates inference client
+// Detection represents a single object detection
+type Detection struct {
+	Class      string  `json:"class"`
+	Confidence float64 `json:"confidence"`
+	X1         int     `json:"x1"`
+	Y1         int     `json:"y1"`
+	X2         int     `json:"x2"`
+	Y2         int     `json:"y2"`
+}
+
+// InferenceRequest represents the request to inference server
+type InferenceRequest struct {
+	Image     string `json:"image"`      // Base64 encoded image
+	ModelType string `json:"model_type"` // Model type to use
+}
+
+// InferenceResponse represents the response from inference server
+type InferenceResponse struct {
+	Success    bool        `json:"success"`
+	Detections []Detection `json:"detections"`
+	Message    string      `json:"message"`
+}
+
+// NewInferenceClient creates a new inference client
 func NewInferenceClient(serverURL string) *InferenceClient {
+	if serverURL == "" {
+		serverURL = "http://localhost:8000" // Default inference server URL
+	}
 	return &InferenceClient{
 		serverURL: serverURL,
-		httpClient: &http.Client{
+		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
 }
 
-// imageToBase64 converts image to base64 string
-func (c *InferenceClient) imageToBase64(img image.Image) (string, error) {
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
-		return "", fmt.Errorf("failed to encode image to JPEG: %v", err)
-	}
-	
-	encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
-	return encoded, nil
-}
+// DetectObjects sends image to inference server and returns detections
+func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]Detection, error) {
+	// Encode image to base64
+	encodedImage := base64.StdEncoding.EncodeToString(imageData)
 
-// InferImage performs inference on image
-func (c *InferenceClient) InferImage(img image.Image, filename string) (*InferenceResponse, error) {
-	// convert image to base64
-	base64Image, err := c.imageToBase64(img)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert image to base64: %v", err)
-	}
-
-	// create request
+	// Create request
 	request := InferenceRequest{
-		Image:    base64Image,
-		Filename: filename,
+		Image:     encodedImage,
+		ModelType: modelType,
 	}
 
-	// serialize request
-	requestData, err := json.Marshal(request)
+	requestBody, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %v", err)
 	}
 
-	// send HTTP request
-	resp, err := c.httpClient.Post(c.serverURL, "application/json", bytes.NewReader(requestData))
+	// Build URL - use serverURL directly if it's already a complete URL
+	url := ic.serverURL
+	if url[len(url)-1] != '/' && !contains(url, "/detect") && !contains(url, "/gesture") {
+		url = url + "/detect"
+	}
+
+	// Send request to inference server
+	resp, err := ic.client.Post(
+		url,
+		"application/json",
+		bytes.NewBuffer(requestBody),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %v", err)
+		return nil, fmt.Errorf("failed to send request to inference server: %v", err)
 	}
 	defer resp.Body.Close()
 
-	// check HTTP status code
+	// Check HTTP status
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("server returned error status: %d", resp.StatusCode)
+		body, _ := ioutil.ReadAll(resp.Body)
+		if len(body) > 0 && body[0] == '<' {
+			return nil, fmt.Errorf("inference server returned HTML (status %d) - check if service is running at %s", resp.StatusCode, url)
+		}
+		return nil, fmt.Errorf("inference server returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	// parse response
+	// Read response
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %v", err)
+	}
+
+	// Check if response is HTML (error page)
+	if len(body) > 0 && body[0] == '<' {
+		return nil, fmt.Errorf("inference server returned HTML instead of JSON - service may not be running at %s", url)
+	}
+
+	// Parse response
 	var response InferenceResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %v", err)
+	if err := json.Unmarshal(body, &response); err != nil {
+		// Log first 200 chars of response for debugging
+		preview := string(body)
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		return nil, fmt.Errorf("failed to parse response: %v (response preview: %s)", err, preview)
 	}
 
-	// check business error
-	if response.Errno != 0 {
-		return nil, fmt.Errorf("inference error: %s (code: %d)", response.ErrMsg, response.Errno)
+	if !response.Success {
+		return nil, fmt.Errorf("inference failed: %s", response.Message)
 	}
 
-	return &response, nil
+	log.Printf("Detected %d objects", len(response.Detections))
+	return response.Detections, nil
 }
 
-// TestConnection tests connection to server
-func (c *InferenceClient) TestConnection() error {
-	resp, err := c.httpClient.Get(c.serverURL + "/health")
+// ProcessFrame processes a frame with inference
+func ProcessFrameWithInference(frameData []byte, cameraConfig *CameraConfig) ([]byte, error) {
+	// Skip inference if no server URL configured
+	if cameraConfig.ServerUrl == "" {
+		return frameData, nil
+	}
+
+	// Create inference client
+	client := NewInferenceClient(cameraConfig.ServerUrl)
+
+	// Detect objects
+	detections, err := client.DetectObjects(frameData, cameraConfig.ModelType)
 	if err != nil {
-		return fmt.Errorf("failed to connect to server: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		// server exists but no health endpoint, this is normal
-		return nil
+		log.Printf("Warning: Inference failed for camera %s: %v", cameraConfig.ID, err)
+		// Still draw timestamp overlay even if inference fails
+		processedFrame, _ := DrawDetections(frameData, []Detection{}, cameraConfig.Name)
+		return processedFrame, nil
 	}
 
-	return nil
+	// Draw detections on frame
+	processedFrame, err := DrawDetections(frameData, detections, cameraConfig.Name)
+	if err != nil {
+		log.Printf("Warning: Failed to draw detections for camera %s: %v", cameraConfig.ID, err)
+		return frameData, nil // Return original frame on error
+	}
+
+	return processedFrame, nil
+}
+
+// Helper function to check if string contains substring
+func contains(s, substr string) bool {
+	return bytes.Contains([]byte(s), []byte(substr))
 }

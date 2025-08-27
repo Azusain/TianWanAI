@@ -1,7 +1,4 @@
 {
-  "rtsp_url": "rtsp://localhost:8554/test",
-  "server_url": "http://localhost:8080/tshirt",
-  "camera_name": "MediaMTX 测试流",
   "debug_mode": true,
   "frame_rate": 1,
   "output_width": 1920,
