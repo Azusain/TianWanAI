@@ -183,28 +183,46 @@ func (m *FFmpegCmdRTSPManager) monitorFrameFile(stream *FFmpegCameraStream, outp
 
 			// Process frame with inference if configured
 			processedFrame := frameData
+			shouldSave := false
 			if cameraConfig != nil && cameraConfig.ServerUrl != "" {
-				processedFrame, err = ProcessFrameWithInference(frameData, cameraConfig)
+				var err error
+				processedFrame, shouldSave, err = ProcessFrameWithInference(frameData, cameraConfig)
 				if err != nil {
 					log.Printf("Warning: Failed to process frame with inference for camera %s: %v", stream.ID, err)
 					processedFrame = frameData // Use original frame on error
-				}
-				
-				// Save processed frame with detections
-				processedPath := filepath.Join(m.outputDir, fmt.Sprintf("camera_%s_processed.jpg", stream.ID))
-				if err := os.WriteFile(processedPath, processedFrame, 0644); err != nil {
-					log.Printf("Warning: Failed to save processed frame for camera %s: %v", stream.ID, err)
+					shouldSave = false
 				}
 			} else {
-				// No inference, just add timestamp overlay
+				// No inference, just add timestamp overlay - never save
 				var detections []Detection // Empty detections
 				processedFrame, err = DrawDetections(frameData, detections, stream.Name)
-				if err == nil {
-					// Save with overlay
-					processedPath := filepath.Join(m.outputDir, fmt.Sprintf("camera_%s_processed.jpg", stream.ID))
-					os.WriteFile(processedPath, processedFrame, 0644)
+				if err != nil {
+					processedFrame = frameData // Use original on error
+				}
+				shouldSave = false // Never save when no inference
+			}
+			
+			// Only save if we detected real objects (not test detections)
+			if shouldSave {
+				// Create camera-specific directory
+				cameraDir := filepath.Join(m.outputDir, stream.ID)
+				if err := os.MkdirAll(cameraDir, 0755); err != nil {
+					log.Printf("Warning: Failed to create camera directory for %s: %v", stream.ID, err)
+				} else {
+					// Save processed frame with detections using timestamp
+					timestamp := time.Now().Format("20060102_150405")
+					processedPath := filepath.Join(cameraDir, fmt.Sprintf("%s.jpg", timestamp))
+					if err := os.WriteFile(processedPath, processedFrame, 0644); err != nil {
+						log.Printf("Warning: Failed to save processed frame for camera %s: %v", stream.ID, err)
+					} else {
+						log.Printf("Saved detection frame for camera %s: %s", stream.ID, processedPath)
+					}
 				}
 			}
+			
+			// Always update global latest for web interface
+			globalLatest := filepath.Join(m.outputDir, "latest_processed.jpg")
+			os.WriteFile(globalLatest, processedFrame, 0644)
 
 			// Update stream with processed frame
 			stream.mutex.Lock()
