@@ -1,189 +1,239 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
+	"image/jpeg"
 	"time"
-
-	"github.com/fogleman/gg"
 )
 
-// ImageRenderer image renderer
-type ImageRenderer struct {
-	debugMode bool
-}
-
-// NewImageRenderer creates image renderer
-func NewImageRenderer(debugMode bool) *ImageRenderer {
-	return &ImageRenderer{
-		debugMode: debugMode,
+// DrawDetections draws detection boxes on the image
+func DrawDetections(imageData []byte, detections []Detection, cameraName string) ([]byte, error) {
+	// Decode JPEG
+	img, err := jpeg.Decode(bytes.NewReader(imageData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JPEG: %v", err)
 	}
-}
 
-// RenderDetections renders detection results on image
-func (r *ImageRenderer) RenderDetections(img image.Image, detections []InferenceDetectionResult, cameraName string, timestamp time.Time) (image.Image, error) {
+	// Convert to RGBA for drawing
 	bounds := img.Bounds()
-	width := bounds.Dx()
-	height := bounds.Dy()
+	rgbaImg := image.NewRGBA(bounds)
+	draw.Draw(rgbaImg, bounds, img, bounds.Min, draw.Src)
 
-	// create drawing context
-	dc := gg.NewContext(width, height)
-	dc.DrawImage(img, 0, 0)
-
-	// set font size (adjusted based on image size)
-	fontSize := float64(width) / 50.0
-	if fontSize < 12 {
-		fontSize = 12
-	} else if fontSize > 24 {
-		fontSize = 24
+	// Draw detection boxes
+	for _, det := range detections {
+		drawDetectionBox(rgbaImg, det)
 	}
 
-	// draw timestamp (top-left)
-	r.drawTimestamp(dc, timestamp, fontSize)
+	// Add timestamp and camera name overlay
+	addOverlay(rgbaImg, cameraName, len(detections))
 
-	// draw camera name (bottom-right)
-	r.drawCameraName(dc, cameraName, width, height, fontSize)
-
-	// draw detection boxes
-	r.drawDetectionBoxes(dc, detections, width, height, fontSize)
-
-	return dc.Image(), nil
-}
-
-// drawTimestamp draws timestamp
-func (r *ImageRenderer) drawTimestamp(dc *gg.Context, timestamp time.Time, fontSize float64) {
-	timeStr := timestamp.Format("2006-01-02 15:04:05")
-	
-	// set font
-	dc.LoadFontFace("arial", fontSize) // system font, will use default if not found
-	
-	// measure text size
-	textWidth, textHeight := dc.MeasureString(timeStr)
-	
-	// set background
-	padding := 8.0
-	bgX := 10.0
-	bgY := 10.0
-	bgWidth := textWidth + padding*2
-	bgHeight := textHeight + padding*2
-	
-	// draw semi-transparent background
-	dc.SetColor(color.RGBA{0, 0, 0, 180})
-	dc.DrawRoundedRectangle(bgX, bgY, bgWidth, bgHeight, 5)
-	dc.Fill()
-	
-	// draw text
-	dc.SetColor(color.RGBA{255, 255, 255, 255})
-	dc.DrawString(timeStr, bgX+padding, bgY+textHeight+padding-5)
-}
-
-// drawCameraName draws camera name
-func (r *ImageRenderer) drawCameraName(dc *gg.Context, cameraName string, width, height int, fontSize float64) {
-	// set font
-	dc.LoadFontFace("arial", fontSize)
-	
-	// measure text size
-	textWidth, textHeight := dc.MeasureString(cameraName)
-	
-	// calculate position (bottom-right)
-	padding := 8.0
-	bgX := float64(width) - textWidth - padding*2 - 10
-	bgY := float64(height) - textHeight - padding*2 - 10
-	bgWidth := textWidth + padding*2
-	bgHeight := textHeight + padding*2
-	
-	// draw semi-transparent background
-	dc.SetColor(color.RGBA{0, 0, 0, 180})
-	dc.DrawRoundedRectangle(bgX, bgY, bgWidth, bgHeight, 5)
-	dc.Fill()
-	
-	// draw text
-	dc.SetColor(color.RGBA{255, 255, 255, 255})
-	dc.DrawString(cameraName, bgX+padding, bgY+textHeight+padding-5)
-}
-
-// drawDetectionBoxes draws detection boxes
-func (r *ImageRenderer) drawDetectionBoxes(dc *gg.Context, detections []InferenceDetectionResult, width, height int, fontSize float64) {
-	colors := []color.RGBA{
-		{0, 255, 0, 255},   // green
-		{255, 0, 0, 255},   // red
-		{0, 0, 255, 255},   // blue
-		{255, 255, 0, 255}, // yellow
-		{255, 0, 255, 255}, // magenta
-		{0, 255, 255, 255}, // cyan
+	// Encode back to JPEG
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, rgbaImg, &jpeg.Options{Quality: 90}); err != nil {
+		return nil, fmt.Errorf("failed to encode JPEG: %v", err)
 	}
 
-	for idx, detection := range detections {
-		// select color
-		color := colors[idx%len(colors)]
-		
-		// calculate pixel coordinates
-		loc := detection.Location
-		left := int(loc.Left * float64(width))
-		top := int(loc.Top * float64(height))
-		boxWidth := int(loc.Width * float64(width))
-		boxHeight := int(loc.Height * float64(height))
-		
-		// ensure coordinates are within image bounds
-		left = clamp(left, 0, width-1)
-		top = clamp(top, 0, height-1)
-		right := clamp(left+boxWidth, left+1, width)
-		bottom := clamp(top+boxHeight, top+1, height)
-		
-		// draw detection box
-		dc.SetColor(color)
-		dc.SetLineWidth(3)
-		dc.DrawRectangle(float64(left), float64(top), float64(right-left), float64(bottom-top))
-		dc.Stroke()
-		
-		// draw confidence and class info in Debug mode
-		if r.debugMode {
-			labelText := fmt.Sprintf("Score: %.3f", detection.Score)
-			if detection.Class != "" {
-				labelText = fmt.Sprintf("%s %.3f", detection.Class, detection.Score)
+	return buf.Bytes(), nil
+}
+
+// drawDetectionBox draws a single detection box with label
+func drawDetectionBox(img *image.RGBA, det Detection) {
+	// Define colors for different classes
+	boxColor := getClassColor(det.Class)
+	
+	// Draw box border (3 pixels wide for visibility)
+	drawThickRectangle(img, det.X1, det.Y1, det.X2, det.Y2, boxColor, 3)
+
+	// Draw label background
+	labelHeight := 20
+	labelBg := color.RGBA{boxColor.R/2, boxColor.G/2, boxColor.B/2, 200} // Darker version with transparency
+	for y := det.Y1 - labelHeight; y < det.Y1; y++ {
+		if y < 0 {
+			continue
+		}
+		for x := det.X1; x < det.X2 && x < img.Bounds().Max.X; x++ {
+			if x < 0 {
+				continue
 			}
-			
-			r.drawDetectionLabel(dc, labelText, float64(left), float64(top), fontSize*0.8, color)
+			img.Set(x, y, labelBg)
+		}
+	}
+
+	// Draw label text (simple pixel representation)
+	label := fmt.Sprintf("%s %.2f", det.Class, det.Confidence)
+	drawText(img, det.X1+5, det.Y1-15, label, color.RGBA{255, 255, 255, 255})
+}
+
+// drawThickRectangle draws a rectangle with specified thickness
+func drawThickRectangle(img *image.RGBA, x1, y1, x2, y2 int, col color.RGBA, thickness int) {
+	// Top and bottom borders
+	for t := 0; t < thickness; t++ {
+		for x := x1; x <= x2; x++ {
+			if x >= 0 && x < img.Bounds().Max.X {
+				// Top
+				if y1+t >= 0 && y1+t < img.Bounds().Max.Y {
+					img.Set(x, y1+t, col)
+				}
+				// Bottom
+				if y2-t >= 0 && y2-t < img.Bounds().Max.Y {
+					img.Set(x, y2-t, col)
+				}
+			}
+		}
+	}
+
+	// Left and right borders
+	for t := 0; t < thickness; t++ {
+		for y := y1; y <= y2; y++ {
+			if y >= 0 && y < img.Bounds().Max.Y {
+				// Left
+				if x1+t >= 0 && x1+t < img.Bounds().Max.X {
+					img.Set(x1+t, y, col)
+				}
+				// Right
+				if x2-t >= 0 && x2-t < img.Bounds().Max.X {
+					img.Set(x2-t, y, col)
+				}
+			}
 		}
 	}
 }
 
-// drawDetectionLabel draws detection label
-func (r *ImageRenderer) drawDetectionLabel(dc *gg.Context, text string, x, y, fontSize float64, bgColor color.RGBA) {
-	// set font
-	dc.LoadFontFace("arial", fontSize)
-	
-	// measure text size
-	textWidth, textHeight := dc.MeasureString(text)
-	
-	// calculate label position
-	padding := 4.0
-	labelX := x
-	labelY := y - textHeight - padding*2
-	
-	// if label exceeds image top, place inside box
-	if labelY < 0 {
-		labelY = y + padding
+// getClassColor returns a color for a detection class
+func getClassColor(class string) color.RGBA {
+	// Define colors for common classes
+	colors := map[string]color.RGBA{
+		"person":     {255, 0, 0, 255},     // Red
+		"car":        {0, 255, 0, 255},     // Green
+		"truck":      {0, 200, 0, 255},     // Dark Green
+		"bus":        {0, 150, 0, 255},     // Darker Green
+		"bicycle":    {255, 255, 0, 255},   // Yellow
+		"motorcycle": {255, 200, 0, 255},   // Orange-Yellow
+		"dog":        {255, 0, 255, 255},   // Magenta
+		"cat":        {200, 0, 200, 255},   // Purple
+		"chair":      {0, 255, 255, 255},   // Cyan
+		"bottle":     {0, 200, 255, 255},   // Light Blue
+		"cell phone": {128, 128, 255, 255}, // Light Purple
 	}
-	
-	// draw label background
-	dc.SetColor(bgColor)
-	dc.DrawRoundedRectangle(labelX, labelY, textWidth+padding*2, textHeight+padding*2, 3)
-	dc.Fill()
-	
-	// draw text
-	dc.SetColor(color.RGBA{255, 255, 255, 255})
-	dc.DrawString(text, labelX+padding, labelY+textHeight+padding-2)
+
+	if col, exists := colors[class]; exists {
+		return col
+	}
+
+	// Default color for unknown classes
+	return color.RGBA{255, 165, 0, 255} // Orange
 }
 
-// clamp restricts value within specified range
-func clamp(value, min, max int) int {
-	if value < min {
-		return min
+// addOverlay adds timestamp and detection count overlay
+func addOverlay(img *image.RGBA, cameraName string, detectionCount int) {
+	bounds := img.Bounds()
+	width := bounds.Max.X
+	height := bounds.Max.Y
+
+	// Calculate overlay size (1/15 of image height as requested)
+	overlayHeight := height / 15
+	if overlayHeight < 30 {
+		overlayHeight = 30 // Minimum height
 	}
-	if value > max {
-		return max
+	if overlayHeight > 100 {
+		overlayHeight = 100 // Maximum height
 	}
-	return value
+
+	// Draw semi-transparent black background at the top
+	bgColor := color.RGBA{0, 0, 0, 180}
+	for y := 0; y < overlayHeight; y++ {
+		for x := 0; x < width; x++ {
+			img.Set(x, y, bgColor)
+		}
+	}
+
+	// Add timestamp
+	now := time.Now()
+	timestamp := now.Format("2006-01-02 15:04:05")
+	weekday := getChineseWeekday(now.Weekday())
+	fullTimestamp := fmt.Sprintf("%s %s", timestamp, weekday)
+	
+	// Draw timestamp text (positioned at 10% from left)
+	textX := width / 10
+	textY := overlayHeight / 3
+	drawText(img, textX, textY, fullTimestamp, color.RGBA{255, 255, 255, 255})
+
+	// Add camera name (positioned at center)
+	cameraTextX := width / 2 - len(cameraName)*3
+	drawText(img, cameraTextX, textY, cameraName, color.RGBA{255, 255, 0, 255})
+
+	// Add detection count (positioned at 80% from left)
+	detectionText := fmt.Sprintf("Objects: %d", detectionCount)
+	detectionTextX := width * 8 / 10
+	drawText(img, detectionTextX, textY, detectionText, color.RGBA{0, 255, 0, 255})
+}
+
+// getChineseWeekday returns Chinese weekday name
+func getChineseWeekday(weekday time.Weekday) string {
+	weekdays := map[time.Weekday]string{
+		time.Sunday:    "星期日",
+		time.Monday:    "星期一",
+		time.Tuesday:   "星期二",
+		time.Wednesday: "星期三",
+		time.Thursday:  "星期四",
+		time.Friday:    "星期五",
+		time.Saturday:  "星期六",
+	}
+	return weekdays[weekday]
+}
+
+// drawText draws simple text representation (basic ASCII only for now)
+func drawText(img *image.RGBA, x, y int, text string, col color.RGBA) {
+	// This is a very basic text drawing function
+	// For proper text rendering with Chinese support, you'd need a font library
+	// For now, we just draw simple lines to represent text presence
+	
+	textWidth := len(text) * 6
+	textHeight := 10
+	
+	// Ensure text doesn't go out of bounds
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+	if x + textWidth > img.Bounds().Max.X {
+		textWidth = img.Bounds().Max.X - x
+	}
+	
+	// Draw a simple line to represent text
+	for i := 0; i < textWidth && x+i < img.Bounds().Max.X; i++ {
+		if y >= 0 && y < img.Bounds().Max.Y {
+			img.Set(x+i, y, col)
+		}
+		if y+1 >= 0 && y+1 < img.Bounds().Max.Y {
+			img.Set(x+i, y+1, col)
+		}
+	}
+	
+	// For Chinese text, draw a slightly different pattern
+	if containsChinese(text) {
+		for i := 0; i < textWidth && x+i < img.Bounds().Max.X; i += 3 {
+			for j := 0; j < textHeight && y+j < img.Bounds().Max.Y; j += 2 {
+				if x+i >= 0 && y+j >= 0 {
+					img.Set(x+i, y+j, col)
+				}
+			}
+		}
+	}
+}
+
+// containsChinese checks if string contains Chinese characters
+func containsChinese(s string) bool {
+	for _, r := range s {
+		if r >= 0x4E00 && r <= 0x9FFF {
+			return true
+		}
+	}
+	return false
 }

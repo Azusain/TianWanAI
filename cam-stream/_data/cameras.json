@@ -1,0 +1,17 @@
+{
+  "cameras": {
+    "cam_4": {
+      "id": "cam_4",
+      "name": "一号摄像头",
+      "rtsp_url": "rtsp://localhost:8554/test",
+      "server_url": "http://localhost:8902/gesture",
+      "enabled": true,
+      "running": true,
+      "created_at": "2025-08-28T01:25:10.7828994+08:00",
+      "updated_at": "2025-08-28T01:25:10.7828994+08:00"
+    }
+  },
+  "counters": {
+    "camera": 4
+  }
+}

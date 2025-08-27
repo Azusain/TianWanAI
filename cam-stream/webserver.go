@@ -3,32 +3,20 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
-	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
 )
 
-// ImageInfo represents information about a saved image
-type ImageInfo struct {
-	Filename  string    `json:"filename"`
-	Path      string    `json:"path"`
-	Timestamp time.Time `json:"timestamp"`
-	Size      int64     `json:"size"`
-}
-
-// WebServer handles web interface for viewing images
+// WebServer handles web interface
 type WebServer struct {
-	outputDir string
-	port      int
+	outputDir   string
+	port        int
+	rtspManager *FFmpegCmdRTSPManager
 }
 
 // NewWebServer creates a new web server
@@ -39,15 +27,43 @@ func NewWebServer(outputDir string, port int) *WebServer {
 	}
 }
 
+// SetRTSPManager sets the RTSP manager for camera operations
+func (ws *WebServer) SetRTSPManager(manager *FFmpegCmdRTSPManager) {
+	ws.rtspManager = manager
+}
+
 // Start starts the web server
 func (ws *WebServer) Start() error {
 	router := mux.NewRouter()
 
-	// Routes
+	// Add CORS middleware
+	router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	// Web Routes
 	router.HandleFunc("/", ws.handleIndex).Methods("GET")
-	router.HandleFunc("/api/images", ws.handleAPIImages).Methods("GET")
-	router.HandleFunc("/image/{filename}", ws.handleImage).Methods("GET")
-	router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static/"))))
+	router.HandleFunc("/cameras", ws.handleCameraManagement).Methods("GET")
+
+	// Camera API Routes
+	api := router.PathPrefix("/api").Subrouter()
+	api.HandleFunc("/cameras", ws.handleAPICameras).Methods("GET", "POST", "OPTIONS")
+	api.HandleFunc("/cameras/{id}", ws.handleAPICameraByID).Methods("GET", "PUT", "DELETE", "OPTIONS")
+	api.HandleFunc("/cameras/{id}/start", ws.handleAPIStartCamera).Methods("POST", "OPTIONS")
+	api.HandleFunc("/cameras/{id}/stop", ws.handleAPIStopCamera).Methods("POST", "OPTIONS")
+	api.HandleFunc("/status", ws.handleAPIStatus).Methods("GET", "OPTIONS")
+	api.HandleFunc("/debug", ws.handleAPIDebug).Methods("GET", "OPTIONS")
 
 	log.Printf("Starting web server on port %d", ws.port)
 	log.Printf("Access web interface at: http://localhost:%d", ws.port)
@@ -57,377 +73,406 @@ func (ws *WebServer) Start() error {
 
 // handleIndex serves the main page
 func (ws *WebServer) handleIndex(w http.ResponseWriter, r *http.Request) {
-	page := r.URL.Query().Get("page")
-	if page == "" {
-		page = "1"
-	}
-
-	tmpl := `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cam-Stream Image Viewer</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #333;
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .image-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        .image-card {
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            transition: transform 0.2s;
-        }
-        .image-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        }
-        .image-card img {
-            width: 100%;
-            height: 200px;
-            object-fit: cover;
-            cursor: pointer;
-        }
-        .image-info {
-            padding: 15px;
-            background: #f9f9f9;
-        }
-        .image-info h3 {
-            margin: 0 0 10px 0;
-            font-size: 14px;
-            color: #555;
-        }
-        .image-info p {
-            margin: 5px 0;
-            font-size: 12px;
-            color: #777;
-        }
-        .pagination {
-            text-align: center;
-            margin-top: 30px;
-        }
-        .pagination a {
-            display: inline-block;
-            padding: 8px 16px;
-            margin: 0 4px;
-            background: #007bff;
-            color: white;
-            text-decoration: none;
-            border-radius: 4px;
-            transition: background 0.2s;
-        }
-        .pagination a:hover {
-            background: #0056b3;
-        }
-        .pagination .current {
-            background: #6c757d;
-        }
-        .loading {
-            text-align: center;
-            padding: 50px;
-            font-size: 18px;
-            color: #666;
-        }
-        .no-images {
-            text-align: center;
-            padding: 50px;
-            color: #666;
-        }
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.9);
-        }
-        .modal-content {
-            display: block;
-            margin: auto;
-            max-width: 90%;
-            max-height: 90%;
-            margin-top: 50px;
-        }
-        .close {
-            position: absolute;
-            top: 15px;
-            right: 35px;
-            color: #f1f1f1;
-            font-size: 40px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        .close:hover {
-            color: #bbb;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🎥 Cam-Stream Image Viewer</h1>
-        
-        <div id="loading" class="loading">Loading images...</div>
-        <div id="content" style="display: none;">
-            <div id="image-grid" class="image-grid"></div>
-            <div id="pagination" class="pagination"></div>
-        </div>
-        <div id="no-images" class="no-images" style="display: none;">
-            No detection images found. Images are only saved when objects are detected.
-        </div>
-    </div>
-
-    <!-- Modal for full-size image -->
-    <div id="imageModal" class="modal">
-        <span class="close" onclick="closeModal()">&times;</span>
-        <img class="modal-content" id="modalImage">
-    </div>
-
-    <script>
-        let currentPage = parseInt(new URLSearchParams(window.location.search).get('page') || '1');
-        const imagesPerPage = 12;
-
-        async function loadImages() {
-            try {
-                const response = await fetch('/api/images?page=' + currentPage + '&limit=' + imagesPerPage);
-                const data = await response.json();
-                
-                document.getElementById('loading').style.display = 'none';
-                
-                if (data.images.length === 0) {
-                    document.getElementById('no-images').style.display = 'block';
-                    return;
-                }
-                
-                displayImages(data.images);
-                displayPagination(data.total, currentPage);
-                document.getElementById('content').style.display = 'block';
-            } catch (error) {
-                console.error('Error loading images:', error);
-                document.getElementById('loading').innerHTML = 'Error loading images: ' + error.message;
-            }
-        }
-
-        function displayImages(images) {
-            const grid = document.getElementById('image-grid');
-            grid.innerHTML = '';
-            
-            images.forEach(image => {
-                const card = document.createElement('div');
-                card.className = 'image-card';
-                
-                const date = new Date(image.timestamp).toLocaleString();
-                const sizeMB = (image.size / 1024 / 1024).toFixed(2);
-                
-                card.innerHTML = ` + "`" + `
-                    <img src="/image/${image.filename}" alt="${image.filename}" onclick="openModal('/image/${image.filename}')">
-                    <div class="image-info">
-                        <h3>${image.filename}</h3>
-                        <p><strong>Date:</strong> ${date}</p>
-                        <p><strong>Size:</strong> ${sizeMB} MB</p>
-                    </div>
-                ` + "`" + `;
-                
-                grid.appendChild(card);
-            });
-        }
-
-        function displayPagination(total, current) {
-            const totalPages = Math.ceil(total / imagesPerPage);
-            const pagination = document.getElementById('pagination');
-            pagination.innerHTML = '';
-            
-            if (totalPages <= 1) return;
-            
-            // Previous button
-            if (current > 1) {
-                const prev = document.createElement('a');
-                prev.href = '?page=' + (current - 1);
-                prev.textContent = '← Previous';
-                pagination.appendChild(prev);
-            }
-            
-            // Page numbers
-            for (let i = Math.max(1, current - 2); i <= Math.min(totalPages, current + 2); i++) {
-                const link = document.createElement('a');
-                link.href = '?page=' + i;
-                link.textContent = i;
-                if (i === current) {
-                    link.className = 'current';
-                }
-                pagination.appendChild(link);
-            }
-            
-            // Next button
-            if (current < totalPages) {
-                const next = document.createElement('a');
-                next.href = '?page=' + (current + 1);
-                next.textContent = 'Next →';
-                pagination.appendChild(next);
-            }
-        }
-
-        function openModal(imageSrc) {
-            const modal = document.getElementById('imageModal');
-            const modalImg = document.getElementById('modalImage');
-            modal.style.display = 'block';
-            modalImg.src = imageSrc;
-        }
-
-        function closeModal() {
-            document.getElementById('imageModal').style.display = 'none';
-        }
-
-        // Close modal when clicking outside the image
-        window.onclick = function(event) {
-            const modal = document.getElementById('imageModal');
-            if (event.target == modal) {
-                modal.style.display = 'none';
-            }
-        }
-
-        // Load images on page load
-        loadImages();
-    </script>
-</body>
-</html>`
-
-	t, err := template.New("index").Parse(tmpl)
-	if err != nil {
-		http.Error(w, "Template error", http.StatusInternalServerError)
-		return
-	}
-
 	w.Header().Set("Content-Type", "text/html")
-	t.Execute(w, nil)
+	w.Write([]byte(`<!DOCTYPE html>
+<html><head><title>Multi-Camera Stream Platform</title></head>
+<body><h1>Multi-Camera Stream Platform</h1>
+<p><a href="/cameras">Camera Management</a></p>
+<p><a href="/api/debug">API Debug</a></p>
+</body></html>`))
 }
 
-// handleAPIImages returns JSON list of images
-func (ws *WebServer) handleAPIImages(w http.ResponseWriter, r *http.Request) {
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	if page < 1 {
-		page = 1
+// handleCameraManagement serves the camera management page
+func (ws *WebServer) handleCameraManagement(w http.ResponseWriter, r *http.Request) {
+	content, err := ioutil.ReadFile("camera_management.html")
+	if err != nil {
+		http.Error(w, "Could not load camera management interface: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
-	
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit < 1 || limit > 100 {
-		limit = 12
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(content)
+}
+
+// Data structures
+type CameraConfig struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	RTSPUrl   string    `json:"rtsp_url"`
+	ServerUrl string    `json:"server_url,omitempty"`
+	ModelType string    `json:"model_type,omitempty"`
+	Enabled   bool      `json:"enabled"`
+	Running   bool      `json:"running"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+
+type APIResponse struct {
+	Success bool        `json:"success"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data,omitempty"`
+	Error   string      `json:"error,omitempty"`
+}
+
+type DataStore struct {
+	Cameras map[string]*CameraConfig `json:"cameras"`
+	Counters struct {
+		Camera int `json:"camera"`
+	} `json:"counters"`
+}
+
+const (
+	DataFile = "_data/cameras.json"
+	DataDir  = "_data"
+)
+
+// Global data store
+var dataStore = &DataStore{
+	Cameras: make(map[string]*CameraConfig),
+}
+
+// Data persistence functions
+func loadDataStore() error {
+	if err := os.MkdirAll(DataDir, 0755); err != nil {
+		return fmt.Errorf("failed to create data directory: %v", err)
 	}
 
-	images, err := ws.getImages()
+	data, err := ioutil.ReadFile(DataFile)
 	if err != nil {
-		http.Error(w, "Error reading images: "+err.Error(), http.StatusInternalServerError)
+		if os.IsNotExist(err) {
+			log.Printf("Data file not found, starting with empty store")
+			return nil
+		}
+		return fmt.Errorf("failed to read data file: %v", err)
+	}
+
+	if err := json.Unmarshal(data, dataStore); err != nil {
+		return fmt.Errorf("failed to parse data file: %v", err)
+	}
+
+	if dataStore.Cameras == nil {
+		dataStore.Cameras = make(map[string]*CameraConfig)
+	}
+
+	log.Printf("Loaded %d cameras from storage", len(dataStore.Cameras))
+	return nil
+}
+
+func saveDataStore() error {
+	if err := os.MkdirAll(DataDir, 0755); err != nil {
+		return fmt.Errorf("failed to create data directory: %v", err)
+	}
+
+	data, err := json.MarshalIndent(dataStore, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal data: %v", err)
+	}
+
+	if err := ioutil.WriteFile(DataFile, data, 0644); err != nil {
+		return fmt.Errorf("failed to write data file: %v", err)
+	}
+
+	log.Printf("Saved data store with %d cameras", len(dataStore.Cameras))
+	return nil
+}
+
+func generateCameraID() string {
+	dataStore.Counters.Camera++
+	return fmt.Sprintf("cam_%d", dataStore.Counters.Camera)
+}
+
+// API Handlers
+func (ws *WebServer) handleAPICameras(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case "GET":
+		var cameraList []*CameraConfig
+		for _, camera := range dataStore.Cameras {
+			cameraList = append(cameraList, camera)
+		}
+
+		response := APIResponse{
+			Success: true,
+			Message: "Cameras retrieved successfully",
+			Data:    cameraList,
+		}
+		json.NewEncoder(w).Encode(response)
+
+	case "POST":
+		var newCamera CameraConfig
+		if err := json.NewDecoder(r.Body).Decode(&newCamera); err != nil {
+			response := APIResponse{
+				Success: false,
+				Message: "Invalid request body",
+				Error:   err.Error(),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if newCamera.Name == "" || newCamera.RTSPUrl == "" {
+			response := APIResponse{
+				Success: false,
+				Message: "Name and RTSP URL are required",
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if newCamera.ID == "" {
+			newCamera.ID = generateCameraID()
+		}
+
+		newCamera.CreatedAt = time.Now()
+		newCamera.UpdatedAt = time.Now()
+		// Auto-start cameras when they are created
+		newCamera.Running = true
+		newCamera.Enabled = true
+
+		dataStore.Cameras[newCamera.ID] = &newCamera
+
+		if err := saveDataStore(); err != nil {
+			log.Printf("Warning: Failed to save data store: %v", err)
+		}
+
+		// Actually start the RTSP stream processing
+		if ws.rtspManager != nil {
+			if err := ws.rtspManager.StartCamera(&newCamera); err != nil {
+				log.Printf("Warning: Failed to start RTSP stream for camera %s: %v", newCamera.ID, err)
+				// Don't fail the API call, just log the warning
+			}
+		}
+
+		log.Printf("Created camera: %s (%s)", newCamera.ID, newCamera.Name)
+
+		response := APIResponse{
+			Success: true,
+			Message: "Camera created successfully",
+			Data:    &newCamera,
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+func (ws *WebServer) handleAPICameraByID(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	camera, exists := dataStore.Cameras[id]
+	if !exists {
+		response := APIResponse{
+			Success: false,
+			Message: "Camera not found",
+		}
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
 		return
 	}
 
-	// Calculate pagination
-	total := len(images)
-	start := (page - 1) * limit
-	end := start + limit
-	
-	if start >= total {
-		start = 0
-		end = 0
-	}
-	if end > total {
-		end = total
-	}
+	switch r.Method {
+	case "GET":
+		response := APIResponse{
+			Success: true,
+			Message: "Camera retrieved successfully",
+			Data:    camera,
+		}
+		json.NewEncoder(w).Encode(response)
 
-	var pageImages []ImageInfo
-	if start < end {
-		pageImages = images[start:end]
-	}
+	case "PUT":
+		var updatedCamera CameraConfig
+		if err := json.NewDecoder(r.Body).Decode(&updatedCamera); err != nil {
+			response := APIResponse{
+				Success: false,
+				Message: "Invalid request body",
+				Error:   err.Error(),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
 
-	response := map[string]interface{}{
-		"images": pageImages,
-		"total":  total,
-		"page":   page,
-		"limit":  limit,
-	}
+		updatedCamera.ID = id
+		updatedCamera.CreatedAt = camera.CreatedAt
+		updatedCamera.UpdatedAt = time.Now()
 
+		dataStore.Cameras[id] = &updatedCamera
+
+		if err := saveDataStore(); err != nil {
+			log.Printf("Warning: Failed to save data store: %v", err)
+		}
+
+		log.Printf("Updated camera: %s", id)
+
+		response := APIResponse{
+			Success: true,
+			Message: "Camera updated successfully",
+			Data:    &updatedCamera,
+		}
+		json.NewEncoder(w).Encode(response)
+
+	case "DELETE":
+		// Stop RTSP stream first
+		if ws.rtspManager != nil {
+			if err := ws.rtspManager.StopCamera(id); err != nil {
+				log.Printf("Warning: Failed to stop RTSP stream for camera %s: %v", id, err)
+			}
+		}
+		
+		delete(dataStore.Cameras, id)
+
+		if err := saveDataStore(); err != nil {
+			log.Printf("Warning: Failed to save data store: %v", err)
+		}
+
+		log.Printf("Deleted camera: %s", id)
+
+		response := APIResponse{
+			Success: true,
+			Message: "Camera deleted successfully",
+		}
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+func (ws *WebServer) handleAPIStartCamera(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	camera, exists := dataStore.Cameras[id]
+	if !exists {
+		response := APIResponse{
+			Success: false,
+			Message: "Camera not found",
+		}
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	camera.Running = true
+	camera.Enabled = true
+	camera.UpdatedAt = time.Now()
+
+	if err := saveDataStore(); err != nil {
+		log.Printf("Warning: Failed to save data store: %v", err)
+	}
+
+	log.Printf("Started camera: %s", id)
+
+	response := APIResponse{
+		Success: true,
+		Message: "Camera started successfully",
+		Data:    camera,
+	}
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleImage serves individual images
-func (ws *WebServer) handleImage(w http.ResponseWriter, r *http.Request) {
+func (ws *WebServer) handleAPIStopCamera(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
 	vars := mux.Vars(r)
-	filename := vars["filename"]
+	id := vars["id"]
 
-	// Security check - prevent directory traversal
-	if strings.Contains(filename, "..") || strings.Contains(filename, "/") || strings.Contains(filename, "\\") {
-		http.Error(w, "Invalid filename", http.StatusBadRequest)
+	camera, exists := dataStore.Cameras[id]
+	if !exists {
+		response := APIResponse{
+			Success: false,
+			Message: "Camera not found",
+		}
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
 		return
 	}
 
-	imagePath := filepath.Join(ws.outputDir, filename)
-	
-	// Check if file exists
-	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-		http.Error(w, "Image not found", http.StatusNotFound)
-		return
+	camera.Running = false
+	camera.UpdatedAt = time.Now()
+
+	if err := saveDataStore(); err != nil {
+		log.Printf("Warning: Failed to save data store: %v", err)
 	}
 
-	http.ServeFile(w, r, imagePath)
+	log.Printf("Stopped camera: %s", id)
+
+	response := APIResponse{
+		Success: true,
+		Message: "Camera stopped successfully",
+		Data:    camera,
+	}
+	json.NewEncoder(w).Encode(response)
 }
 
-// getImages returns list of all images sorted by modification time (newest first)
-func (ws *WebServer) getImages() ([]ImageInfo, error) {
-	files, err := ioutil.ReadDir(ws.outputDir)
-	if err != nil {
-		return nil, err
+func (ws *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	runningCount := 0
+	enabledCount := 0
+
+	for _, camera := range dataStore.Cameras {
+		if camera.Running {
+			runningCount++
+		}
+		if camera.Enabled {
+			enabledCount++
+		}
 	}
 
-	var images []ImageInfo
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-
-		// Only include image files
-		filename := file.Name()
-		ext := strings.ToLower(filepath.Ext(filename))
-		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
-			continue
-		}
-
-		images = append(images, ImageInfo{
-			Filename:  filename,
-			Path:      filepath.Join(ws.outputDir, filename),
-			Timestamp: file.ModTime(),
-			Size:      file.Size(),
-		})
+	response := APIResponse{
+		Success: true,
+		Message: "System status retrieved successfully",
+		Data: map[string]interface{}{
+			"manager_running":    true,
+			"running_cameras":    runningCount,
+			"total_cameras":      len(dataStore.Cameras),
+			"enabled_cameras":    enabledCount,
+			"disabled_cameras":   len(dataStore.Cameras) - enabledCount,
+			"persistent_storage": true,
+			"data_file":          DataFile,
+		},
 	}
 
-	// Sort by timestamp (newest first)
-	sort.Slice(images, func(i, j int) bool {
-		return images[i].Timestamp.After(images[j].Timestamp)
-	})
+	json.NewEncoder(w).Encode(response)
+}
 
-	return images, nil
+func (ws *WebServer) handleAPIDebug(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var cameraIDs []string
+	for id := range dataStore.Cameras {
+		cameraIDs = append(cameraIDs, id)
+	}
+
+	debugInfo := map[string]interface{}{
+		"message":              "Debug route is working!",
+		"timestamp":            time.Now().Format(time.RFC3339),
+		"routes_registered":    "API routes are properly registered",
+		"cors_enabled":         true,
+		"total_cameras":        len(dataStore.Cameras),
+		"camera_ids":           cameraIDs,
+		"persistent_storage":   true,
+		"data_file_exists":     fileExists(DataFile),
+		"request_method":       r.Method,
+		"request_path":         r.URL.Path,
+	}
+
+	response := APIResponse{
+		Success: true,
+		Message: "Debug information retrieved successfully",
+		Data:    debugInfo,
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+func fileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	return !os.IsNotExist(err)
 }

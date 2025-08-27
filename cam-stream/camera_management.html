@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>摄像头管理 - Cam-Stream</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f6fa;
+            color: #2c3e50;
+            padding: 30px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        .header h1 {
+            font-size: 32px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #7f8c8d;
+            font-size: 18px;
+        }
+        
+        /* 卡片样式 */
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            padding: 25px;
+            margin-bottom: 20px;
+            border: 1px solid #e1e8ed;
+        }
+        
+        .card h3 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+        
+        /* 按钮样式 */
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
+        /* 表单样式 */
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        
+        .form-control {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+        
+        .form-control:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+        }
+        
+        /* 表格样式 */
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        .table th,
+        .table td {
+            padding: 15px 12px;
+            text-align: left;
+            border-bottom: 1px solid #e1e8ed;
+        }
+        
+        .table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .table tbody tr:hover {
+            background: #f8f9fa;
+        }
+        
+        /* 状态指示器 */
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-running {
+            background: #27ae60;
+            box-shadow: 0 0 0 2px rgba(39, 174, 96, 0.3);
+        }
+        
+        .status-stopped {
+            background: #95a5a6;
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            body {
+                padding: 20px;
+            }
+            
+            .table {
+                font-size: 12px;
+            }
+            
+            .table th,
+            .table td {
+                padding: 10px 8px;
+            }
+            
+            .btn {
+                padding: 8px 16px;
+                font-size: 12px;
+            }
+        }
+        
+        /* 加载状态 */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+        
+        /* 空状态 */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #7f8c8d;
+        }
+        
+        .empty-state h4 {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+        
+        .empty-state p {
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>摄像头管理系统</h1>
+        <p>管理和监控你的RTSP摄像头</p>
+    </div>
+
+    <!-- 添加摄像头表单 -->
+    <div class="card">
+        <h3>添加摄像头</h3>
+        <form id="cameraForm">
+            <div class="form-group">
+                <label for="cameraName">摄像头名称 *</label>
+                <input type="text" id="cameraName" class="form-control" placeholder="例如: 前门摄像头" required>
+            </div>
+            <div class="form-group">
+                <label for="rtspUrl">RTSP地址 *</label>
+                <input type="text" id="rtspUrl" class="form-control" placeholder="rtsp://username:password@ip:port/path" required>
+            </div>
+            <div class="form-group">
+                <label for="serverUrl">推理服务器地址</label>
+                <input type="url" id="serverUrl" class="form-control" placeholder="http://localhost:8080/api/detect" value="">
+                <small style="color: #7f8c8d; font-size: 12px;">可选：AI推理服务器的API地址</small>
+            </div>
+            <button type="submit" class="btn btn-primary">添加摄像头</button>
+        </form>
+    </div>
+
+    <!-- 摄像头列表 -->
+    <div class="card">
+        <h3>摄像头列表</h3>
+        <div id="camerasLoading" class="loading">
+            <p>加载中...</p>
+        </div>
+        <div id="camerasEmpty" class="empty-state" style="display: none;">
+            <h4>暂无摄像头</h4>
+            <p>请使用上面的表单添加第一个摄像头</p>
+        </div>
+        <div id="camerasTable" style="display: none;">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>名称</th>
+                        <th>RTSP地址</th>
+                        <th>推理服务器</th>
+                        <th>状态</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="camerasTableBody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        class CameraManager {
+            constructor() {
+                this.apiBase = '/api';
+                this.init();
+            }
+            
+            init() {
+                this.loadCameras();
+                this.setupEventListeners();
+            }
+            
+            setupEventListeners() {
+                document.getElementById('cameraForm').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.addCamera();
+                });
+            }
+            
+            async loadCameras() {
+                try {
+                    const response = await fetch(`${this.apiBase}/cameras`);
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.displayCameras(result.data || []);
+                    } else {
+                        console.error('加载摄像头失败:', result.error);
+                    }
+                } catch (error) {
+                    console.error('网络错误:', error);
+                } finally {
+                    document.getElementById('camerasLoading').style.display = 'none';
+                }
+            }
+            
+            displayCameras(cameras) {
+                const tbody = document.getElementById('camerasTableBody');
+                const emptyState = document.getElementById('camerasEmpty');
+                const table = document.getElementById('camerasTable');
+                
+                if (cameras.length === 0) {
+                    emptyState.style.display = 'block';
+                    table.style.display = 'none';
+                    return;
+                }
+                
+                emptyState.style.display = 'none';
+                table.style.display = 'block';
+                
+                tbody.innerHTML = cameras.map(camera => `
+                    <tr>
+                        <td>${this.escapeHtml(camera.name)}</td>
+                        <td>
+                            <code style="font-size: 12px; background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">
+                                ${this.escapeHtml(camera.rtsp_url)}
+                            </code>
+                        </td>
+                        <td>
+                            ${camera.server_url ? 
+                                `<code style="font-size: 11px; background: #e8f5e8; padding: 2px 6px; border-radius: 3px; color: #2d7d2d;">
+                                    ${this.escapeHtml(camera.server_url)}
+                                </code>` : 
+                                `<span style="color: #95a5a6; font-size: 12px;">未设置</span>`
+                            }
+                        </td>
+                        <td>
+                            <span class="status-indicator ${camera.running ? 'status-running' : 'status-stopped'}"></span>
+                            ${camera.running ? '运行中' : '已停止'}
+                        </td>
+                        <td>${this.formatDate(camera.created_at)}</td>
+                        <td>
+                            <button class="btn btn-danger" onclick="cameraManager.deleteCamera('${camera.id}')">
+                                删除
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+            
+            async addCamera() {
+                const name = document.getElementById('cameraName').value.trim();
+                const rtspUrl = document.getElementById('rtspUrl').value.trim();
+                const serverUrl = document.getElementById('serverUrl').value.trim();
+                
+                if (!name || !rtspUrl) {
+                    alert('请填写所有必填字段');
+                    return;
+                }
+                
+                const cameraData = {
+                    name: name,
+                    rtsp_url: rtspUrl,
+                    enabled: true,
+                    running: true
+                };
+                
+                // 只有在用户输入了推理服务器地址时才添加该字段
+                if (serverUrl) {
+                    cameraData.server_url = serverUrl;
+                }
+                
+                try {
+                    const response = await fetch(`${this.apiBase}/cameras`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(cameraData)
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        // 清空表单
+                        document.getElementById('cameraForm').reset();
+                        // 重新加载摄像头列表
+                        this.loadCameras();
+                        alert('摄像头添加成功并已自动启动！');
+                    } else {
+                        alert('添加摄像头失败: ' + (result.error || result.message));
+                    }
+                } catch (error) {
+                    console.error('网络错误:', error);
+                    alert('网络错误，请稍后重试');
+                }
+            }
+            
+            async deleteCamera(cameraId) {
+                if (!confirm('确定要删除这个摄像头吗？此操作无法撤销。')) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(`${this.apiBase}/cameras/${cameraId}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.loadCameras();
+                        alert('摄像头删除成功！');
+                    } else {
+                        alert('删除摄像头失败: ' + (result.error || result.message));
+                    }
+                } catch (error) {
+                    console.error('网络错误:', error);
+                    alert('网络错误，请稍后重试');
+                }
+            }
+            
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+            
+            formatDate(dateString) {
+                try {
+                    const date = new Date(dateString);
+                    return date.toLocaleString('zh-CN');
+                } catch (error) {
+                    return dateString;
+                }
+            }
+        }
+        
+        // 初始化摄像头管理器
+        const cameraManager = new CameraManager();
+    </script>
+</body>
+</html>
