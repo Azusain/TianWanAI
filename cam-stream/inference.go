@@ -48,6 +48,7 @@ type InferenceResponse struct {
 type DetectionResult struct {
 	Score    float64  `json:"score"`
 	Location Location `json:"location"`
+	Class    string   `json:"class,omitempty"` // Class name if provided by server
 }
 
 // Location represents the location of a detected object
@@ -191,8 +192,14 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 			result.Location.Left, result.Location.Top, result.Location.Width, result.Location.Height,
 			x1, y1, x2, y2)
 
+		// Use class name from server response, or default to "detected_object"
+		className := result.Class
+		if className == "" {
+			className = "detected_object" // Default class name
+		}
+
 		detection := Detection{
-			Class:      "gesture", // Based on your endpoint
+			Class:      className,
 			Confidence: result.Score,
 			X1:         x1,
 			Y1:         y1,
@@ -202,23 +209,7 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 		detections = append(detections, detection)
 	}
 
-	log.Printf("Detected %d objects from inference server", len(detections))
-
-	// FOR TESTING: Add a fake detection box if no detections found
-	if len(detections) == 0 {
-		// Use actual image dimensions for test box
-		testDetection := Detection{
-			Class:      "test_gesture",
-			Confidence: 0.99,
-			X1:         img.Width / 4,      // 25% from left
-			Y1:         img.Height / 4,     // 25% from top
-			X2:         3 * img.Width / 4,  // 75% from left
-			Y2:         3 * img.Height / 4, // 75% from top
-		}
-		detections = append(detections, testDetection)
-		log.Printf("Added test detection box for debugging at (%d,%d,%d,%d) on %dx%d image",
-			testDetection.X1, testDetection.Y1, testDetection.X2, testDetection.Y2, img.Width, img.Height)
-	}
+	log.Printf("Detected %d real objects from inference server", len(detections))
 
 	return detections, nil
 }
@@ -243,30 +234,23 @@ func ProcessFrameWithInference(frameData []byte, cameraConfig *CameraConfig) ([]
 		return processedFrame, false, nil // No detections, don't save
 	}
 
-	// Filter out test detections for saving decision
-	realDetections := make([]Detection, 0)
-	for _, det := range detections {
-		if det.Class != "test_gesture" {
-			realDetections = append(realDetections, det)
-		}
-	}
-
-	// Draw detections on frame (including test detections for display)
+	// Draw detections on frame
 	processedFrame, err := DrawDetections(frameData, detections, cameraConfig.Name)
 	if err != nil {
 		log.Printf("Warning: Failed to draw detections for camera %s: %v", cameraConfig.ID, err)
 		return frameData, false, nil // Return original frame on error
 	}
 
-	// Only save if there are real detections (not test)
-	hasRealDetections := len(realDetections) > 0
-	if hasRealDetections {
-		log.Printf("Camera %s: Found %d real detections, will save frame", cameraConfig.ID, len(realDetections))
+	// Save if inference was successful and returned any detections
+	// (regardless of what the detections are - let AI server decide)
+	shouldSave := len(detections) > 0
+	if shouldSave {
+		log.Printf("Camera %s: Inference successful with %d detections, will save frame", cameraConfig.ID, len(detections))
 	} else {
-		log.Printf("Camera %s: No real detections found, skipping save", cameraConfig.ID)
+		log.Printf("Camera %s: No detections from inference server, skipping save", cameraConfig.ID)
 	}
 
-	return processedFrame, hasRealDetections, nil
+	return processedFrame, shouldSave, nil
 }
 
 // Helper function to check if string contains substring
