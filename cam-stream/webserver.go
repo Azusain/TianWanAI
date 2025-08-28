@@ -56,18 +56,7 @@ func (ws *WebServer) Start() error {
 		})
 	})
 
-	// Web Routes
-	router.HandleFunc("/", ws.handleIndex).Methods("GET")
-	router.HandleFunc("/cameras", ws.handleCameraManagement).Methods("GET")
-	router.HandleFunc("/images", ws.handleImages).Methods("GET")
-	
-	// Static file server for output directory (images)
-	router.PathPrefix("/output/").Handler(http.StripPrefix("/output/", http.FileServer(http.Dir("output/"))))
-	
-	// Static file server for HTML files
-	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./")))
-
-	// Camera API Routes
+	// Camera API Routes - MUST be registered BEFORE catch-all routes
 	api := router.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/cameras", ws.handleAPICameras).Methods("GET", "POST", "OPTIONS")
 	api.HandleFunc("/cameras/{id}", ws.handleAPICameraByID).Methods("GET", "PUT", "DELETE", "OPTIONS")
@@ -79,6 +68,17 @@ func (ws *WebServer) Start() error {
 	// Image management API routes
 	api.HandleFunc("/images/{cameraId}", ws.handleAPIImages).Methods("GET", "OPTIONS")
 	api.HandleFunc("/images/{cameraId}/{filename}", ws.handleAPIImageFile).Methods("GET", "OPTIONS")
+
+	// Web Routes
+	router.HandleFunc("/", ws.handleIndex).Methods("GET")
+	router.HandleFunc("/cameras", ws.handleCameraManagement).Methods("GET")
+	router.HandleFunc("/images", ws.handleImages).Methods("GET")
+	
+	// Static file server for output directory (images)
+	router.PathPrefix("/output/").Handler(http.StripPrefix("/output/", http.FileServer(http.Dir("output/"))))
+	
+	// Static file server for HTML files - MUST be LAST as it's a catch-all
+	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./")))
 
 	log.Printf("Starting web server on port %d", ws.port)
 	log.Printf("Access web interface at: http://localhost:%d", ws.port)
