@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+README.md
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Development files
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test files
+*_test.go
+test/
+tests/
+
+# Build artifacts
+*.exe
+*.so
+*.dylib
+cam-stream-backend
+
+# Image files (if not needed)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+
+# Documentation
+docs/
+*.md
+LICENSE
+
+# Environment files
+.env
+.env.local
+.env.development
+.env.test
+.env.production
