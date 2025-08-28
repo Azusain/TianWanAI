@@ -7,6 +7,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -55,6 +59,13 @@ func (ws *WebServer) Start() error {
 	// Web Routes
 	router.HandleFunc("/", ws.handleIndex).Methods("GET")
 	router.HandleFunc("/cameras", ws.handleCameraManagement).Methods("GET")
+	router.HandleFunc("/images", ws.handleImages).Methods("GET")
+	
+	// Static file server for output directory (images)
+	router.PathPrefix("/output/").Handler(http.StripPrefix("/output/", http.FileServer(http.Dir("output/"))))
+	
+	// Static file server for HTML files
+	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./")))
 
 	// Camera API Routes
 	api := router.PathPrefix("/api").Subrouter()
@@ -64,6 +75,10 @@ func (ws *WebServer) Start() error {
 	api.HandleFunc("/cameras/{id}/stop", ws.handleAPIStopCamera).Methods("POST", "OPTIONS")
 	api.HandleFunc("/status", ws.handleAPIStatus).Methods("GET", "OPTIONS")
 	api.HandleFunc("/debug", ws.handleAPIDebug).Methods("GET", "OPTIONS")
+	
+	// Image management API routes
+	api.HandleFunc("/images/{cameraId}", ws.handleAPIImages).Methods("GET", "OPTIONS")
+	api.HandleFunc("/images/{cameraId}/{filename}", ws.handleAPIImageFile).Methods("GET", "OPTIONS")
 
 	log.Printf("Starting web server on port %d", ws.port)
 	log.Printf("Access web interface at: http://localhost:%d", ws.port)
@@ -71,15 +86,15 @@ func (ws *WebServer) Start() error {
 	return http.ListenAndServe(fmt.Sprintf(":%d", ws.port), router)
 }
 
-// handleIndex serves the main page
+// handleIndex serves the image viewer page
 func (ws *WebServer) handleIndex(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(`<!DOCTYPE html>
-<html><head><title>Multi-Camera Stream Platform</title></head>
-<body><h1>Multi-Camera Stream Platform</h1>
-<p><a href="/cameras">Camera Management</a></p>
-<p><a href="/api/debug">API Debug</a></p>
-</body></html>`))
+	content, err := ioutil.ReadFile("image_viewer.html")
+	if err != nil {
+		http.Error(w, "Could not load image viewer interface: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(content)
 }
 
 // handleCameraManagement serves the camera management page
@@ -87,6 +102,17 @@ func (ws *WebServer) handleCameraManagement(w http.ResponseWriter, r *http.Reque
 	content, err := ioutil.ReadFile("camera_management.html")
 	if err != nil {
 		http.Error(w, "Could not load camera management interface: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(content)
+}
+
+// handleImages serves the test image viewer page
+func (ws *WebServer) handleImages(w http.ResponseWriter, r *http.Request) {
+	content, err := ioutil.ReadFile("test_image_viewer.html")
+	if err != nil {
+		http.Error(w, "Could not load image viewer: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -470,6 +496,184 @@ func (ws *WebServer) handleAPIDebug(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(response)
+}
+
+// Image management structures
+type ImageInfo struct {
+	Filename  string    `json:"filename"`
+	Size      int64     `json:"size"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type ImageListResponse struct {
+	Images     []ImageInfo `json:"images"`
+	TotalCount int         `json:"total_count"`
+	TotalPages int         `json:"total_pages"`
+	CurrentPage int        `json:"current_page"`
+}
+
+// handleAPIImages returns paginated list of images for a specific camera
+func (ws *WebServer) handleAPIImages(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	cameraId := vars["cameraId"]
+
+	// Check if camera exists
+	if _, exists := dataStore.Cameras[cameraId]; !exists {
+		response := APIResponse{
+			Success: false,
+			Message: "Camera not found",
+		}
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Parse query parameters for pagination
+	pageStr := r.URL.Query().Get("page")
+	limitStr := r.URL.Query().Get("limit")
+
+	page := 1
+	limit := 24 // Default page size
+
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	// Get images from camera directory
+	cameraDir := filepath.Join(ws.outputDir, cameraId)
+	images, err := getImagesFromDirectory(cameraDir)
+	if err != nil {
+		response := APIResponse{
+			Success: false,
+			Message: "Failed to read camera images",
+			Error:   err.Error(),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Sort images by creation time (newest first)
+	sort.Slice(images, func(i, j int) bool {
+		return images[i].CreatedAt.After(images[j].CreatedAt)
+	})
+
+	// Calculate pagination
+	totalCount := len(images)
+	totalPages := (totalCount + limit - 1) / limit
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	// Get page slice
+	start := (page - 1) * limit
+	end := start + limit
+	if start >= totalCount {
+		images = []ImageInfo{}
+	} else {
+		if end > totalCount {
+			end = totalCount
+		}
+		images = images[start:end]
+	}
+
+	responseData := ImageListResponse{
+		Images:      images,
+		TotalCount:  totalCount,
+		TotalPages:  totalPages,
+		CurrentPage: page,
+	}
+
+	response := APIResponse{
+		Success: true,
+		Message: "Images retrieved successfully",
+		Data:    responseData,
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleAPIImageFile serves individual image files
+func (ws *WebServer) handleAPIImageFile(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	cameraId := vars["cameraId"]
+	filename := vars["filename"]
+
+	// Check if camera exists
+	if _, exists := dataStore.Cameras[cameraId]; !exists {
+		http.Error(w, "Camera not found", http.StatusNotFound)
+		return
+	}
+
+	// Validate filename (security check)
+	if strings.Contains(filename, "..") || strings.Contains(filename, "/") || strings.Contains(filename, "\\") {
+		http.Error(w, "Invalid filename", http.StatusBadRequest)
+		return
+	}
+
+	// Construct file path
+	filePath := filepath.Join(ws.outputDir, cameraId, filename)
+
+	// Check if file exists
+	if !fileExists(filePath) {
+		http.Error(w, "Image not found", http.StatusNotFound)
+		return
+	}
+
+	// Set appropriate headers
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "public, max-age=3600") // Cache for 1 hour
+
+	// Serve the file
+	http.ServeFile(w, r, filePath)
+}
+
+// getImagesFromDirectory reads all JPEG images from a directory and returns their info
+func getImagesFromDirectory(dir string) ([]ImageInfo, error) {
+	var images []ImageInfo
+
+	// Check if directory exists
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return images, nil // Return empty slice, not an error
+	}
+
+	// Read directory
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory: %v", err)
+	}
+
+	// Filter and collect JPEG files
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		// Check if it's a JPEG file
+		filename := file.Name()
+		lowerName := strings.ToLower(filename)
+		if !strings.HasSuffix(lowerName, ".jpg") && !strings.HasSuffix(lowerName, ".jpeg") {
+			continue
+		}
+
+		images = append(images, ImageInfo{
+			Filename:  filename,
+			Size:      file.Size(),
+			CreatedAt: file.ModTime(),
+		})
+	}
+
+	return images, nil
 }
 
 func fileExists(filename string) bool {
