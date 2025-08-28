@@ -135,23 +135,15 @@ func addClearOverlay(img *image.RGBA, cameraName string, detectionCount int) {
 	// Set reasonable font size for better visibility
 	fontSize := 32.0
 
-	// Try to load Chinese fonts with fallback chain
-	chineseFonts := []string{
-		"C:/Windows/Fonts/msyh.ttc",   // Microsoft YaHei (preferred)
-		"C:/Windows/Fonts/simhei.ttf", // SimHei (good fallback)
-		"C:/Windows/Fonts/simsun.ttc", // SimSun
-		"C:/Windows/Fonts/arial.ttf",  // Arial (English fallback)
-	}
+	// Load Microsoft YaHei font from project fonts directory
+	fontPath := "./fonts/msyh.ttc"
 
 	fontLoaded := false
-	for _, fontPath := range chineseFonts {
-		if err := ctx.LoadFontFace(fontPath, fontSize); err != nil {
-			log.Printf("Failed to load font %s: %v", fontPath, err)
-			continue
-		}
+	if err := ctx.LoadFontFace(fontPath, fontSize); err != nil {
+		log.Printf("Failed to load font %s: %v", fontPath, err)
+	} else {
 		log.Printf("Successfully loaded font: %s", fontPath)
 		fontLoaded = true
-		break
 	}
 
 	if !fontLoaded {
