@@ -108,9 +108,9 @@ func (ws *WebServer) handleCameraManagement(w http.ResponseWriter, r *http.Reque
 	w.Write(content)
 }
 
-// handleImages serves the test image viewer page
+// handleImages serves the image viewer page
 func (ws *WebServer) handleImages(w http.ResponseWriter, r *http.Request) {
-	content, err := ioutil.ReadFile("test_image_viewer.html")
+	content, err := ioutil.ReadFile("image_viewer.html")
 	if err != nil {
 		http.Error(w, "Could not load image viewer: "+err.Error(), http.StatusInternalServerError)
 		return
