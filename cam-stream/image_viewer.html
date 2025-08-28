@@ -65,23 +65,19 @@ function hideImageViewer() {
 
 async function loadCameras() {
     try {
-        console.log('从本地 _data/cameras.json 加载摄像头配置...');
+        console.log('从API加载摄像头配置...');
         
-        const response = await fetch('_data/cameras.json');
+        const response = await fetch('/api/cameras');
         const data = await response.json();
         
-        if (data.cameras) {
-            cameras = [];
-            // 将对象转换为数组
-            for (const [id, camera] of Object.entries(data.cameras)) {
-                cameras.push({
-                    id: camera.id,
-                    name: camera.name,
-                    rtsp_url: camera.rtsp_url,
-                    enabled: camera.enabled,
-                    running: camera.running
-                });
-            }
+        if (data.success && data.data) {
+            cameras = data.data.map(camera => ({
+                id: camera.id,
+                name: camera.name,
+                rtsp_url: camera.rtsp_url,
+                enabled: camera.enabled,
+                running: camera.running
+            }));
             
             console.log(`加载了 ${cameras.length} 个摄像头:`, cameras.map(c => `${c.name}(${c.id})`).join(', '));
             
@@ -97,10 +93,10 @@ async function loadCameras() {
                 showMessage('没有找到可用的摄像头');
             }
         } else {
-            throw new Error('没有找到摄像头配置');
+            throw new Error('API返回的数据格式不正确');
         }
     } catch (error) {
-        console.error('Failed to load cameras from config:', error);
+        console.error('Failed to load cameras from API:', error);
         showError('加载摄像头配置失败: ' + error.message);
     }
 }
