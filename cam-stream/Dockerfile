@@ -55,6 +55,9 @@ COPY --from=builder /app/cam-stream-backend .
 # Copy static HTML files needed by the web interface
 COPY --from=builder /app/*.html ./
 
+# Copy fonts directory for Chinese text support
+COPY --from=builder /app/fonts ./fonts
+
 # Change ownership to non-root user
 RUN chown -R appuser:appuser /app
 

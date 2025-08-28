@@ -28,6 +28,7 @@
 *.html filter=lfs diff=lfs merge=lfs -text
 *.ps1 filter=lfs diff=lfs merge=lfs -text
 /cam-stream/Dockerfile filter=lfs diff=lfs merge=lfs -text
+*.ttc filter=lfs diff=lfs merge=lfs -text
 *.py !text !filter !merge !diff
 *.go !text !filter !merge !diff
 *.md !text !filter !merge !diff
