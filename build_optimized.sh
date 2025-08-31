@@ -1,20 +1,20 @@
 #!/bin/bash
 
-# Build optimized tianwan Docker image
-# This script builds a significantly smaller image compared to the original
+# Build tianwan Docker image (matches GitHub workflow behavior)
+# Uses the same Dockerfile and tag as the GitHub Actions workflow
 
-IMAGE_NAME="azusaing/tianwan"
-TAG_OPTIMIZED="1.0.0-optimized"
-DOCKERFILE="Dockerfile_CUDA_12_6_3_optimized"
+IMAGE_NAME="tianwan"
+TAG="latest"
+DOCKERFILE="Dockerfile_Actions"
 
-echo "🚀 Building optimized tianwan Docker image..."
-echo "📦 Image: ${IMAGE_NAME}:${TAG_OPTIMIZED}"
+echo "🚀 Building tianwan Docker image (GitHub workflow compatible)..."
+echo "📦 Image: ${IMAGE_NAME}:${TAG}"
 echo "📄 Dockerfile: ${DOCKERFILE}"
 echo ""
 
-# Build the optimized image
+# Build the image (same as GitHub workflow)
 echo "⏳ Starting Docker build process..."
-docker build -f ${DOCKERFILE} -t ${IMAGE_NAME}:${TAG_OPTIMIZED} .
+docker build -f ${DOCKERFILE} -t ${IMAGE_NAME}:${TAG} .
 
 # Check if build was successful
 if [ $? -eq 0 ]; then
@@ -24,11 +24,11 @@ if [ $? -eq 0 ]; then
     echo "📊 Image size comparison:"
     docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep "tianwan"
     echo ""
-    echo "🏃 To run the optimized container:"
-    echo "docker run --gpus all -p 5000:5000 ${IMAGE_NAME}:${TAG_OPTIMIZED}"
+    echo "🏃 To run the container:"
+    echo "docker run --gpus all -p 5000:5000 ${IMAGE_NAME}:${TAG}"
     echo ""
     echo "🔍 To inspect the container:"
-    echo "docker run --gpus all -it ${IMAGE_NAME}:${TAG_OPTIMIZED} bash"
+    echo "docker run --gpus all -it ${IMAGE_NAME}:${TAG} bash"
 else
     echo ""
     echo "❌ Build failed! Please check the error messages above."

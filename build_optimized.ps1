@@ -1,18 +1,18 @@
-# Build optimized tianwan Docker image
-# This script builds a significantly smaller image compared to the original
+# Build tianwan Docker image (matches GitHub workflow behavior)
+# Uses the same Dockerfile and tag as the GitHub Actions workflow
 
-$IMAGE_NAME = "azusaing/tianwan"
-$TAG_OPTIMIZED = "1.0.0-optimized" 
-$DOCKERFILE = "Dockerfile_CUDA_12_6_3_optimized"
+$IMAGE_NAME = "tianwan"
+$TAG = "latest" 
+$DOCKERFILE = "Dockerfile_Actions"
 
-Write-Host "🚀 Building optimized tianwan Docker image..." -ForegroundColor Green
-Write-Host "📦 Image: $IMAGE_NAME`:$TAG_OPTIMIZED" -ForegroundColor Cyan
+Write-Host "🚀 Building tianwan Docker image (GitHub workflow compatible)..." -ForegroundColor Green
+Write-Host "📦 Image: $IMAGE_NAME`:$TAG" -ForegroundColor Cyan
 Write-Host "📄 Dockerfile: $DOCKERFILE" -ForegroundColor Cyan
 Write-Host ""
 
-# Build the optimized image
+# Build the image (same as GitHub workflow)
 Write-Host "⏳ Starting Docker build process..." -ForegroundColor Yellow
-$buildResult = docker build -f $DOCKERFILE -t "$IMAGE_NAME`:$TAG_OPTIMIZED" .
+$buildResult = docker build -f $DOCKERFILE -t "$IMAGE_NAME`:$TAG" .
 
 # Check if build was successful
 if ($LASTEXITCODE -eq 0) {
@@ -22,11 +22,11 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "📊 Image size comparison:" -ForegroundColor Blue
     docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | Select-String "tianwan"
     Write-Host ""
-    Write-Host "🏃 To run the optimized container:" -ForegroundColor Yellow
-    Write-Host "docker run --gpus all -p 5000:5000 $IMAGE_NAME`:$TAG_OPTIMIZED" -ForegroundColor White
+    Write-Host "🏃 To run the container:" -ForegroundColor Yellow
+    Write-Host "docker run --gpus all -p 5000:5000 $IMAGE_NAME`:$TAG" -ForegroundColor White
     Write-Host ""
     Write-Host "🔍 To inspect the container:" -ForegroundColor Yellow
-    Write-Host "docker run --gpus all -it $IMAGE_NAME`:$TAG_OPTIMIZED bash" -ForegroundColor White
+    Write-Host "docker run --gpus all -it $IMAGE_NAME`:$TAG bash" -ForegroundColor White
 } else {
     Write-Host ""
     Write-Host "❌ Build failed! Please check the error messages above." -ForegroundColor Red
