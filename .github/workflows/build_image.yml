@@ -3,17 +3,8 @@ name: Build and Push Docker Image
 on:
   workflow_dispatch:
     inputs:
-      dockerfile:
-        description: 'Dockerfile to use'
-        required: false
-        default: 'Dockerfile_CUDA_12_6_3_optimized'
-        type: choice
-        options:
-          - 'Dockerfile_CUDA_12_6_3_optimized'
-          - 'Dockerfile_CUDA_12_6_3'
-          - 'Dockerfile_CUDA_11_1_1'
       tag_suffix:
-        description: 'Tag suffix (e.g., "optimized", "v2")'
+        description: 'Tag suffix (e.g., "v2", "test")'
         required: false
         default: ''
         type: string
@@ -26,43 +17,43 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Free up disk space
-        run: |
-          echo "=== Before cleanup ==="
-          df -h
-          
-          # Remove unnecessary packages and files
-          sudo apt-get purge -y \
-            firefox \
-            google-chrome-stable \
-            microsoft-edge-stable \
-            dotnet-* \
-            llvm-* \
-            mysql-* \
-            postgresql-* \
-            mono-* \
-            powershell \
-            azure-cli
-          
-          sudo apt-get autoremove -y
-          sudo apt-get autoclean
-          
-          # Remove large directories
-          sudo rm -rf /usr/local/.ghcup
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/hostedtoolcache
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/share/powershell
-          sudo rm -rf /usr/share/swift
-          sudo rm -rf /usr/local/julia*
-          
-          # Clean Docker
-          docker system prune -af
-          
-          echo "=== After cleanup ==="
-          df -h
-          
+      # - name: Free up disk space
+      #   run: |
+      #     echo "=== Before cleanup ==="
+      #     df -h
+      #     
+      #     # Remove unnecessary packages and files
+      #     sudo apt-get purge -y \
+      #       firefox \
+      #       google-chrome-stable \
+      #       microsoft-edge-stable \
+      #       dotnet-* \
+      #       llvm-* \
+      #       mysql-* \
+      #       postgresql-* \
+      #       mono-* \
+      #       powershell \
+      #       azure-cli
+      #     
+      #     sudo apt-get autoremove -y
+      #     sudo apt-get autoclean
+      #     
+      #     # Remove large directories
+      #     sudo rm -rf /usr/local/.ghcup
+      #     sudo rm -rf /usr/local/share/boost
+      #     sudo rm -rf /usr/local/lib/android
+      #     sudo rm -rf /opt/hostedtoolcache
+      #     sudo rm -rf /usr/share/dotnet
+      #     sudo rm -rf /usr/local/share/powershell
+      #     sudo rm -rf /usr/share/swift
+      #     sudo rm -rf /usr/local/julia*
+      #     
+      #     # Clean Docker
+      #     docker system prune -af
+      #     
+      #     echo "=== After cleanup ==="
+      #     df -h
+      #     
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -105,7 +96,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
-          file: ./${{ inputs.dockerfile }}
+          file: ./Dockerfile_CUDA_12_6_3
           push: true
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/tianwan:${{ env.FULL_TAG }}
@@ -127,7 +118,7 @@ jobs:
           description: |
             **Workflow:** ${{ github.workflow }}
             **Status:** ${{ needs.build.result }}
-            **Dockerfile:** ${{ inputs.dockerfile }}
+            **Dockerfile:** Dockerfile_CUDA_12_6_3
             **Tag:** ${{ env.FULL_TAG }}
             **Repository:** ${{ github.repository }}
             **Run URL:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
