@@ -119,7 +119,7 @@ jobs:
   notify:
     needs: build
     runs-on: ubuntu-latest
-    if: ${{ always() && secrets.DISCORD_WEBHOOK }}
+    if: ${{ always() }}
     steps:
       - name: Notify Discord
         uses: nobrayner/discord-webhook@v1
