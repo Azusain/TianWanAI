@@ -63,6 +63,7 @@ RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
 
 # Copy only essential files from downloader stage
 COPY --from=downloader ${WORKDIR}/models/ ${WORKDIR}/models/
+COPY --from=downloader ${WORKDIR}/__SmokeFire/ ${WORKDIR}/__SmokeFire/
 COPY --from=downloader ${WORKDIR}/*.py ${WORKDIR}/
 COPY --from=downloader ${WORKDIR}/requirements.txt ${WORKDIR}/
 COPY --from=downloader ${WORKDIR}/run.bash ${WORKDIR}/
