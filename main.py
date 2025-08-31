@@ -20,7 +20,7 @@ import cv2
 from uuid import uuid4 as uuid4
 
 # project 
-from api import ServiceStatus, YoloDetectionService, TshirtDetectionService
+from api import ServiceStatus, YoloDetectionService, TshirtDetectionService, TemporalFallDetectionService
 
 # logger
 from loguru import logger
@@ -73,7 +73,7 @@ def get_service(model_type: str):
   if model_type == ModelType.TSHIRT.value:
     return TshirtDetectionService("models/fashionpedia", 640), None
   if model_type == ModelType.FALL.value:
-    return YoloDetectionService("models/fall.pt", 640), YoloDetectionService("models/yolo11s.pt", 640)
+    return TemporalFallDetectionService(), None
 
 # model:
 #   - gesture
@@ -122,7 +122,7 @@ def app():
             xyxyn=xyxyn
         )
     
-    # TODO: refactor with person detection.
+    # Temporal Fall Detection using ST-GCN
     @app.route('/fall', methods=['POST'])
     def FallDetect():
         img, errno = validate_img_format()
@@ -131,79 +131,107 @@ def app():
                 "log_id": uuid4(),
                 "errno": errno,
                 "err_msg": ServiceStatus.stringify(errno),
+                "api_version": "1.0.0",
+                "model_version": service.version,
+                "results": []
             }
-
-        def ensure_iterable(x):
-            if x is None:
-                return []
-            if isinstance(x, torch.Tensor):
-                return x.cpu().tolist()
-            if isinstance(x, (float, int)):
-                return [x]
-            if hasattr(x, '__iter__'):
-                return list(x)
-            return [x]
-
-        H, W = img.shape[:2]
-        p_scores, p_xyxyn, p_cls = base.Predict(img)
-
-        p_scores = ensure_iterable(p_scores)
-        p_xyxyn = ensure_iterable(p_xyxyn)
-        p_cls = ensure_iterable(p_cls)
-
-        results = []
-        for p_score, (cx, cy, w, h), pcls in zip(p_scores, p_xyxyn, p_cls):
-            if int(pcls) != 0:
-                continue
-
-            person_x1 = max(int((cx - w / 2) * W), 0)
-            person_y1 = max(int((cy - h / 2) * H), 0)
-            person_x2 = min(int((cx + w / 2) * W), W - 1)
-            person_y2 = min(int((cy + h / 2) * H), H - 1)
-
-            if person_y2 <= person_y1 or person_x2 <= person_x1:
-                continue  # 防止无效切片
-
-            person_img = img[person_y1:person_y2, person_x1:person_x2]
-
-            s_scores, s_xyxyn, s_cls = service.Predict(person_img)
-
-            s_scores = ensure_iterable(s_scores)
-            s_xyxyn = ensure_iterable(s_xyxyn)
-            s_cls = ensure_iterable(s_cls)
-
-            for s_score, (scx, scy, sw_, sh_), scls in zip(s_scores, s_xyxyn, s_cls):
-                if int(scls) != 0:
-                    continue
-
-                pixel_w = person_x2 - person_x1
-                pixel_h = person_y2 - person_y1
-                pixel_cx = person_x1 + pixel_w / 2
-                pixel_cy = person_y1 + pixel_h / 2
-                norm_cx = pixel_cx / W
-                norm_cy = pixel_cy / H
-                norm_w = pixel_w / W
-                norm_h = pixel_h / H
-                logger.success(f"SUCCESS - score: {s_score}")
+            
+        # Get camera ID from request (default to 'default' if not provided)
+        camera_id = request.json.get('camera_id', 'default')
+        
+        # Process frame with temporal fall detection service
+        try:
+            detection_results = service.process_frame(img, camera_id)
+            
+            # Convert to TianWan API format
+            results = []
+            errno = ServiceStatus.SUCCESS.value if detection_results['fall_detected'] else ServiceStatus.NO_OBJECT_DETECTED.value
+            
+            # Convert alerts to standard format
+            for alert in detection_results['alerts']:
+                bbox = alert['bbox']  # [x1, y1, x2, y2] in pixels
+                H, W = img.shape[:2]
+                
+                # Convert to normalized format
+                x1, y1, x2, y2 = bbox
+                center_x = (x1 + x2) / 2 / W
+                center_y = (y1 + y2) / 2 / H
+                width = (x2 - x1) / W
+                height = (y2 - y1) / H
+                left = center_x - width / 2
+                top = center_y - height / 2
+                
                 results.append({
-                    "score": s_score,
+                    "score": alert['confidence'],
+                    "person_id": alert['person_id'],
+                    "alert_type": alert['alert_type'],
                     "location": {
-                        "left": norm_cx,
-                        "top": norm_cy,
-                        "width": norm_w,
-                        "height": norm_h
+                        "left": left,
+                        "top": top,
+                        "width": width,
+                        "height": height
                     }
                 })
-
-        errno = ServiceStatus.SUCCESS.value if results else ServiceStatus.NO_OBJECT_DETECTED.value
-        return {
-            "log_id": uuid4(),
-            "errno": errno,
-            "err_msg": ServiceStatus.stringify(errno),
-            "api_version": "0.0.1",
-            "model_version": "0.0.1",
-            "results": results
-        }
+                
+            if detection_results['fall_detected']:
+                logger.warning(f"Fall detected in camera {camera_id}: {len(results)} alerts")
+            
+            return {
+                "log_id": uuid4(),
+                "errno": errno,
+                "err_msg": ServiceStatus.stringify(errno),
+                "api_version": "1.0.0",
+                "model_version": service.version,
+                "camera_id": camera_id,
+                "timestamp": detection_results['timestamp'],
+                "persons_detected": detection_results['persons_detected'],
+                "fall_detected": detection_results['fall_detected'],
+                "debug_info": detection_results['debug_info'],
+                "results": results
+            }
+            
+        except Exception as e:
+            logger.error(f"Fall detection failed: {e}")
+            return {
+                "log_id": uuid4(),
+                "errno": ServiceStatus.INVALID_IMAGE_FORMAT.value,
+                "err_msg": f"Fall detection error: {str(e)}",
+                "api_version": "1.0.0",
+                "model_version": service.version if hasattr(service, 'version') else "unknown",
+                "results": []
+            }
+    
+    # Fall Detection Status Endpoint
+    @app.route('/fall/status', methods=['GET'])
+    def FallDetectionStatus():
+        """Get fall detection service status and statistics"""
+        if model_type == ModelType.FALL.value and service:
+            try:
+                camera_id = request.args.get('camera_id')
+                status = service.get_status(camera_id)
+                
+                return {
+                    "log_id": uuid4(),
+                    "errno": ServiceStatus.SUCCESS.value,
+                    "err_msg": "SUCCESS",
+                    "api_version": "1.0.0",
+                    "status": status
+                }
+            except Exception as e:
+                logger.error(f"Failed to get fall detection status: {e}")
+                return {
+                    "log_id": uuid4(),
+                    "errno": ServiceStatus.INVALID_CONTENT_TYPE.value,
+                    "err_msg": f"Status error: {str(e)}",
+                    "api_version": "1.0.0"
+                }
+        else:
+            return {
+                "log_id": uuid4(),
+                "errno": ServiceStatus.INVALID_CONTENT_TYPE.value,
+                "err_msg": "Fall detection service not available",
+                "api_version": "1.0.0"
+            }
 
     @app.route('/tshirt', methods=['POST'])
     def TshirtDetect():

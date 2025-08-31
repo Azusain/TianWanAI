@@ -4,3 +4,6 @@
 [submodule "__SmokeFire"]
 	path = __SmokeFire
 	url = https://github.com/Azusain/Smoke_Fire_Detection
+[submodule "fall-detection"]
+	path = fall-detection
+	url = https://github.com/Azusain/Human-Falling-Detect-Tracks.git

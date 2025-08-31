@@ -1,17 +1,8 @@
 {
-  "cameras": {
-    "cam_5": {
-      "id": "cam_5",
-      "name": "这是第一个摄像头",
-      "rtsp_url": "rtsp://localhost:8554/test",
-      "server_url": "http://localhost:8902/ponding",
-      "enabled": true,
-      "running": true,
-      "created_at": "2025-08-28T06:45:09.7367289+08:00",
-      "updated_at": "2025-08-28T06:45:09.7367289+08:00"
-    }
-  },
+  "cameras": {},
+  "inference_servers": {},
   "counters": {
-    "camera": 6
+    "camera": 1,
+    "inference_server": 0
   }
 }
