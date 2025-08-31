@@ -62,6 +62,11 @@ func (ws *WebServer) Start() error {
 	api.HandleFunc("/cameras/{id}", ws.handleAPICameraByID).Methods("GET", "PUT", "DELETE", "OPTIONS")
 	api.HandleFunc("/cameras/{id}/start", ws.handleAPIStartCamera).Methods("POST", "OPTIONS")
 	api.HandleFunc("/cameras/{id}/stop", ws.handleAPIStopCamera).Methods("POST", "OPTIONS")
+	
+	// Inference Server API Routes
+	api.HandleFunc("/inference-servers", ws.handleAPIInferenceServers).Methods("GET", "POST", "OPTIONS")
+	api.HandleFunc("/inference-servers/{id}", ws.handleAPIInferenceServerByID).Methods("GET", "PUT", "DELETE", "OPTIONS")
+	
 	api.HandleFunc("/status", ws.handleAPIStatus).Methods("GET", "OPTIONS")
 	api.HandleFunc("/debug", ws.handleAPIDebug).Methods("GET", "OPTIONS")
 	
@@ -120,16 +125,29 @@ func (ws *WebServer) handleImages(w http.ResponseWriter, r *http.Request) {
 }
 
 // Data structures
+type InferenceServer struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"` // User-friendly name/alias
+	URL         string    `json:"url"`
+	ModelType   string    `json:"model_type"`   // e.g., "yolo", "detectron2", "custom"
+	Description string    `json:"description,omitempty"` // Optional description
+	Enabled     bool      `json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type CameraConfig struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	RTSPUrl   string    `json:"rtsp_url"`
-	ServerUrl string    `json:"server_url,omitempty"`
-	ModelType string    `json:"model_type,omitempty"`
-	Enabled   bool      `json:"enabled"`
-	Running   bool      `json:"running"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	RTSPUrl         string   `json:"rtsp_url"`
+	InferenceServers []string `json:"inference_servers,omitempty"` // Array of inference server IDs
+	Enabled         bool     `json:"enabled"`
+	Running         bool     `json:"running"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	// Keep these for backward compatibility during migration
+	ServerUrl string `json:"server_url,omitempty"` // Deprecated
+	ModelType string `json:"model_type,omitempty"` // Deprecated
 }
 
 
@@ -142,8 +160,10 @@ type APIResponse struct {
 
 type DataStore struct {
 	Cameras map[string]*CameraConfig `json:"cameras"`
+	InferenceServers map[string]*InferenceServer `json:"inference_servers"`
 	Counters struct {
 		Camera int `json:"camera"`
+		InferenceServer int `json:"inference_server"`
 	} `json:"counters"`
 }
 
@@ -155,6 +175,7 @@ const (
 // Global data store
 var dataStore = &DataStore{
 	Cameras: make(map[string]*CameraConfig),
+	InferenceServers: make(map[string]*InferenceServer),
 }
 
 // Data persistence functions
@@ -179,8 +200,11 @@ func loadDataStore() error {
 	if dataStore.Cameras == nil {
 		dataStore.Cameras = make(map[string]*CameraConfig)
 	}
+	if dataStore.InferenceServers == nil {
+		dataStore.InferenceServers = make(map[string]*InferenceServer)
+	}
 
-	log.Printf("Loaded %d cameras from storage", len(dataStore.Cameras))
+	log.Printf("Loaded %d cameras and %d inference servers from storage", len(dataStore.Cameras), len(dataStore.InferenceServers))
 	return nil
 }
 
@@ -198,13 +222,18 @@ func saveDataStore() error {
 		return fmt.Errorf("failed to write data file: %v", err)
 	}
 
-	log.Printf("Saved data store with %d cameras", len(dataStore.Cameras))
+	log.Printf("Saved data store with %d cameras and %d inference servers", len(dataStore.Cameras), len(dataStore.InferenceServers))
 	return nil
 }
 
 func generateCameraID() string {
 	dataStore.Counters.Camera++
 	return fmt.Sprintf("cam_%d", dataStore.Counters.Camera)
+}
+
+func generateInferenceServerID() string {
+	dataStore.Counters.InferenceServer++
+	return fmt.Sprintf("inf_%d", dataStore.Counters.InferenceServer)
 }
 
 // API Handlers
@@ -679,4 +708,159 @@ func getImagesFromDirectory(dir string) ([]ImageInfo, error) {
 func fileExists(filename string) bool {
 	_, err := os.Stat(filename)
 	return !os.IsNotExist(err)
+}
+
+// Inference Server API Handlers
+func (ws *WebServer) handleAPIInferenceServers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case "GET":
+		var serverList []*InferenceServer
+		for _, server := range dataStore.InferenceServers {
+			serverList = append(serverList, server)
+		}
+
+		response := APIResponse{
+			Success: true,
+			Message: "Inference servers retrieved successfully",
+			Data:    serverList,
+		}
+		json.NewEncoder(w).Encode(response)
+
+	case "POST":
+		var newServer InferenceServer
+		if err := json.NewDecoder(r.Body).Decode(&newServer); err != nil {
+			response := APIResponse{
+				Success: false,
+				Message: "Invalid request body",
+				Error:   err.Error(),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if newServer.Name == "" || newServer.URL == "" || newServer.ModelType == "" {
+			response := APIResponse{
+				Success: false,
+				Message: "Name, URL, and ModelType are required",
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if newServer.ID == "" {
+			newServer.ID = generateInferenceServerID()
+		}
+
+		newServer.CreatedAt = time.Now()
+		newServer.UpdatedAt = time.Now()
+		newServer.Enabled = true // Default to enabled
+
+		dataStore.InferenceServers[newServer.ID] = &newServer
+
+		if err := saveDataStore(); err != nil {
+			log.Printf("Warning: Failed to save data store: %v", err)
+		}
+
+		log.Printf("Created inference server: %s (%s)", newServer.ID, newServer.Name)
+
+		response := APIResponse{
+			Success: true,
+			Message: "Inference server created successfully",
+			Data:    &newServer,
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+func (ws *WebServer) handleAPIInferenceServerByID(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	server, exists := dataStore.InferenceServers[id]
+	if !exists {
+		response := APIResponse{
+			Success: false,
+			Message: "Inference server not found",
+		}
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	switch r.Method {
+	case "GET":
+		response := APIResponse{
+			Success: true,
+			Message: "Inference server retrieved successfully",
+			Data:    server,
+		}
+		json.NewEncoder(w).Encode(response)
+
+	case "PUT":
+		var updatedServer InferenceServer
+		if err := json.NewDecoder(r.Body).Decode(&updatedServer); err != nil {
+			response := APIResponse{
+				Success: false,
+				Message: "Invalid request body",
+				Error:   err.Error(),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		updatedServer.ID = id
+		updatedServer.CreatedAt = server.CreatedAt
+		updatedServer.UpdatedAt = time.Now()
+
+		dataStore.InferenceServers[id] = &updatedServer
+
+		if err := saveDataStore(); err != nil {
+			log.Printf("Warning: Failed to save data store: %v", err)
+		}
+
+		log.Printf("Updated inference server: %s", id)
+
+		response := APIResponse{
+			Success: true,
+			Message: "Inference server updated successfully",
+			Data:    &updatedServer,
+		}
+		json.NewEncoder(w).Encode(response)
+
+	case "DELETE":
+		// Remove this server from all cameras that reference it
+		for _, camera := range dataStore.Cameras {
+			for i, serverId := range camera.InferenceServers {
+				if serverId == id {
+					// Remove this server ID from the slice
+					camera.InferenceServers = append(camera.InferenceServers[:i], camera.InferenceServers[i+1:]...)
+					camera.UpdatedAt = time.Now()
+					break
+				}
+			}
+		}
+
+		delete(dataStore.InferenceServers, id)
+
+		if err := saveDataStore(); err != nil {
+			log.Printf("Warning: Failed to save data store: %v", err)
+		}
+
+		log.Printf("Deleted inference server: %s", id)
+
+		response := APIResponse{
+			Success: true,
+			Message: "Inference server deleted successfully",
+		}
+		json.NewEncoder(w).Encode(response)
+	}
 }
