@@ -1,109 +1,29 @@
-name: Build Cam-Stream Docker Image
+name: Build Cam-Stream
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Docker image tag'
-        required: false
-        default: 'latest'
-        type: string
-      push_to_registry:
-        description: 'Push to Docker registry'
-        required: false
-        default: true
-        type: boolean
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/cam-stream
+  push:
+    branches: [ main, develop ]
+    paths: [ 'cam-stream/**' ]
+  pull_request:
+    branches: [ main ]
+    paths: [ 'cam-stream/**' ]
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Container Registry
-        if: ${{ inputs.push_to_registry }}
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ inputs.tag }}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix={{branch}}-
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./cam-stream
-          file: ./cam-stream/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: ${{ inputs.push_to_registry }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            BUILDTIME=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
-            VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
-            REVISION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }}
-
-      - name: Generate deployment info
-        if: ${{ inputs.push_to_registry }}
-        run: |
-          echo "## 🚀 Deployment Info" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Docker Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Usage Example:" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "docker run -d --name cam-stream \\" >> $GITHUB_STEP_SUMMARY
-          echo "  -v ./output:/app/output \\" >> $GITHUB_STEP_SUMMARY
-          echo "  -v ./config.json:/app/config.json \\" >> $GITHUB_STEP_SUMMARY
-          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Configuration:" >> $GITHUB_STEP_SUMMARY
-          echo "Make sure to update \`config.json\` with your RTSP URL and Python backend server URL." >> $GITHUB_STEP_SUMMARY
-
-  notify:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    if: ${{ always() }}
-    steps:
-      - name: Notify Discord
-        uses: nobrayner/discord-webhook@v1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          discord-webhook: ${{ secrets.DISCORD_WEBHOOK }}
-          title: "📷 Cam-Stream Build: ${{ github.repository }}"
-          description: |
-            **Workflow:** ${{ github.workflow }}
-            **Status:** ${{ needs.build-and-push.result }}
-            **Tag:** ${{ inputs.tag }}
-            **Repository:** ${{ github.repository }}
-            **Run URL:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            
-            Image: `ghcr.io/${{ github.repository }}/cam-stream:${{ inputs.tag }}`
-          include-details: "false"
-          color-success: "#17cf48"
-          color-failure: "#eb4034"
-          color-cancelled: "#42daf5"
+    - name: Build cam-stream Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./cam-stream
+        file: ./cam-stream/Dockerfile
+        push: false
+        tags: cam-stream:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
