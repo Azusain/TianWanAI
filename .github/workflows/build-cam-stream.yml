@@ -83,3 +83,27 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Configuration:" >> $GITHUB_STEP_SUMMARY
           echo "Make sure to update \`config.json\` with your RTSP URL and Python backend server URL." >> $GITHUB_STEP_SUMMARY
+
+  notify:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    steps:
+      - name: Notify Discord
+        uses: nobrayner/discord-webhook@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          discord-webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          title: "📷 Cam-Stream Build: ${{ github.repository }}"
+          description: |
+            **Workflow:** ${{ github.workflow }}
+            **Status:** ${{ needs.build-and-push.result }}
+            **Tag:** ${{ inputs.tag }}
+            **Repository:** ${{ github.repository }}
+            **Run URL:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            Image: `ghcr.io/${{ github.repository }}/cam-stream:${{ inputs.tag }}`
+          include-details: "false"
+          color-success: "#17cf48"
+          color-failure: "#eb4034"
+          color-cancelled: "#42daf5"
