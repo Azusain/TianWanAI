@@ -13,7 +13,7 @@ RUN apt-get -y update                                                           
     git submodule update --init --recursive
 
 # runtime.
-FROM nvidia/cuda:10.2-runtime-ubuntu18.04
+FROM nvidia/cuda:10.2-devel-ubuntu18.04
 ENV WORKDIR=/root
 ENV PATH="${WORKDIR}/venv/bin:$PATH"
 WORKDIR ${WORKDIR}
