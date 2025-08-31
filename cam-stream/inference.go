@@ -393,17 +393,8 @@ func ProcessFrameWithFallDetection(frameData []byte, cameraConfig *CameraConfig,
 	// Save if fall was detected
 	shouldSave := fallResponse.FallDetected
 	if shouldSave {
-		log.Printf("🚨 FALL DETECTED in camera %s: %d alerts, %d persons detected", 
-			cameraConfig.ID, len(fallResponse.Results), fallResponse.PersonsCount)
-		
-		// Log confidence scores
-		for _, result := range fallResponse.Results {
-			log.Printf("  Person %s: Fall confidence %.2f (%s)", 
-				result.PersonID, result.Score, result.AlertType)
-		}
-	} else {
-		log.Printf("Camera %s: No fall detected, %d persons tracked", 
-			cameraConfig.ID, fallResponse.PersonsCount)
+		log.Printf("🚨 FALL DETECTED in camera %s: %d alerts", 
+			cameraConfig.ID, len(fallResponse.Results))
 	}
 
 	return processedFrame, shouldSave, nil

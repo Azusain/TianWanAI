@@ -214,11 +214,7 @@ class TemporalFallDetectionService:
             'timestamp': current_time,
             'persons_detected': len(persons),
             'fall_detected': False,
-            'alerts': [],
-            'debug_info': {
-                'model_type': 'ST-GCN' if self.model else 'Pose-based',
-                'sequence_lengths': {}
-            }
+            'alerts': []
         }
         
         if not persons:
@@ -238,9 +234,7 @@ class TemporalFallDetectionService:
             
             self.person_timestamps[camera_id][person_id] = current_time
             
-            # Get current sequence length
-            seq_len = len(self.person_sequences[camera_id][person_id])
-            results['debug_info']['sequence_lengths'][person_id] = seq_len
+            # Continue processing (sequence length tracking removed for simplicity)
             
             # Check for fall detection
             fall_detected, confidence = self._detect_fall_for_person(
@@ -371,36 +365,6 @@ class TemporalFallDetectionService:
                 alert for alert in self.fall_alerts[camera_id]
                 if current_time - alert['timestamp'] < alert_timeout
             ]
-    
-    def get_status(self, camera_id: str = None) -> Dict:
-        """Get service status and statistics"""
-        status = {
-            'version': self.version,
-            'model_loaded': self.model is not None,
-            'device': str(self.device),
-            'sequence_length': self.sequence_length,
-            'confidence_threshold': self.confidence_threshold
-        }
-        
-        if camera_id:
-            status['camera_stats'] = {
-                'active_persons': len(self.person_sequences.get(camera_id, {})),
-                'recent_alerts': len([
-                    alert for alert in self.fall_alerts.get(camera_id, [])
-                    if time.time() - alert['timestamp'] < 300  # Last 5 minutes
-                ])
-            }
-        else:
-            status['global_stats'] = {
-                'active_cameras': len(self.person_sequences),
-                'total_active_persons': sum(len(persons) for persons in self.person_sequences.values()),
-                'total_recent_alerts': sum(
-                    len([alert for alert in alerts if time.time() - alert['timestamp'] < 300])
-                    for alerts in self.fall_alerts.values()
-                )
-            }
-        
-        return status
 
 
 # Service instance (singleton pattern)

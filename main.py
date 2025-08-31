@@ -182,11 +182,6 @@ def app():
                 "err_msg": ServiceStatus.stringify(errno),
                 "api_version": "1.0.0",
                 "model_version": service.version,
-                "camera_id": camera_id,
-                "timestamp": detection_results['timestamp'],
-                "persons_detected": detection_results['persons_detected'],
-                "fall_detected": detection_results['fall_detected'],
-                "debug_info": detection_results['debug_info'],
                 "results": results
             }
             
@@ -199,38 +194,6 @@ def app():
                 "api_version": "1.0.0",
                 "model_version": service.version if hasattr(service, 'version') else "unknown",
                 "results": []
-            }
-    
-    # Fall Detection Status Endpoint
-    @app.route('/fall/status', methods=['GET'])
-    def FallDetectionStatus():
-        """Get fall detection service status and statistics"""
-        if model_type == ModelType.FALL.value and service:
-            try:
-                camera_id = request.args.get('camera_id')
-                status = service.get_status(camera_id)
-                
-                return {
-                    "log_id": uuid4(),
-                    "errno": ServiceStatus.SUCCESS.value,
-                    "err_msg": "SUCCESS",
-                    "api_version": "1.0.0",
-                    "status": status
-                }
-            except Exception as e:
-                logger.error(f"Failed to get fall detection status: {e}")
-                return {
-                    "log_id": uuid4(),
-                    "errno": ServiceStatus.INVALID_CONTENT_TYPE.value,
-                    "err_msg": f"Status error: {str(e)}",
-                    "api_version": "1.0.0"
-                }
-        else:
-            return {
-                "log_id": uuid4(),
-                "errno": ServiceStatus.INVALID_CONTENT_TYPE.value,
-                "err_msg": "Fall detection service not available",
-                "api_version": "1.0.0"
             }
 
     @app.route('/tshirt', methods=['POST'])
