@@ -10,6 +10,8 @@ from ultralytics import YOLO
 import torch
 from transformers import YolosImageProcessor, YolosForObjectDetection
 
+# temporal fall detection
+from fall_detection_temporal import TemporalFallDetectionService
 
 # logger
 from loguru import logger
