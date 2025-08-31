@@ -2,6 +2,21 @@ name: Build and Push Docker Image
 
 on:
   workflow_dispatch:
+    inputs:
+      dockerfile:
+        description: 'Dockerfile to use'
+        required: false
+        default: 'Dockerfile_CUDA_12_6_3_optimized'
+        type: choice
+        options:
+          - 'Dockerfile_CUDA_12_6_3_optimized'
+          - 'Dockerfile_CUDA_12_6_3'
+          - 'Dockerfile_CUDA_11_1_1'
+      tag_suffix:
+        description: 'Tag suffix (e.g., "optimized", "v2")'
+        required: false
+        default: ''
+        type: string
   # push:
   #   branches:
   #     - main
@@ -11,14 +26,63 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Free up disk space
+        run: |
+          echo "=== Before cleanup ==="
+          df -h
+          
+          # Remove unnecessary packages and files
+          sudo apt-get purge -y \
+            firefox \
+            google-chrome-stable \
+            microsoft-edge-stable \
+            dotnet-* \
+            llvm-* \
+            mysql-* \
+            postgresql-* \
+            mono-* \
+            powershell \
+            azure-cli
+          
+          sudo apt-get autoremove -y
+          sudo apt-get autoclean
+          
+          # Remove large directories
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/julia*
+          
+          # Clean Docker
+          docker system prune -af
+          
+          echo "=== After cleanup ==="
+          df -h
+          
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Checkout LFS objects
+        run: git lfs pull
 
       - name: Read version from file
         id: version
         run: |
           VERSION=$(cat version)
+          if [ -n "${{ inputs.tag_suffix }}" ]; then
+            FULL_TAG="${VERSION}-${{ inputs.tag_suffix }}"
+          else
+            FULL_TAG="${VERSION}"
+          fi
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "FULL_TAG=${FULL_TAG}" >> $GITHUB_ENV
+          echo "Using tag: ${FULL_TAG}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -41,9 +105,13 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
-          file: ./Dockerfile_CUDA_12_6_3_optimized
+          file: ./${{ inputs.dockerfile }}
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/tianwan:${{ env.VERSION }}
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/tianwan:${{ env.FULL_TAG }}
+            ${{ secrets.DOCKER_USERNAME }}/tianwan:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   notify:
     needs: build
@@ -55,12 +123,16 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           discord-webhook: ${{ secrets.DISCORD_WEBHOOK }}
-          title: "${{ github.repository }}: ${{ github.workflow }} - ${{ github.sha }}"
+          title: "🐳 Docker Build: ${{ github.repository }} - ${{ env.FULL_TAG }}"
           description: |
-            Workflow: ${{ github.workflow }}
-            Status: ${{ job.status }}
-            Repository: ${{ github.repository }}
-            Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            **Workflow:** ${{ github.workflow }}
+            **Status:** ${{ needs.build.result }}
+            **Dockerfile:** ${{ inputs.dockerfile }}
+            **Tag:** ${{ env.FULL_TAG }}
+            **Repository:** ${{ github.repository }}
+            **Run URL:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            Image: `${{ secrets.DOCKER_USERNAME }}/tianwan:${{ env.FULL_TAG }}`
           include-details: "false"
           color-success: "#17cf48"
           color-failure: "#eb4034"
