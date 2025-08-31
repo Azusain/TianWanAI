@@ -1,0 +1,30 @@
+# downloader.
+FROM ubuntu:18.04 AS downloader
+ENV WORKDIR=/root
+WORKDIR ${WORKDIR}
+COPY . ${WORKDIR}
+RUN apt-get -y update                                                                         && \
+    apt-get install -y curl                                                                  && \
+    curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash && \
+    apt-get install -y git-lfs                                                               && \
+    rm -rf .git/hooks                                                                        && \
+    git lfs install                                                                          && \
+    git lfs pull                                                                             && \
+    git submodule update --init --recursive
+
+# runtime.
+FROM nvidia/cuda:10.2-cudnn7-runtime-ubuntu18.04
+ENV WORKDIR=/root
+ENV PATH="${WORKDIR}/venv/bin:$PATH"
+WORKDIR ${WORKDIR}
+RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime                          && \
+    apt-get update                                                                   && \
+    apt-get install -y python3.8 python3.8-venv python3.8-dev                      && \
+    python3.8 -m venv venv                                                          
+COPY --from=downloader ${WORKDIR} ${WORKDIR}                                    
+RUN pip install torch==1.7.1+cu102 torchvision==0.8.2+cu102 torchaudio==0.7.2 -f https://download.pytorch.org/whl/torch_stable.html && \
+    apt-get install -y libgl1-mesa-glx libglib2.0-0                                 && \
+    pip install -r requirements.txt                                                 && \
+    apt-get clean
+
+CMD ["bash", "run.bash"]

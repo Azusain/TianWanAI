@@ -21,6 +21,7 @@ on:
         options:
           - 'Dockerfile_CUDA_12_6_3_optimized'
           - 'Dockerfile_CUDA_11_1_1'
+          - 'Dockerfile_CUDA_10_2'
 
 jobs:
   build:
