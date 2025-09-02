@@ -3,8 +3,9 @@ import cv2
 import os
 import shutil
 
-def get_frame_from_video(video_name, interval, prefix="res", start_idx=0):
-    save_path = video_name.split('.mp4')[0] + '/'
+def get_frame_from_video(video_name, interval, prefix="res", start_idx=0, max_frames=None):
+    # Use English folder name to avoid path issues with Chinese characters
+    save_path = 'extracted_frames/'
     is_exists = os.path.exists(save_path)
     if not is_exists:
         os.makedirs(save_path)
@@ -32,11 +33,16 @@ def get_frame_from_video(video_name, interval, prefix="res", start_idx=0):
             cv2.imwrite(save_path + save_name, frame)
             if j % 100 == 0:
                 print('image of %s is saved' % save_name)
+            # Stop if we've reached the maximum number of frames
+            if max_frames is not None and j >= max_frames:
+                print(f'Extracted {j} frames, reached maximum limit')
+                break
 
 if __name__ == '__main__':
     get_frame_from_video(
-        video_name='mouse.mp4', # 输入视频路径, 会自动创建同名输出文件夹
-        interval = 3,             # 采样间隔
-        prefix="m",              # 输出名称前缀
-        start_idx=0               # 输出编号起始位置
+        video_name='9月1日.mp4',  # 输入视频路径, 会自动创建同名输出文件夹
+        interval = 4,             # 采样间隔
+        prefix="frame",          # 输出名称前缀
+        start_idx=1,             # 输出编号起始位置
+        max_frames=5000          # 最大提取帧数
     )

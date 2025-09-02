@@ -2,7 +2,7 @@
   "cameras": {},
   "inference_servers": {},
   "counters": {
-    "camera": 1,
+    "camera": 2,
     "inference_server": 0
   }
 }

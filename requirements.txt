@@ -6,3 +6,8 @@ loguru
 gunicorn
 transformers
 numpy
+
+# Fall detection dependencies
+scipy
+scikit-learn
+torch-directml; sys_platform=="win32"
