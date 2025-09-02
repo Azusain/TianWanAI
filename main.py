@@ -67,7 +67,7 @@ def get_service(model_type: str):
   if model_type == ModelType.PONDING.value:
     return YoloDetectionService("models/ponding/weights/best.pt", 640), None
   if model_type == ModelType.MOUSE.value:
-    return YoloDetectionService("models/mouse/weights/mouse_v3.pt", 640), None
+    return YoloDetectionService("models/mouse/weights/mouse_v4.pt", 640), None
   if model_type == ModelType.SMOKE .value:
     return SmokeFileDetector("__SmokeFire/weights/smoke.pt"), None
   if model_type == ModelType.TSHIRT.value:
