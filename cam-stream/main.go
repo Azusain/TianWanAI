@@ -13,6 +13,9 @@ const (
 	OutputDir  = "output"
 )
 
+// Global config variable
+var globalConfig *Config
+
 // autoStartRunningCameras starts all cameras that were marked as running and enabled
 func autoStartRunningCameras(rtspManager *FFmpegCmdRTSPManager) error {
 	var errors []string
@@ -51,13 +54,13 @@ func main() {
 
 	// Load configuration
 	config, err := LoadConfig(ConfigFile)
-	var webPort int
 	if err != nil {
-		log.Printf("Warning: Failed to load config, using default web port 3001")
-		webPort = 3001
+		log.Printf("Warning: Failed to load config, using defaults")
+		globalConfig = DefaultConfig()
 	} else {
-		webPort = config.WebPort
+		globalConfig = config
 	}
+	webPort := globalConfig.WebPort
 
 	// Create output directory
 	if err := os.MkdirAll(OutputDir, 0755); err != nil {

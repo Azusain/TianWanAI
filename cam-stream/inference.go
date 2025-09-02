@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"time"
+	"github.com/google/uuid"
 )
 
 // InferenceClient handles communication with inference server
@@ -403,4 +404,73 @@ func ProcessFrameWithFallDetection(frameData []byte, cameraConfig *CameraConfig,
 // Helper function to check if string contains substring
 func contains(s, substr string) bool {
 	return bytes.Contains([]byte(s), []byte(substr))
+}
+
+// AlertRequest represents the alert request format for management platform
+type AlertRequest struct {
+	Image     string  `json:"image"`
+	RequestID string  `json:"request_id"`
+	Model     string  `json:"model"`
+	CameraKKS string  `json:"camera_kks"`
+	Score     float64 `json:"score"`
+	X1        float64 `json:"x1"`
+	Y1        float64 `json:"y1"`
+	X2        float64 `json:"x2"`
+	Y2        float64 `json:"y2"`
+	Timestamp string  `json:"timestamp"`
+}
+
+// SendAlert sends detection alert to management platform
+func SendAlert(platformURL string, imageData []byte, model string, camera string, score float64, x1, y1, x2, y2 float64) error {
+	if platformURL == "" {
+		return fmt.Errorf("platform URL not configured")
+	}
+
+	// Encode image to base64
+	encodedImage := base64.StdEncoding.EncodeToString(imageData)
+
+	// Create alert request
+	alertReq := AlertRequest{
+		Image:     encodedImage,
+		RequestID: uuid.New().String(),
+		Model:     model,
+		CameraKKS: camera,
+		Score:     score,
+		X1:        x1,
+		Y1:        y1,
+		X2:        x2,
+		Y2:        y2,
+		Timestamp: time.Now().Format("2006-01-02T15:04:05+08:00"),
+	}
+
+	// Marshal request
+	requestBody, err := json.Marshal(alertReq)
+	if err != nil {
+		return fmt.Errorf("failed to marshal alert request: %v", err)
+	}
+
+	// Create HTTP client
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// Send request
+	resp, err := client.Post(
+		platformURL,
+		"application/json",
+		bytes.NewBuffer(requestBody),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to send alert to platform: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return fmt.Errorf("platform returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	log.Printf("Alert sent successfully to platform for camera %s (model: %s, score: %.3f)", 
+		camera, model, score)
+
+	return nil
 }

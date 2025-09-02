@@ -18,11 +18,10 @@ from loguru import logger
 sys.path.append(os.path.join(os.path.dirname(__file__), 'fall-detection'))
 
 try:
-    from ActionsEstLoader import TwoStreamSpatialTemporalGraph
-    import torch_directml  # For DirectML support on Windows
+    from Actionsrecognition.Models import TwoStreamSpatialTemporalGraph
 except ImportError as e:
-    logger.warning(f"Could not import fall detection modules: {e}")
-    logger.info("Make sure you have initialized the fall-detection submodule and installed dependencies")
+    logger.warning(f"Could not import ST-GCN model: {e}")
+    TwoStreamSpatialTemporalGraph = None
 
 class TemporalFallDetectionService:
     """
@@ -48,7 +47,7 @@ class TemporalFallDetectionService:
         self.fall_alerts = defaultdict(list)  # Recent fall detections per camera
         
         # Model configuration
-        self.model_path = model_path or os.path.join("fall-detection", "Models", "TSSTG-model.pth")
+        self.model_path = model_path or os.path.join("fall-detection", "Models", "TSSTG", "tsstg-model.pth")
         self.confidence_threshold = 0.7
         self.alert_cooldown = 3.0  # Seconds between alerts for same person
         
@@ -77,11 +76,19 @@ class TemporalFallDetectionService:
                 self.model = None
                 return
                 
-            # Load ST-GCN model
+            if TwoStreamSpatialTemporalGraph is None:
+                logger.warning("ST-GCN model class not available")
+                logger.info("Using fallback pose-based detection")
+                self.model = None
+                return
+                
+            # Load ST-GCN model with correct parameters
+            graph_args = {'layout': 'openpose', 'strategy': 'spatial'}
+            num_class = 7  # Based on ActionsEstLoader: Standing, Walking, Sitting, Lying Down, Stand up, Sit down, Fall Down
+            
             self.model = TwoStreamSpatialTemporalGraph(
-                in_channels=3,
-                num_class=2,  # Fall/No-Fall
-                graph_cfg={'layout': 'openpose', 'strategy': 'spatial'}
+                graph_args=graph_args,
+                num_class=num_class
             )
             
             # Load weights
@@ -319,7 +326,9 @@ class TemporalFallDetectionService:
             with torch.no_grad():
                 output = self.model(input_tensor)
                 probabilities = torch.softmax(output, dim=1)
-                fall_prob = probabilities[0, 1].item()  # Probability of fall class
+                # Class 6 is 'Fall Down' based on ActionsEstLoader class_names
+                # ['Standing', 'Walking', 'Sitting', 'Lying Down', 'Stand up', 'Sit down', 'Fall Down']
+                fall_prob = probabilities[0, 6].item()  # Probability of Fall Down class
                 
             fall_detected = fall_prob > 0.5
             return fall_detected, fall_prob

@@ -102,8 +102,8 @@ func (m *FFmpegCmdRTSPManager) captureFrames(stream *FFmpegCameraStream) {
 		case <-stream.stopChannel:
 			return
 		default:
-			// Get frame rate from config
-			frameRate := fmt.Sprintf("%d", config.FrameRate)
+			// Get frame rate from global config
+			frameRate := fmt.Sprintf("%d", globalConfig.FrameRate)
 			
 			// FFmpeg command to capture frames continuously
 			// -rtsp_transport tcp: Use TCP for more reliable connection
@@ -156,7 +156,7 @@ func (m *FFmpegCmdRTSPManager) captureFrames(stream *FFmpegCameraStream) {
 // monitorFrameFile monitors the output file and updates lastFrame
 func (m *FFmpegCmdRTSPManager) monitorFrameFile(stream *FFmpegCameraStream, outputPath string) {
 	// Calculate monitoring interval based on frame rate (with minimum of 33ms for 30+ FPS)
-	monitorInterval := time.Duration(1000/config.FrameRate) * time.Millisecond
+	monitorInterval := time.Duration(1000/globalConfig.FrameRate) * time.Millisecond
 	if monitorInterval < 33*time.Millisecond {
 		monitorInterval = 33 * time.Millisecond // Cap at ~30 FPS monitoring
 	}
