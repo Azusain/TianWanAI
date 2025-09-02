@@ -1,0 +1,7 @@
+{
+  "debug_mode": true,
+  "frame_rate": 30,
+  "output_width": 1920,
+  "output_height": 1080,
+  "web_port": 3000
+}

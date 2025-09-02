@@ -281,19 +281,9 @@
                     <input type="text" id="serverName" class="form-control" placeholder="例如: YOLO检测服务器" required>
                 </div>
                 <div class="form-group">
-                    <label for="serverUrl">服务器URL *</label>
-                    <input type="url" id="serverUrlInput" class="form-control" placeholder="http://localhost:8080/api/detect" required>
-                </div>
-                <div class="form-group">
-                    <label for="modelType">模型类型 *</label>
-                    <select id="modelType" class="form-control" required>
-                        <option value="">请选择模型类型</option>
-                        <option value="yolo">YOLO目标检测</option>
-                        <option value="fall">跌倒检测</option>
-                        <option value="person">人员检测</option>
-                        <option value="vehicle">车辆检测</option>
-                        <option value="custom">自定义模型</option>
-                    </select>
+                    <label for="serverUrl">服务器地址 *</label>
+                    <input type="url" id="serverUrlInput" class="form-control" placeholder="例如: http://localhost:8080/gesture 或 http://192.168.1.100:8080/fall" required>
+                    <small style="color: #7f8c8d; font-size: 12px;">直接输入完整的推理服务器地址，包括端点路径</small>
                 </div>
                 <div class="form-group">
                     <label for="serverDescription">描述</label>
@@ -393,12 +383,7 @@
                             </code>
                         </td>
                         <td>
-                            ${camera.server_url ? 
-                                `<code style="font-size: 11px; background: #e8f5e8; padding: 2px 6px; border-radius: 3px; color: #2d7d2d;">
-                                    ${this.escapeHtml(camera.server_url)}
-                                </code>` : 
-                                `<span style="color: #95a5a6; font-size: 12px;">未设置</span>`
-                            }
+                            ${this.renderInferenceServerBindings(camera)}
                         </td>
                         <td>
                             <span class="status-indicator ${camera.running ? 'status-running' : 'status-stopped'}"></span>
@@ -406,6 +391,9 @@
                         </td>
                         <td>${this.formatDate(camera.created_at)}</td>
                         <td>
+                            <button class="btn btn-primary" onclick="cameraManager.editCamera('${camera.id}')" style="margin-right: 5px;">
+                                编辑
+                            </button>
                             <button class="btn btn-danger" onclick="cameraManager.deleteCamera('${camera.id}')">
                                 删除
                             </button>
@@ -438,22 +426,34 @@
                 if (servers.length === 0) {
                     container.innerHTML = `
                         <div style="color: #7f8c8d; font-size: 14px;">
-                            暂无可用的推理服务器，请先在“推理服务器”标签页中添加
+                            暂无可用的推理服务器，请先在"推理服务器"标签页中添加
                         </div>
                     `;
                     return;
                 }
                 
                 container.innerHTML = servers.map(server => `
-                    <div style="margin-bottom: 8px;">
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" name="inferenceServer" value="${server.id}" style="margin-right: 8px;">
-                            <span style="font-weight: 500;">${this.escapeHtml(server.name)}</span>
-                            <span style="background: #e8f4fd; color: #1e88e5; padding: 1px 6px; border-radius: 8px; font-size: 10px; margin-left: 8px;">
-                                ${this.escapeHtml(server.model_type)}
-                            </span>
-                            ${!server.enabled ? '<span style="color: #e74c3c; font-size: 10px; margin-left: 8px;">(禁用)</span>' : ''}
-                        </label>
+                    <div style="margin-bottom: 12px; padding: 8px; border: 1px solid #eee; border-radius: 6px; background: #fafafa;">
+                        <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                            <label style="display: flex; align-items: center; cursor: pointer; flex: 1;">
+                                <input type="checkbox" name="inferenceServer" value="${server.id}" style="margin-right: 8px;" onchange="toggleThresholdInput('${server.id}')">
+                                <span style="font-weight: 500;">${this.escapeHtml(server.name)}</span>
+                                <span style="background: #e8f4fd; color: #1e88e5; padding: 1px 6px; border-radius: 8px; font-size: 10px; margin-left: 8px;">
+                                    ${this.escapeHtml(server.model_type)}
+                                </span>
+                                ${!server.enabled ? '<span style="color: #e74c3c; font-size: 10px; margin-left: 8px;">(禁用)</span>' : ''}
+                            </label>
+                        </div>
+                        <div id="threshold-${server.id}" style="display: none; margin-left: 24px;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <label style="font-size: 12px; color: #666; min-width: 80px;">置信度阈值:</label>
+                                <input type="range" name="threshold-${server.id}" min="0" max="100" value="50" style="flex: 1;" oninput="updateThresholdValue('${server.id}', this.value)">
+                                <span id="threshold-value-${server.id}" style="font-size: 12px; color: #333; min-width: 40px;">50%</span>
+                            </div>
+                            <div style="font-size: 11px; color: #999; margin-top: 4px;">
+                                ${server.model_type === 'fall' ? '跌倒检测不使用阈值' : '检测置信度达到此阈值时保存图片'}
+                            </div>
+                        </div>
                     </div>
                 `).join('');
             }
@@ -479,9 +479,17 @@
                     running: true
                 };
                 
-                // 优先使用新的多服务器模式
+                // 使用新的服务器绑定模式（包含阈值）
                 if (selectedServers.length > 0) {
-                    cameraData.inference_servers = selectedServers;
+                    const bindings = selectedServers.map(serverId => {
+                        const thresholdInput = document.querySelector(`input[name="threshold-${serverId}"]`);
+                        const threshold = thresholdInput ? parseFloat(thresholdInput.value) / 100.0 : 0.5;
+                        return {
+                            server_id: serverId,
+                            threshold: threshold
+                        };
+                    });
+                    cameraData.inference_server_bindings = bindings;
                 } else if (serverUrl) {
                     // 向后兼容：使用旧的单服务器模式
                     cameraData.server_url = serverUrl;
@@ -506,6 +514,218 @@
                         alert('摄像头添加成功并已自动启动！');
                     } else {
                         alert('添加摄像头失败: ' + (result.error || result.message));
+                    }
+                } catch (error) {
+                    console.error('网络错误:', error);
+                    alert('网络错误，请稍后重试');
+                }
+            }
+            
+            async editCamera(cameraId) {
+                try {
+                    // 获取摄像头当前配置
+                    const response = await fetch(`${this.apiBase}/cameras/${cameraId}`);
+                    const result = await response.json();
+                    
+                    if (!result.success) {
+                        alert('获取摄像头信息失败: ' + (result.error || result.message));
+                        return;
+                    }
+                    
+                    const camera = result.data;
+                    this.showEditDialog(camera);
+                } catch (error) {
+                    console.error('网络错误:', error);
+                    alert('网络错误，请稍后重试');
+                }
+            }
+            
+            showEditDialog(camera) {
+                // 创建编辑对话框
+                const dialog = document.createElement('div');
+                dialog.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0,0,0,0.5);
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    z-index: 1000;
+                `;
+                
+                dialog.innerHTML = `
+                    <div style="background: white; padding: 30px; border-radius: 12px; width: 90%; max-width: 600px; max-height: 80vh; overflow-y: auto;">
+                        <h3 style="margin-bottom: 20px; color: #2c3e50;">编辑摄像头: ${this.escapeHtml(camera.name)}</h3>
+                        <form id="editCameraForm">
+                            <div class="form-group">
+                                <label>摄像头名称 *</label>
+                                <input type="text" id="editCameraName" class="form-control" value="${this.escapeHtml(camera.name)}" required>
+                            </div>
+                            <div class="form-group">
+                                <label>RTSP地址 *</label>
+                                <input type="text" id="editRtspUrl" class="form-control" value="${this.escapeHtml(camera.rtsp_url)}" required>
+                            </div>
+                            <div class="form-group">
+                                <label>推理服务器绑定</label>
+                                <div id="editInferenceServersList" style="border: 1px solid #ddd; border-radius: 6px; padding: 10px; max-height: 200px; overflow-y: auto;">
+                                    <div style="color: #7f8c8d; font-size: 14px;">加载中...</div>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                                <button type="button" class="btn" style="background: #95a5a6; color: white;" onclick="this.parentElement.parentElement.parentElement.parentElement.remove()">取消</button>
+                                <button type="submit" class="btn btn-primary">保存</button>
+                            </div>
+                        </form>
+                    </div>
+                `;
+                
+                document.body.appendChild(dialog);
+                
+                // 加载推理服务器列表为编辑对话框
+                this.loadInferenceServersForEdit(camera);
+                
+                // 设置表单提交事件
+                document.getElementById('editCameraForm').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.updateCamera(camera.id, dialog);
+                });
+                
+                // 点击外部关闭对话框
+                dialog.addEventListener('click', (e) => {
+                    if (e.target === dialog) {
+                        dialog.remove();
+                    }
+                });
+            }
+            
+            async loadInferenceServersForEdit(camera) {
+                try {
+                    const response = await fetch(`${this.apiBase}/inference-servers`);
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.displayInferenceServersListForEdit(result.data || [], camera);
+                    } else {
+                        document.getElementById('editInferenceServersList').innerHTML = `
+                            <div style="color: #e74c3c; font-size: 14px;">加载失败</div>
+                        `;
+                    }
+                } catch (error) {
+                    document.getElementById('editInferenceServersList').innerHTML = `
+                        <div style="color: #e74c3c; font-size: 14px;">网络错误</div>
+                    `;
+                }
+            }
+            
+            displayInferenceServersListForEdit(servers, camera) {
+                const container = document.getElementById('editInferenceServersList');
+                
+                if (servers.length === 0) {
+                    container.innerHTML = `
+                        <div style="color: #7f8c8d; font-size: 14px;">暂无可用的推理服务器</div>
+                    `;
+                    return;
+                }
+                
+                // 获取当前摄像头的绑定信息
+                const currentBindings = camera.inference_server_bindings || [];
+                const bindingMap = {};
+                currentBindings.forEach(binding => {
+                    bindingMap[binding.server_id] = binding.threshold;
+                });
+                
+                container.innerHTML = servers.map(server => {
+                    const isSelected = bindingMap.hasOwnProperty(server.id);
+                    const threshold = isSelected ? Math.round(bindingMap[server.id] * 100) : 50;
+                    
+                    return `
+                        <div style="margin-bottom: 12px; padding: 8px; border: 1px solid #eee; border-radius: 6px; background: #fafafa;">
+                            <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                                <label style="display: flex; align-items: center; cursor: pointer; flex: 1;">
+                                    <input type="checkbox" name="editInferenceServer" value="${server.id}" 
+                                           ${isSelected ? 'checked' : ''} 
+                                           style="margin-right: 8px;" 
+                                           onchange="toggleEditThresholdInput('${server.id}')">
+                                    <span style="font-weight: 500;">${this.escapeHtml(server.name)}</span>
+                                    <span style="background: #e8f4fd; color: #1e88e5; padding: 1px 6px; border-radius: 8px; font-size: 10px; margin-left: 8px;">
+                                        ${this.escapeHtml(server.model_type)}
+                                    </span>
+                                    ${!server.enabled ? '<span style="color: #e74c3c; font-size: 10px; margin-left: 8px;">(禁用)</span>' : ''}
+                                </label>
+                            </div>
+                            <div id="edit-threshold-${server.id}" style="display: ${isSelected ? 'block' : 'none'}; margin-left: 24px;">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <label style="font-size: 12px; color: #666; min-width: 80px;">置信度阈值:</label>
+                                    <input type="range" name="edit-threshold-${server.id}" min="0" max="100" value="${threshold}" 
+                                           style="flex: 1;" 
+                                           oninput="updateEditThresholdValue('${server.id}', this.value)">
+                                    <span id="edit-threshold-value-${server.id}" style="font-size: 12px; color: #333; min-width: 40px;">${threshold}%</span>
+                                </div>
+                                <div style="font-size: 11px; color: #999; margin-top: 4px;">
+                                    ${server.model_type === 'fall' ? '跌倒检测不使用阈值' : '检测置信度达到此阈值时保存图片'}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+            
+            async updateCamera(cameraId, dialog) {
+                const name = document.getElementById('editCameraName').value.trim();
+                const rtspUrl = document.getElementById('editRtspUrl').value.trim();
+                
+                if (!name || !rtspUrl) {
+                    alert('请填写所有必填字段');
+                    return;
+                }
+                
+                // 获取选中的推理服务器
+                const selectedServers = Array.from(document.querySelectorAll('input[name="editInferenceServer"]:checked'))
+                    .map(checkbox => checkbox.value);
+                
+                const cameraData = {
+                    name: name,
+                    rtsp_url: rtspUrl,
+                    enabled: true,
+                    running: true
+                };
+                
+                // 使用新的服务器绑定模式（包含阈值）
+                if (selectedServers.length > 0) {
+                    const bindings = selectedServers.map(serverId => {
+                        const thresholdInput = document.querySelector(`input[name="edit-threshold-${serverId}"]`);
+                        const threshold = thresholdInput ? parseFloat(thresholdInput.value) / 100.0 : 0.5;
+                        return {
+                            server_id: serverId,
+                            threshold: threshold
+                        };
+                    });
+                    cameraData.inference_server_bindings = bindings;
+                } else {
+                    // 清空绑定
+                    cameraData.inference_server_bindings = [];
+                }
+                
+                try {
+                    const response = await fetch(`${this.apiBase}/cameras/${cameraId}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(cameraData)
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        dialog.remove();
+                        this.loadCameras();
+                        alert('摄像头更新成功！');
+                    } else {
+                        alert('更新摄像头失败: ' + (result.error || result.message));
                     }
                 } catch (error) {
                     console.error('网络错误:', error);
@@ -549,6 +769,29 @@
                     return date.toLocaleString('zh-CN');
                 } catch (error) {
                     return dateString;
+                }
+            }
+            
+            renderInferenceServerBindings(camera) {
+                // Handle both new binding format and legacy format
+                if (camera.inference_server_bindings && camera.inference_server_bindings.length > 0) {
+                    return camera.inference_server_bindings.map(binding => `
+                        <div style="margin-bottom: 4px; font-size: 11px;">
+                            <code style="background: #e8f5e8; color: #2d7d2d; padding: 1px 4px; border-radius: 3px;">
+                                ${this.escapeHtml(binding.server_id)}
+                            </code>
+                            <span style="color: #666; margin-left: 4px;">
+                                ${Math.round(binding.threshold * 100)}%
+                            </span>
+                        </div>
+                    `).join('');
+                } else if (camera.server_url) {
+                    // Legacy single server format
+                    return `<code style="font-size: 11px; background: #e8f5e8; padding: 2px 6px; border-radius: 3px; color: #2d7d2d;">
+                        ${this.escapeHtml(camera.server_url)}
+                    </code>`;
+                } else {
+                    return `<span style="color: #95a5a6; font-size: 12px;">未设置</span>`;
                 }
             }
         }
@@ -620,12 +863,30 @@
             async addServer() {
                 const name = document.getElementById('serverName').value.trim();
                 const url = document.getElementById('serverUrlInput').value.trim();
-                const modelType = document.getElementById('modelType').value;
                 const description = document.getElementById('serverDescription').value.trim();
                 
-                if (!name || !url || !modelType) {
-                    alert('请填写所有必填字段');
+                if (!name || !url) {
+                    alert('请填写服务器名称和地址字段');
                     return;
+                }
+                
+                // 验证服务器名称只能包含英文字母、数字、下划线和连字符
+                const namePattern = /^[a-zA-Z0-9_-]+$/;
+                if (!namePattern.test(name)) {
+                    alert('服务器名称只能包含英文字母、数字、下划线和连字符');
+                    return;
+                }
+                
+                // 从 URL 中提取模型类型（端点路径）
+                let modelType = 'auto';
+                try {
+                    const urlObj = new URL(url);
+                    const pathParts = urlObj.pathname.split('/').filter(part => part);
+                    if (pathParts.length > 0) {
+                        modelType = pathParts[pathParts.length - 1]; // 使用最后一个路径段作为模型类型
+                    }
+                } catch (error) {
+                    console.log('URL解析失败，使用默认的 auto 类型');
                 }
                 
                 const serverData = {
@@ -730,6 +991,40 @@
             e.preventDefault();
             serverManager.addServer();
         });
+        
+        // 阈值管理功能
+        function toggleThresholdInput(serverId) {
+            const checkbox = document.querySelector(`input[name="inferenceServer"][value="${serverId}"]`);
+            const thresholdDiv = document.getElementById(`threshold-${serverId}`);
+            
+            if (checkbox && thresholdDiv) {
+                thresholdDiv.style.display = checkbox.checked ? 'block' : 'none';
+            }
+        }
+        
+        function updateThresholdValue(serverId, value) {
+            const valueSpan = document.getElementById(`threshold-value-${serverId}`);
+            if (valueSpan) {
+                valueSpan.textContent = `${value}%`;
+            }
+        }
+        
+        // 编辑对话框中的阈值管理功能
+        function toggleEditThresholdInput(serverId) {
+            const checkbox = document.querySelector(`input[name="editInferenceServer"][value="${serverId}"]`);
+            const thresholdDiv = document.getElementById(`edit-threshold-${serverId}`);
+            
+            if (checkbox && thresholdDiv) {
+                thresholdDiv.style.display = checkbox.checked ? 'block' : 'none';
+            }
+        }
+        
+        function updateEditThresholdValue(serverId, value) {
+            const valueSpan = document.getElementById(`edit-threshold-value-${serverId}`);
+            if (valueSpan) {
+                valueSpan.textContent = `${value}%`;
+            }
+        }
     </script>
 </body>
 </html>
