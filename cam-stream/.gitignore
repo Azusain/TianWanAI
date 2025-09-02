@@ -11,3 +11,4 @@ test_loop.mp4
 # OS files
 .DS_Store
 Thumbs.db
+**/*.exe

@@ -275,17 +275,57 @@
             loadImages();
         });
 
-        function populateServerSelect() {
-            const knownServers = ['Mouse', 'Human', 'Vehicle', 'Fall', 'YOLOv8', 'Detection'];
+        async function populateServerSelect() {
             const select = document.getElementById('serverSelect');
             select.innerHTML = '<option value="">所有服务器</option>';
             
-            knownServers.forEach(serverName => {
-                const option = document.createElement('option');
-                option.value = serverName;
-                option.textContent = serverName;
-                select.appendChild(option);
-            });
+            try {
+                // 扫描output目录获取实际存在的服务器目录
+                const response = await fetch('/output/');
+                const html = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                const links = doc.querySelectorAll('a[href]');
+                
+                const actualServers = [];
+                links.forEach(link => {
+                    const href = link.getAttribute('href');
+                    // 过滤掉父目录和文件，只保留目录
+                    if (href && href.endsWith('/') && href !== '../') {
+                        const serverName = href.replace('/', '');
+                        actualServers.push(serverName);
+                    }
+                });
+                
+                console.log('发现的实际推理服务器目录:', actualServers);
+                
+                // 添加实际存在的服务器选项
+                actualServers.forEach(serverName => {
+                    const option = document.createElement('option');
+                    option.value = serverName;
+                    option.textContent = serverName;
+                    select.appendChild(option);
+                });
+                
+                // 保存到全局变量
+                servers = actualServers;
+                
+                if (actualServers.length === 0) {
+                    const noOption = document.createElement('option');
+                    noOption.value = '';
+                    noOption.textContent = '暂无推理服务器目录';
+                    noOption.disabled = true;
+                    select.appendChild(noOption);
+                }
+                
+            } catch (error) {
+                console.error('加载服务器目录失败:', error);
+                const errorOption = document.createElement('option');
+                errorOption.value = '';
+                errorOption.textContent = '加载失败';
+                errorOption.disabled = true;
+                select.appendChild(errorOption);
+            }
             
             select.addEventListener('change', function() {
                 currentServer = this.value;
@@ -301,11 +341,10 @@
         async function showManualImageList() {
             console.log('扫描推理服务器目录中的图片...');
             
-            const knownServers = ['Mouse', 'Human', 'Vehicle', 'Fall', 'YOLOv8', 'Detection'];
             const allImages = [];
             
-            // 如果选择了特定服务器，只扫描该服务器
-            const serversToScan = currentServer ? [currentServer] : knownServers;
+            // 如果选择了特定服务器，只扫描该服务器；否则扫描所有发现的服务器
+            const serversToScan = currentServer ? [currentServer] : servers;
             
             for (const serverName of serversToScan) {
                 try {
