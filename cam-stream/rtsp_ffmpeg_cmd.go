@@ -191,41 +191,26 @@ func (m *FFmpegCmdRTSPManager) monitorFrameFile(stream *FFmpegCameraStream, outp
 
 			// Process frame with inference if configured
 			processedFrame := frameData
-			shouldSave := false
-			if cameraConfig != nil && cameraConfig.ServerUrl != "" {
+			var modelResults map[string]*ModelResult
+			if cameraConfig != nil && (len(cameraConfig.InferenceServers) > 0 || cameraConfig.ServerUrl != "") {
 				var err error
-				processedFrame, shouldSave, err = ProcessFrameWithInference(frameData, cameraConfig)
+				processedFrame, modelResults, err = ProcessFrameWithInference(frameData, cameraConfig)
 				if err != nil {
 					log.Printf("Warning: Failed to process frame with inference for camera %s: %v", stream.ID, err)
 					processedFrame = frameData // Use original frame on error
-					shouldSave = false
 				}
 			} else {
-				// No inference, just add timestamp overlay - never save
+				// No inference, just add timestamp overlay
 				var detections []Detection // Empty detections
 				processedFrame, err = DrawDetections(frameData, detections, stream.Name)
 				if err != nil {
 					processedFrame = frameData // Use original on error
 				}
-				shouldSave = false // Never save when no inference
 			}
 			
-			// Only save if we detected real objects (not test detections)
-			if shouldSave {
-				// Create camera-specific directory
-				cameraDir := filepath.Join(m.outputDir, stream.ID)
-				if err := os.MkdirAll(cameraDir, 0755); err != nil {
-					log.Printf("Warning: Failed to create camera directory for %s: %v", stream.ID, err)
-				} else {
-					// Save processed frame with detections using timestamp
-					timestamp := time.Now().Format("20060102_150405")
-					processedPath := filepath.Join(cameraDir, fmt.Sprintf("%s.jpg", timestamp))
-					if err := os.WriteFile(processedPath, processedFrame, 0644); err != nil {
-						log.Printf("Warning: Failed to save processed frame for camera %s: %v", stream.ID, err)
-					} else {
-						log.Printf("Saved detection frame for camera %s: %s", stream.ID, processedPath)
-					}
-				}
+			// Save results by model type (new architecture)
+			if modelResults != nil {
+				m.saveResultsByModel(stream.ID, stream.Name, frameData, processedFrame, modelResults)
 			}
 			
 			// Always update global latest for web interface
@@ -336,4 +321,41 @@ func (m *FFmpegCmdRTSPManager) GetLatestFrame(cameraID string) ([]byte, time.Tim
 	copy(frameCopy, stream.lastFrame)
 
 	return frameCopy, stream.lastUpdate, nil
+}
+
+// saveResultsByModel saves detection results organized by model type
+func (m *FFmpegCmdRTSPManager) saveResultsByModel(cameraID, cameraName string, originalFrame, processedFrame []byte, modelResults map[string]*ModelResult) {
+	timestamp := time.Now().Format("20060102_150405")
+	
+	for modelType, result := range modelResults {
+		if !result.ShouldSave {
+			continue
+		}
+		
+		// Create model-specific directory
+		modelDir := filepath.Join(m.outputDir, "models", modelType)
+		if err := os.MkdirAll(modelDir, 0755); err != nil {
+			log.Printf("Warning: Failed to create model directory for %s: %v", modelType, err)
+			continue
+		}
+		
+		// Save processed frame with detections
+		filename := fmt.Sprintf("%s_%s_%s.jpg", timestamp, cameraID, modelType)
+		processedPath := filepath.Join(modelDir, filename)
+		
+		if err := os.WriteFile(processedPath, processedFrame, 0644); err != nil {
+			log.Printf("Warning: Failed to save processed frame for model %s: %v", modelType, err)
+			continue
+		}
+		
+		log.Printf("Saved detection frame - Camera: %s, Model: %s, Detections: %d, Path: %s", 
+			cameraName, modelType, len(result.Detections), processedPath)
+		
+		// Also save a copy in legacy camera directory for backward compatibility
+		cameraDir := filepath.Join(m.outputDir, cameraID)
+		if err := os.MkdirAll(cameraDir, 0755); err == nil {
+			legacyPath := filepath.Join(cameraDir, fmt.Sprintf("%s_%s.jpg", timestamp, modelType))
+			os.WriteFile(legacyPath, processedFrame, 0644)
+		}
+	}
 }
