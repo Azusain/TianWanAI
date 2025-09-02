@@ -55,8 +55,10 @@ COPY --from=builder /app/cam-stream-backend .
 # Copy static HTML files needed by the web interface
 COPY --from=builder /app/*.html ./
 
-# Copy fonts directory for Chinese text support
-COPY --from=builder /app/fonts ./fonts
+# Copy necessary directories
+COPY --from=builder /app/web ./web
+COPY --from=builder /app/assets ./assets
+COPY --from=builder /app/configs ./configs
 
 # Change ownership to non-root user
 RUN chown -R appuser:appuser /app
@@ -65,11 +67,11 @@ RUN chown -R appuser:appuser /app
 USER appuser
 
 # Expose the port used by the application
-EXPOSE 3000
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/api/status || exit 1
+    CMD curl -f http://localhost:8080/api/status || exit 1
 
 # Command to run the application
 CMD ["./cam-stream-backend"]
