@@ -203,7 +203,17 @@
         <p>管理和监控你的RTSP摄像头</p>
     </div>
 
-    <!-- 添加摄像头表单 -->
+    <!-- 标签页导航 -->
+    <div class="card">
+        <div style="border-bottom: 1px solid #ddd; margin-bottom: 20px;">
+            <button class="btn" id="camerasTab" style="border: none; background: #3498db; color: white; margin-right: 10px;" onclick="switchTab('cameras')">摄像头管理</button>
+            <button class="btn" id="serversTab" style="border: none; background: #95a5a6; color: white;" onclick="switchTab('servers')">推理服务器</button>
+        </div>
+    </div>
+
+    <!-- 摄像头管理标签页 -->
+    <div id="camerasSection">
+        <!-- 添加摄像头表单 -->
     <div class="card">
         <h3>添加摄像头</h3>
         <form id="cameraForm">
@@ -216,9 +226,16 @@
                 <input type="text" id="rtspUrl" class="form-control" placeholder="rtsp://username:password@ip:port/path" required>
             </div>
             <div class="form-group">
-                <label for="serverUrl">推理服务器地址</label>
+                <label for="inferenceServers">推理服务器</label>
+                <div id="inferenceServersList" style="border: 1px solid #ddd; border-radius: 6px; padding: 10px; max-height: 150px; overflow-y: auto;">
+                    <div style="color: #7f8c8d; font-size: 14px;">加载推理服务器列表...</div>
+                </div>
+                <small style="color: #7f8c8d; font-size: 12px;">可选：选择一个或多个推理服务器</small>
+            </div>
+            <div class="form-group" style="display: none;" id="legacyServerGroup">
+                <label for="serverUrl">推理服务器地址（旧版）</label>
                 <input type="url" id="serverUrl" class="form-control" placeholder="http://localhost:8080/api/detect" value="">
-                <small style="color: #7f8c8d; font-size: 12px;">可选：AI推理服务器的API地址</small>
+                <small style="color: #7f8c8d; font-size: 12px;">兼容模式：直接输入推理服务器API地址</small>
             </div>
             <button type="submit" class="btn btn-primary">添加摄像头</button>
         </form>
@@ -251,6 +268,70 @@
             </table>
         </div>
     </div>
+    </div>
+
+    <!-- 推理服务器管理标签页 -->
+    <div id="serversSection" style="display: none;">
+        <!-- 添加推理服务器表单 -->
+        <div class="card">
+            <h3>添加推理服务器</h3>
+            <form id="serverForm">
+                <div class="form-group">
+                    <label for="serverName">服务器名称 *</label>
+                    <input type="text" id="serverName" class="form-control" placeholder="例如: YOLO检测服务器" required>
+                </div>
+                <div class="form-group">
+                    <label for="serverUrl">服务器URL *</label>
+                    <input type="url" id="serverUrlInput" class="form-control" placeholder="http://localhost:8080/api/detect" required>
+                </div>
+                <div class="form-group">
+                    <label for="modelType">模型类型 *</label>
+                    <select id="modelType" class="form-control" required>
+                        <option value="">请选择模型类型</option>
+                        <option value="yolo">YOLO目标检测</option>
+                        <option value="fall">跌倒检测</option>
+                        <option value="person">人员检测</option>
+                        <option value="vehicle">车辆检测</option>
+                        <option value="custom">自定义模型</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="serverDescription">描述</label>
+                    <input type="text" id="serverDescription" class="form-control" placeholder="可选：服务器描述">
+                </div>
+                <button type="submit" class="btn btn-primary">添加服务器</button>
+            </form>
+        </div>
+
+        <!-- 推理服务器列表 -->
+        <div class="card">
+            <h3>推理服务器列表</h3>
+            <div id="serversLoading" class="loading">
+                <p>加载中...</p>
+            </div>
+            <div id="serversEmpty" class="empty-state" style="display: none;">
+                <h4>暂无推理服务器</h4>
+                <p>请使用上面的表单添加第一个推理服务器</p>
+            </div>
+            <div id="serversTable" style="display: none;">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>名称</th>
+                            <th>URL</th>
+                            <th>模型类型</th>
+                            <th>状态</th>
+                            <th>描述</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="serversTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 
     <script>
         class CameraManager {
@@ -261,6 +342,7 @@
             
             init() {
                 this.loadCameras();
+                this.loadInferenceServersForForm();
                 this.setupEventListeners();
             }
             
@@ -332,10 +414,58 @@
                 `).join('');
             }
             
+            async loadInferenceServersForForm() {
+                try {
+                    const response = await fetch(`${this.apiBase}/inference-servers`);
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.displayInferenceServersList(result.data || []);
+                    } else {
+                        console.error('加载推理服务器失败:', result.error);
+                    }
+                } catch (error) {
+                    console.error('网络错误:', error);
+                    document.getElementById('inferenceServersList').innerHTML = `
+                        <div style="color: #e74c3c; font-size: 14px;">加载失败，请刷新页面重试</div>
+                    `;
+                }
+            }
+            
+            displayInferenceServersList(servers) {
+                const container = document.getElementById('inferenceServersList');
+                
+                if (servers.length === 0) {
+                    container.innerHTML = `
+                        <div style="color: #7f8c8d; font-size: 14px;">
+                            暂无可用的推理服务器，请先在“推理服务器”标签页中添加
+                        </div>
+                    `;
+                    return;
+                }
+                
+                container.innerHTML = servers.map(server => `
+                    <div style="margin-bottom: 8px;">
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" name="inferenceServer" value="${server.id}" style="margin-right: 8px;">
+                            <span style="font-weight: 500;">${this.escapeHtml(server.name)}</span>
+                            <span style="background: #e8f4fd; color: #1e88e5; padding: 1px 6px; border-radius: 8px; font-size: 10px; margin-left: 8px;">
+                                ${this.escapeHtml(server.model_type)}
+                            </span>
+                            ${!server.enabled ? '<span style="color: #e74c3c; font-size: 10px; margin-left: 8px;">(禁用)</span>' : ''}
+                        </label>
+                    </div>
+                `).join('');
+            }
+            
             async addCamera() {
                 const name = document.getElementById('cameraName').value.trim();
                 const rtspUrl = document.getElementById('rtspUrl').value.trim();
                 const serverUrl = document.getElementById('serverUrl').value.trim();
+                
+                // 获取选中的推理服务器
+                const selectedServers = Array.from(document.querySelectorAll('input[name="inferenceServer"]:checked'))
+                    .map(checkbox => checkbox.value);
                 
                 if (!name || !rtspUrl) {
                     alert('请填写所有必填字段');
@@ -349,8 +479,11 @@
                     running: true
                 };
                 
-                // 只有在用户输入了推理服务器地址时才添加该字段
-                if (serverUrl) {
+                // 优先使用新的多服务器模式
+                if (selectedServers.length > 0) {
+                    cameraData.inference_servers = selectedServers;
+                } else if (serverUrl) {
+                    // 向后兼容：使用旧的单服务器模式
                     cameraData.server_url = serverUrl;
                 }
                 
@@ -420,8 +553,183 @@
             }
         }
         
-        // 初始化摄像头管理器
+        class InferenceServerManager {
+            constructor() {
+                this.apiBase = '/api';
+            }
+            
+            async loadServers() {
+                try {
+                    const response = await fetch(`${this.apiBase}/inference-servers`);
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.displayServers(result.data || []);
+                    } else {
+                        console.error('加载推理服务器失败:', result.error);
+                    }
+                } catch (error) {
+                    console.error('网络错误:', error);
+                } finally {
+                    document.getElementById('serversLoading').style.display = 'none';
+                }
+            }
+            
+            displayServers(servers) {
+                const tbody = document.getElementById('serversTableBody');
+                const emptyState = document.getElementById('serversEmpty');
+                const table = document.getElementById('serversTable');
+                
+                if (servers.length === 0) {
+                    emptyState.style.display = 'block';
+                    table.style.display = 'none';
+                    return;
+                }
+                
+                emptyState.style.display = 'none';
+                table.style.display = 'block';
+                
+                tbody.innerHTML = servers.map(server => `
+                    <tr>
+                        <td>${this.escapeHtml(server.name)}</td>
+                        <td>
+                            <code style="font-size: 11px; background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">
+                                ${this.escapeHtml(server.url)}
+                            </code>
+                        </td>
+                        <td>
+                            <span style="background: #e8f4fd; color: #1e88e5; padding: 2px 8px; border-radius: 12px; font-size: 11px;">
+                                ${this.escapeHtml(server.model_type)}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="status-indicator ${server.enabled ? 'status-running' : 'status-stopped'}"></span>
+                            ${server.enabled ? '启用' : '禁用'}
+                        </td>
+                        <td>${server.description || '-'}</td>
+                        <td>${this.formatDate(server.created_at)}</td>
+                        <td>
+                            <button class="btn btn-danger" onclick="serverManager.deleteServer('${server.id}')">
+                                删除
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+            
+            async addServer() {
+                const name = document.getElementById('serverName').value.trim();
+                const url = document.getElementById('serverUrlInput').value.trim();
+                const modelType = document.getElementById('modelType').value;
+                const description = document.getElementById('serverDescription').value.trim();
+                
+                if (!name || !url || !modelType) {
+                    alert('请填写所有必填字段');
+                    return;
+                }
+                
+                const serverData = {
+                    name: name,
+                    url: url,
+                    model_type: modelType,
+                    description: description,
+                    enabled: true
+                };
+                
+                try {
+                    const response = await fetch(`${this.apiBase}/inference-servers`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(serverData)
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        document.getElementById('serverForm').reset();
+                        this.loadServers();
+                        alert('推理服务器添加成功！');
+                    } else {
+                        alert('添加推理服务器失败: ' + (result.error || result.message));
+                    }
+                } catch (error) {
+                    console.error('网络错误:', error);
+                    alert('网络错误，请稍后重试');
+                }
+            }
+            
+            async deleteServer(serverId) {
+                if (!confirm('确定要删除这个推理服务器吗？此操作无法撤销。')) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(`${this.apiBase}/inference-servers/${serverId}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.loadServers();
+                        alert('推理服务器删除成功！');
+                    } else {
+                        alert('删除推理服务器失败: ' + (result.error || result.message));
+                    }
+                } catch (error) {
+                    console.error('网络错误:', error);
+                    alert('网络错误，请稍后重试');
+                }
+            }
+            
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+            
+            formatDate(dateString) {
+                try {
+                    const date = new Date(dateString);
+                    return date.toLocaleString('zh-CN');
+                } catch (error) {
+                    return dateString;
+                }
+            }
+        }
+        
+        // 标签页切换功能
+        function switchTab(tab) {
+            const camerasTab = document.getElementById('camerasTab');
+            const serversTab = document.getElementById('serversTab');
+            const camerasSection = document.getElementById('camerasSection');
+            const serversSection = document.getElementById('serversSection');
+            
+            if (tab === 'cameras') {
+                camerasTab.style.background = '#3498db';
+                serversTab.style.background = '#95a5a6';
+                camerasSection.style.display = 'block';
+                serversSection.style.display = 'none';
+            } else if (tab === 'servers') {
+                camerasTab.style.background = '#95a5a6';
+                serversTab.style.background = '#3498db';
+                camerasSection.style.display = 'none';
+                serversSection.style.display = 'block';
+                serverManager.loadServers();
+            }
+        }
+        
+        // 初始化管理器
         const cameraManager = new CameraManager();
+        const serverManager = new InferenceServerManager();
+        
+        // 设置推理服务器表单事件监听
+        document.getElementById('serverForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            serverManager.addServer();
+        });
     </script>
 </body>
 </html>
