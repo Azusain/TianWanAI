@@ -63,11 +63,11 @@ def validate_img_format():
 # TODO: move this to configuration file.
 def get_service(model_type: str):
   if model_type == ModelType.GESTURE.value:
-    return YoloDetectionService("models/gesture/weights/best.pt", 640), None
+    return YoloDetectionService("models/gesture/weights/gesture_v2.pt", 640), None
   if model_type == ModelType.PONDING.value:
     return YoloDetectionService("models/ponding/weights/best.pt", 640), None
   if model_type == ModelType.MOUSE.value:
-    return YoloDetectionService("models/mouse/weights/best.pt", 640), None
+    return YoloDetectionService("models/mouse/weights/mouse_v3.pt", 640), None
   if model_type == ModelType.SMOKE .value:
     return SmokeFileDetector("__SmokeFire/weights/smoke.pt"), None
   if model_type == ModelType.TSHIRT.value:
@@ -122,19 +122,12 @@ def app():
             xyxyn=xyxyn
         )
     
-    # Temporal Fall Detection using ST-GCN
+    # Temporal Fall Detection using ST-GCN - Now follows unified design pattern
     @app.route('/fall', methods=['POST'])
     def FallDetect():
         img, errno = validate_img_format()
         if img is None:
-            return {
-                "log_id": uuid4(),
-                "errno": errno,
-                "err_msg": ServiceStatus.stringify(errno),
-                "api_version": "1.0.0",
-                "model_version": service.version,
-                "results": []
-            }
+            return service.Response(errno=errno)
             
         # Get camera ID from request (default to 'default' if not provided)
         camera_id = request.json.get('camera_id', 'default')
@@ -143,58 +136,41 @@ def app():
         try:
             detection_results = service.process_frame(img, camera_id)
             
-            # Convert to TianWan API format
-            results = []
-            errno = ServiceStatus.SUCCESS.value if detection_results['fall_detected'] else ServiceStatus.NO_OBJECT_DETECTED.value
+            # Convert to unified format (score, xyxyn) like other models
+            scores = []
+            xyxyn = []
             
-            # Convert alerts to standard format
+            # Convert alerts to standard YOLO-like format
             for alert in detection_results['alerts']:
                 bbox = alert['bbox']  # [x1, y1, x2, y2] in pixels
                 H, W = img.shape[:2]
                 
-                # Convert to normalized format
+                # Convert to normalized xyxy format like other models
                 x1, y1, x2, y2 = bbox
-                center_x = (x1 + x2) / 2 / W
-                center_y = (y1 + y2) / 2 / H
-                width = (x2 - x1) / W
-                height = (y2 - y1) / H
-                left = center_x - width / 2
-                top = center_y - height / 2
+                x1_norm = x1 / W
+                y1_norm = y1 / H  
+                x2_norm = x2 / W
+                y2_norm = y2 / H
                 
-                results.append({
-                    "score": alert['confidence'],
-                    "person_id": alert['person_id'],
-                    "alert_type": alert['alert_type'],
-                    "location": {
-                        "left": left,
-                        "top": top,
-                        "width": width,
-                        "height": height
-                    }
-                })
+                scores.append(alert['confidence'])
+                xyxyn.append([x1_norm, y1_norm, x2_norm, y2_norm])
                 
             if detection_results['fall_detected']:
-                logger.warning(f"Fall detected in camera {camera_id}: {len(results)} alerts")
+                logger.warning(f"Fall detected in camera {camera_id}: {len(scores)} alerts")
+                errno = ServiceStatus.SUCCESS.value
+            else:
+                errno = ServiceStatus.NO_OBJECT_DETECTED.value
             
-            return {
-                "log_id": uuid4(),
-                "errno": errno,
-                "err_msg": ServiceStatus.stringify(errno),
-                "api_version": "1.0.0",
-                "model_version": service.version,
-                "results": results
-            }
+            # Use the same response format as other models
+            return service.Response(
+                errno=errno,
+                score=scores,
+                xyxyn=xyxyn
+            )
             
         except Exception as e:
             logger.error(f"Fall detection failed: {e}")
-            return {
-                "log_id": uuid4(),
-                "errno": ServiceStatus.INVALID_IMAGE_FORMAT.value,
-                "err_msg": f"Fall detection error: {str(e)}",
-                "api_version": "1.0.0",
-                "model_version": service.version if hasattr(service, 'version') else "unknown",
-                "results": []
-            }
+            return service.Response(errno=ServiceStatus.INVALID_IMAGE_FORMAT.value)
 
     @app.route('/tshirt', methods=['POST'])
     def TshirtDetect():

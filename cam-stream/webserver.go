@@ -91,15 +91,93 @@ func (ws *WebServer) Start() error {
 	return http.ListenAndServe(fmt.Sprintf(":%d", ws.port), router)
 }
 
-// handleIndex serves the image viewer page
+// handleIndex serves the main page with links to different sections
 func (ws *WebServer) handleIndex(w http.ResponseWriter, r *http.Request) {
-	content, err := ioutil.ReadFile("image_viewer.html")
-	if err != nil {
-		http.Error(w, "Could not load image viewer interface: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	content := `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cam-Stream 监控平台</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+            padding: 50px 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 40px;
+            font-size: 1rem;
+        }
+        .nav-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+        .nav-item {
+            background: white;
+            padding: 30px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            color: #333;
+            border: 1px solid #e0e0e0;
+            transition: all 0.2s;
+        }
+        .nav-item:hover {
+            border-color: #3498db;
+            box-shadow: 0 4px 12px rgba(52, 152, 219, 0.15);
+        }
+        .nav-icon {
+            font-size: 2rem;
+            margin-bottom: 15px;
+            display: block;
+        }
+        .nav-title {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Cam-Stream 监控平台</h1>
+        <div class="subtitle">智能视频监控与AI检测系统</div>
+        
+        <div class="nav-grid">
+            <a href="/cameras" class="nav-item">
+                <span class="nav-icon">⚙️</span>
+                <div class="nav-title">摄像头管理</div>
+            </a>
+            <a href="/images" class="nav-item">
+                <span class="nav-icon">📷</span>
+                <div class="nav-title">图片查看器</div>
+            </a>
+            <a href="/api/debug" class="nav-item">
+                <span class="nav-icon">🔧</span>
+                <div class="nav-title">系统调试</div>
+            </a>
+        </div>
+    </div>
+</body>
+</html>
+	`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(content)
+	w.Write([]byte(content))
 }
 
 // handleCameraManagement serves the camera management page
@@ -136,18 +214,25 @@ type InferenceServer struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// InferenceServerBinding represents a binding between camera and inference server with threshold
+type InferenceServerBinding struct {
+	ServerID  string  `json:"server_id"`
+	Threshold float64 `json:"threshold"` // Confidence threshold (0.0-1.0) for saving images
+}
+
 type CameraConfig struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	RTSPUrl         string   `json:"rtsp_url"`
-	InferenceServers []string `json:"inference_servers,omitempty"` // Array of inference server IDs
-	Enabled         bool     `json:"enabled"`
-	Running         bool     `json:"running"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID                     string                     `json:"id"`
+	Name                   string                     `json:"name"`
+	RTSPUrl                string                     `json:"rtsp_url"`
+	InferenceServerBindings []InferenceServerBinding   `json:"inference_server_bindings,omitempty"` // Array of server bindings with thresholds
+	Enabled                bool                       `json:"enabled"`
+	Running                bool                       `json:"running"`
+	CreatedAt              time.Time                  `json:"created_at"`
+	UpdatedAt              time.Time                  `json:"updated_at"`
 	// Keep these for backward compatibility during migration
-	ServerUrl string `json:"server_url,omitempty"` // Deprecated
-	ModelType string `json:"model_type,omitempty"` // Deprecated
+	InferenceServers []string `json:"inference_servers,omitempty"` // Deprecated - migrate to bindings
+	ServerUrl        string   `json:"server_url,omitempty"`        // Deprecated
+	ModelType        string   `json:"model_type,omitempty"`        // Deprecated
 }
 
 
@@ -741,14 +826,19 @@ func (ws *WebServer) handleAPIInferenceServers(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		if newServer.Name == "" || newServer.URL == "" || newServer.ModelType == "" {
+		if newServer.Name == "" || newServer.URL == "" {
 			response := APIResponse{
 				Success: false,
-				Message: "Name, URL, and ModelType are required",
+				Message: "Name and URL are required",
 			}
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(response)
 			return
+		}
+
+		// Set default model type if not provided
+		if newServer.ModelType == "" {
+			newServer.ModelType = "auto"
 		}
 
 		if newServer.ID == "" {

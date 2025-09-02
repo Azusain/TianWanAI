@@ -1,8 +1,35 @@
 {
-  "cameras": {},
-  "inference_servers": {},
+  "cameras": {
+    "cam_8": {
+      "id": "cam_8",
+      "name": "一号摄像头",
+      "rtsp_url": "rtsp://192.168.31.48:8554/test",
+      "inference_server_bindings": [
+        {
+          "server_id": "inf_3",
+          "threshold": 0.7
+        }
+      ],
+      "enabled": true,
+      "running": true,
+      "created_at": "2025-09-03T00:02:03.3825857+08:00",
+      "updated_at": "2025-09-03T01:15:36.2621603+08:00"
+    }
+  },
+  "inference_servers": {
+    "inf_3": {
+      "id": "inf_3",
+      "name": "Mouse",
+      "url": "http://192.168.31.48:8080/mouse",
+      "model_type": "mouse",
+      "description": "试试",
+      "enabled": true,
+      "created_at": "2025-09-02T23:49:52.6629735+08:00",
+      "updated_at": "2025-09-02T23:49:52.6629735+08:00"
+    }
+  },
   "counters": {
-    "camera": 2,
-    "inference_server": 0
+    "camera": 8,
+    "inference_server": 3
   }
 }

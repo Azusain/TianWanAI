@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	ConfigFile = "config.json"
+	ConfigFile = "configs/config.json"
 	OutputDir  = "output"
 )
 

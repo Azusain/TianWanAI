@@ -124,8 +124,6 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 		return nil, fmt.Errorf("inference server returned HTML instead of JSON - service may not be running at %s", url)
 	}
 
-	// Log response for debugging
-	log.Printf("Inference server response: %s", string(body))
 
 	// Parse response
 	var response InferenceResponse
@@ -139,8 +137,15 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 	}
 
 	// Check if inference was successful (errno == 0 means success)
-	if response.Errno != 0 {
+	// Note: NO_OBJECT_DETECTED is not an error, it's a valid result with no detections
+	if response.Errno != 0 && response.ErrMsg != "NO_OBJECT_DETECTED" {
 		return nil, fmt.Errorf("inference failed: %s (errno: %d)", response.ErrMsg, response.Errno)
+	}
+	
+	// Log when no objects are detected (for debugging)
+	if response.ErrMsg == "NO_OBJECT_DETECTED" {
+		log.Printf("No objects detected by inference server - returning empty detections")
+		return []Detection{}, nil // Return empty detections, not an error
 	}
 
 	// Get actual image dimensions for coordinate conversion
@@ -151,7 +156,6 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 		img.Width = 1920
 		img.Height = 1080
 	}
-	log.Printf("Image dimensions: %dx%d", img.Width, img.Height)
 
 	// Convert Python server results to our Detection format
 	var detections []Detection
@@ -189,10 +193,6 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 			continue
 		}
 
-		// Debug: log coordinate conversion
-		log.Printf("Converting coordinates: Left=%.3f, Top=%.3f, Width=%.3f, Height=%.3f -> (%d,%d,%d,%d)",
-			result.Location.Left, result.Location.Top, result.Location.Width, result.Location.Height,
-			x1, y1, x2, y2)
 
 		// Use class name from server response, or default to "detected_object"
 		className := result.Class
@@ -211,7 +211,7 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 		detections = append(detections, detection)
 	}
 
-	log.Printf("Detected %d real objects from inference server", len(detections))
+	// Don't log here - let the threshold logic in ProcessFrameWithMultipleInference handle logging
 
 	return detections, nil
 }
@@ -239,15 +239,17 @@ type FallDetectionResult struct {
 	Location  Location `json:"location"`
 }
 
-// ProcessFrameForFallDetection processes a frame specifically for fall detection
-func (ic *InferenceClient) ProcessFrameForFallDetection(imageData []byte, cameraID string) (*FallDetectionResponse, error) {
-	// Encode image to base64
+// ProcessFrameForFallDetection processes a frame for fall detection using unified API pattern
+func (ic *InferenceClient) ProcessFrameForFallDetection(imageData []byte, cameraID string) ([]Detection, error) {
+	// Now use the same DetectObjects method with "fall" model type
+	// This maintains the camera_id in the request for fall detection context
 	encodedImage := base64.StdEncoding.EncodeToString(imageData)
 
-	// Create request for fall detection
-	request := map[string]interface{}{
-		"image":     encodedImage,
-		"camera_id": cameraID,
+	// Create unified request format
+	request := InferenceRequest{
+		Image:     encodedImage,
+		ModelType: "fall",
+		CameraID:  cameraID, // Fall detection still needs camera ID for temporal context
 	}
 
 	requestBody, err := json.Marshal(request)
@@ -255,10 +257,10 @@ func (ic *InferenceClient) ProcessFrameForFallDetection(imageData []byte, camera
 		return nil, fmt.Errorf("failed to marshal fall detection request: %v", err)
 	}
 
-	// Build URL for fall detection endpoint
+	// Use unified endpoint pattern
 	url := ic.serverURL + "/fall"
 
-	// Send request to fall detection API
+	// Send request using standard format
 	resp, err := ic.client.Post(
 		url,
 		"application/json",
@@ -272,6 +274,9 @@ func (ic *InferenceClient) ProcessFrameForFallDetection(imageData []byte, camera
 	// Check HTTP status
 	if resp.StatusCode != http.StatusOK {
 		body, _ := ioutil.ReadAll(resp.Body)
+		if len(body) > 0 && body[0] == '<' {
+			return nil, fmt.Errorf("fall detection API returned HTML (status %d) - check if service is running at %s", resp.StatusCode, url)
+		}
 		return nil, fmt.Errorf("fall detection API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -281,18 +286,98 @@ func (ic *InferenceClient) ProcessFrameForFallDetection(imageData []byte, camera
 		return nil, fmt.Errorf("failed to read fall detection response: %v", err)
 	}
 
-	// Parse response
-	var response FallDetectionResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse fall detection response: %v", err)
+	// Check if response is HTML (error page)
+	if len(body) > 0 && body[0] == '<' {
+		return nil, fmt.Errorf("fall detection API returned HTML instead of JSON - service may not be running at %s", url)
 	}
 
-	// Check if inference was successful
+
+	// Parse response using unified format
+	var response InferenceResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		// Log first 200 chars of response for debugging
+		preview := string(body)
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		return nil, fmt.Errorf("failed to parse fall detection response: %v (response preview: %s)", err, preview)
+	}
+
+	// Check if inference was successful (errno == 0 means success)
 	if response.Errno != 0 {
 		return nil, fmt.Errorf("fall detection failed: %s (errno: %d)", response.ErrMsg, response.Errno)
 	}
 
-	return &response, nil
+	// Get actual image dimensions for coordinate conversion
+	imgReader := bytes.NewReader(imageData)
+	img, err := jpeg.DecodeConfig(imgReader)
+	if err != nil {
+		log.Printf("Warning: Failed to decode image config, using defaults: %v", err)
+		img.Width = 1920
+		img.Height = 1080
+	}
+
+	// Convert unified response to Detection format
+	var detections []Detection
+	for _, result := range response.Results {
+		// Skip results with no score (no detection)
+		if result.Score <= 0 || result.Location.Left < 0 {
+			log.Printf("Skipping invalid fall detection with score %.3f", result.Score)
+			continue
+		}
+
+		// Convert normalized coordinates to pixels
+		x1 := int(result.Location.Left * float64(img.Width))
+		y1 := int(result.Location.Top * float64(img.Height))
+		x2 := int((result.Location.Left + result.Location.Width) * float64(img.Width))
+		y2 := int((result.Location.Top + result.Location.Height) * float64(img.Height))
+
+		// Ensure coordinates are within image bounds
+		if x1 < 0 {
+			x1 = 0
+		}
+		if y1 < 0 {
+			y1 = 0
+		}
+		if x2 > img.Width {
+			x2 = img.Width
+		}
+		if y2 > img.Height {
+			y2 = img.Height
+		}
+
+		// Skip invalid boxes
+		if x2 <= x1 || y2 <= y1 {
+			log.Printf("Skipping invalid fall detection box coordinates: (%d,%d,%d,%d)", x1, y1, x2, y2)
+			continue
+		}
+
+		// Create fall detection with special class name
+		className := "FALL_DETECTED"
+		if result.Score >= 0.8 {
+			className = "HIGH_CONFIDENCE_FALL"
+		}
+
+		detection := Detection{
+			Class:      className,
+			Confidence: result.Score,
+			X1:         x1,
+			Y1:         y1,
+			X2:         x2,
+			Y2:         y2,
+		}
+		detections = append(detections, detection)
+	}
+
+	// Only log when fall detections are found
+	if len(detections) > 0 {
+		log.Printf("🚨 Fall detection completed: %d alerts with confidences:", len(detections))
+		for _, det := range detections {
+			log.Printf("  %s: %.1f%%", det.Class, det.Confidence*100)
+		}
+	}
+
+	return detections, nil
 }
 
 // ModelResult represents detection results for a specific model
@@ -307,7 +392,7 @@ type ModelResult struct {
 // ProcessFrame processes a frame with inference using new multi-server architecture
 func ProcessFrameWithInference(frameData []byte, cameraConfig *CameraConfig) ([]byte, map[string]*ModelResult, error) {
 	// Use new multi-server processing if inference servers are configured
-	if len(cameraConfig.InferenceServers) > 0 {
+	if len(cameraConfig.InferenceServerBindings) > 0 || len(cameraConfig.InferenceServers) > 0 {
 		return ProcessFrameWithMultipleInference(frameData, cameraConfig)
 	}
 
@@ -374,21 +459,42 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 	results := make(map[string]*ModelResult)
 	allDetections := []Detection{}
 	
+	// Determine server list based on configuration format
+	var serverProcessList []struct{
+		ServerID  string
+		Threshold float64
+	}
+	
+	// Use new binding format if available, otherwise fall back to legacy format
+	if len(cameraConfig.InferenceServerBindings) > 0 {
+		for _, binding := range cameraConfig.InferenceServerBindings {
+			serverProcessList = append(serverProcessList, struct{
+				ServerID  string
+				Threshold float64
+			}{binding.ServerID, binding.Threshold})
+		}
+	} else if len(cameraConfig.InferenceServers) > 0 {
+		// Legacy format - use default threshold of 0.5 for backward compatibility
+		for _, serverID := range cameraConfig.InferenceServers {
+			serverProcessList = append(serverProcessList, struct{
+				ServerID  string
+				Threshold float64
+			}{serverID, 0.5})
+		}
+	}
+	
 	// Process each inference server
-	for _, serverID := range cameraConfig.InferenceServers {
-		server, exists := dataStore.InferenceServers[serverID]
+	for _, serverConfig := range serverProcessList {
+		server, exists := dataStore.InferenceServers[serverConfig.ServerID]
 		if !exists {
-			log.Printf("Warning: Inference server %s not found for camera %s", serverID, cameraConfig.ID)
+			log.Printf("Warning: Inference server %s not found for camera %s", serverConfig.ServerID, cameraConfig.ID)
 			continue
 		}
 		
 		if !server.Enabled {
-			log.Printf("Skipping disabled inference server %s for camera %s", serverID, cameraConfig.ID)
+			log.Printf("Skipping disabled inference server %s for camera %s", serverConfig.ServerID, cameraConfig.ID)
 			continue
 		}
-		
-		log.Printf("Processing camera %s with inference server %s (model: %s)", 
-			cameraConfig.ID, server.Name, server.ModelType)
 		
 		// Create inference client
 		client := NewInferenceClient(server.URL)
@@ -399,55 +505,25 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 		var err error
 		
 		if server.ModelType == "fall" {
-			// Handle fall detection
-			fallResponse, fallErr := client.ProcessFrameForFallDetection(frameData, cameraConfig.ID)
-			if fallErr != nil {
-				log.Printf("Warning: Fall detection failed for server %s: %v", server.Name, fallErr)
+			// Handle fall detection using unified API
+			detections, err = client.ProcessFrameForFallDetection(frameData, cameraConfig.ID)
+			if err != nil {
+				log.Printf("Warning: Fall detection failed for server %s: %v", server.Name, err)
 				results[server.ModelType] = &ModelResult{
 					ModelType:  server.ModelType,
-					ServerID:   serverID,
+					ServerID:   serverConfig.ServerID,
 					Detections: []Detection{},
 					ShouldSave: false,
-					Error:      fallErr,
+					Error:      err,
 				}
 				continue
 			}
 			
-			// Convert fall detection results to Detection format
-			for _, result := range fallResponse.Results {
-				// Get actual image dimensions for coordinate conversion
-				imgReader := bytes.NewReader(frameData)
-				img, imgErr := jpeg.DecodeConfig(imgReader)
-				if imgErr != nil {
-					log.Printf("Warning: Failed to decode image config: %v", imgErr)
-					img.Width = 1920
-					img.Height = 1080
-				}
-				
-				// Convert normalized coordinates to pixels
-				x1 := int(result.Location.Left * float64(img.Width))
-				y1 := int(result.Location.Top * float64(img.Height))
-				x2 := int((result.Location.Left + result.Location.Width) * float64(img.Width))
-				y2 := int((result.Location.Top + result.Location.Height) * float64(img.Height))
-				
-				// Create detection with fall-specific class name
-				className := fmt.Sprintf("FALL_ALERT_%s", result.PersonID)
-				if result.Score >= 0.8 {
-					className = fmt.Sprintf("HIGH_FALL_%s", result.PersonID)
-				}
-				
-				detection := Detection{
-					Class:      className,
-					Confidence: result.Score,
-					X1:         x1,
-					Y1:         y1,
-					X2:         x2,
-					Y2:         y2,
-				}
-				detections = append(detections, detection)
+			// For fall detection, save if any falls were detected (threshold not applicable for falls)
+			shouldSave = len(detections) > 0
+			if shouldSave {
+				log.Printf("🚨 FALL DETECTED by server %s: %d alerts", server.Name, len(detections))
 			}
-			
-			shouldSave = fallResponse.FallDetected
 		} else {
 			// Regular object detection
 			detections, err = client.DetectObjects(frameData, server.ModelType)
@@ -455,20 +531,32 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 				log.Printf("Warning: Inference failed for server %s: %v", server.Name, err)
 				results[server.ModelType] = &ModelResult{
 					ModelType:  server.ModelType,
-					ServerID:   serverID,
+					ServerID:   serverConfig.ServerID,
 					Detections: []Detection{},
 					ShouldSave: false,
 					Error:      err,
 				}
 				continue
 			}
-			shouldSave = len(detections) > 0
+			
+			// Apply confidence threshold - save if any detection meets threshold
+			shouldSave = false
+			for _, detection := range detections {
+				if detection.Confidence >= serverConfig.Threshold {
+					shouldSave = true
+					break
+				}
+			}
+			
+			if shouldSave {
+				log.Printf("Threshold met for server %s (threshold: %.1f%%) - saving image", server.Name, serverConfig.Threshold*100)
+			}
 		}
 		
 		// Store results for this model
 		results[server.ModelType] = &ModelResult{
 			ModelType:  server.ModelType,
-			ServerID:   serverID,
+			ServerID:   serverConfig.ServerID,
 			Detections: detections,
 			ShouldSave: shouldSave,
 			Error:      nil,
@@ -477,8 +565,14 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 		// Collect all detections for drawing
 		allDetections = append(allDetections, detections...)
 		
-		log.Printf("Camera %s, Server %s (model: %s): %d detections, save: %v", 
-			cameraConfig.ID, server.Name, server.ModelType, len(detections), shouldSave)
+		// Only log when detections meet threshold and will be saved
+		if shouldSave && len(detections) > 0 {
+			log.Printf("Camera %s, Server %s (%s): %d detections with confidences:", 
+				cameraConfig.ID, server.Name, server.ModelType, len(detections))
+			for _, det := range detections {
+				log.Printf("  %s: %.1f%%", det.Class, det.Confidence*100)
+			}
+		}
 	}
 	
 	// Draw all detections on frame
@@ -488,56 +582,31 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 		return frameData, results, nil
 	}
 	
-	log.Printf("Camera %s: Processed with %d inference servers, total %d detections", 
-		cameraConfig.ID, len(cameraConfig.InferenceServers), len(allDetections))
+	// Only log summary when threshold-meeting detections are saved
+	hasThresholdMeetingDetections := false
+	for _, result := range results {
+		if result.ShouldSave {
+			hasThresholdMeetingDetections = true
+			break
+		}
+	}
+	if hasThresholdMeetingDetections {
+		log.Printf("Camera %s: %d total detections from %d inference servers (saving images)", 
+			cameraConfig.ID, len(allDetections), len(serverProcessList))
+	}
 	
 	return processedFrame, results, nil
 }
 
-// ProcessFrameWithFallDetection processes a frame with fall detection
+// ProcessFrameWithFallDetection processes a frame with fall detection using unified API
 func ProcessFrameWithFallDetection(frameData []byte, cameraConfig *CameraConfig, client *InferenceClient) ([]byte, bool, error) {
-	// Call fall detection API
-	fallResponse, err := client.ProcessFrameForFallDetection(frameData, cameraConfig.ID)
+	// Call unified fall detection API
+	detections, err := client.ProcessFrameForFallDetection(frameData, cameraConfig.ID)
 	if err != nil {
 		log.Printf("Warning: Fall detection failed for camera %s: %v", cameraConfig.ID, err)
 		// Still draw timestamp overlay even if inference fails
 		processedFrame, _ := DrawDetections(frameData, []Detection{}, cameraConfig.Name)
 		return processedFrame, false, nil
-	}
-
-	// Convert fall detection results to Detection format for drawing
-	var detections []Detection
-	for _, result := range fallResponse.Results {
-		// Get actual image dimensions for coordinate conversion
-		imgReader := bytes.NewReader(frameData)
-		img, err := jpeg.DecodeConfig(imgReader)
-		if err != nil {
-			log.Printf("Warning: Failed to decode image config: %v", err)
-			img.Width = 1920
-			img.Height = 1080
-		}
-
-		// Convert normalized coordinates to pixels
-		x1 := int(result.Location.Left * float64(img.Width))
-		y1 := int(result.Location.Top * float64(img.Height))
-		x2 := int((result.Location.Left + result.Location.Width) * float64(img.Width))
-		y2 := int((result.Location.Top + result.Location.Height) * float64(img.Height))
-
-		// Create detection with fall-specific class name
-		className := fmt.Sprintf("FALL_ALERT_%s", result.PersonID)
-		if result.Score >= 0.8 {
-			className = fmt.Sprintf("HIGH_FALL_%s", result.PersonID)
-		}
-
-		detection := Detection{
-			Class:      className,
-			Confidence: result.Score, // 🎯 This is the fall confidence!
-			X1:         x1,
-			Y1:         y1,
-			X2:         x2,
-			Y2:         y2,
-		}
-		detections = append(detections, detection)
 	}
 
 	// Draw fall detections on frame
@@ -547,11 +616,11 @@ func ProcessFrameWithFallDetection(frameData []byte, cameraConfig *CameraConfig,
 		return frameData, false, nil
 	}
 
-	// Save if fall was detected
-	shouldSave := fallResponse.FallDetected
+	// Save if any falls were detected
+	shouldSave := len(detections) > 0
 	if shouldSave {
 		log.Printf("🚨 FALL DETECTED in camera %s: %d alerts", 
-			cameraConfig.ID, len(fallResponse.Results))
+			cameraConfig.ID, len(detections))
 	}
 
 	return processedFrame, shouldSave, nil

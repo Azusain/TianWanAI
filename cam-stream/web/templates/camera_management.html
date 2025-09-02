@@ -383,7 +383,12 @@
                             </code>
                         </td>
                         <td>
-                            ${this.renderInferenceServerBindings(camera)}
+                            ${camera.server_url ? 
+                                `<code style="font-size: 11px; background: #e8f5e8; padding: 2px 6px; border-radius: 3px; color: #2d7d2d;">
+                                    ${this.escapeHtml(camera.server_url)}
+                                </code>` : 
+                                `<span style="color: #95a5a6; font-size: 12px;">未设置</span>`
+                            }
                         </td>
                         <td>
                             <span class="status-indicator ${camera.running ? 'status-running' : 'status-stopped'}"></span>
@@ -769,29 +774,6 @@
                     return date.toLocaleString('zh-CN');
                 } catch (error) {
                     return dateString;
-                }
-            }
-            
-            renderInferenceServerBindings(camera) {
-                // Handle both new binding format and legacy format
-                if (camera.inference_server_bindings && camera.inference_server_bindings.length > 0) {
-                    return camera.inference_server_bindings.map(binding => `
-                        <div style="margin-bottom: 4px; font-size: 11px;">
-                            <code style="background: #e8f5e8; color: #2d7d2d; padding: 1px 4px; border-radius: 3px;">
-                                ${this.escapeHtml(binding.server_id)}
-                            </code>
-                            <span style="color: #666; margin-left: 4px;">
-                                ${Math.round(binding.threshold * 100)}%
-                            </span>
-                        </div>
-                    `).join('');
-                } else if (camera.server_url) {
-                    // Legacy single server format
-                    return `<code style="font-size: 11px; background: #e8f5e8; padding: 2px 6px; border-radius: 3px; color: #2d7d2d;">
-                        ${this.escapeHtml(camera.server_url)}
-                    </code>`;
-                } else {
-                    return `<span style="color: #95a5a6; font-size: 12px;">未设置</span>`;
                 }
             }
         }

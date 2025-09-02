@@ -163,14 +163,7 @@ func (m *FFmpegCmdRTSPManager) monitorFrameFile(stream *FFmpegCameraStream, outp
 	ticker := time.NewTicker(monitorInterval)
 	defer ticker.Stop()
 
-	// Get camera config for inference
-	var cameraConfig *CameraConfig
-	for _, cam := range dataStore.Cameras {
-		if cam.ID == stream.ID {
-			cameraConfig = cam
-			break
-		}
-	}
+	// Camera config will be reloaded on each frame to ensure latest settings
 
 	for {
 		select {
@@ -189,10 +182,19 @@ func (m *FFmpegCmdRTSPManager) monitorFrameFile(stream *FFmpegCameraStream, outp
 				continue // Invalid JPEG, skip
 			}
 
+			// Get latest camera config for inference (reload to get updated thresholds)
+			var cameraConfig *CameraConfig
+			for _, cam := range dataStore.Cameras {
+				if cam.ID == stream.ID {
+					cameraConfig = cam
+					break
+				}
+			}
+
 			// Process frame with inference if configured
 			processedFrame := frameData
 			var modelResults map[string]*ModelResult
-			if cameraConfig != nil && (len(cameraConfig.InferenceServers) > 0 || cameraConfig.ServerUrl != "") {
+			if cameraConfig != nil && (len(cameraConfig.InferenceServerBindings) > 0 || len(cameraConfig.InferenceServers) > 0 || cameraConfig.ServerUrl != "") {
 				var err error
 				processedFrame, modelResults, err = ProcessFrameWithInference(frameData, cameraConfig)
 				if err != nil {
@@ -223,10 +225,7 @@ func (m *FFmpegCmdRTSPManager) monitorFrameFile(stream *FFmpegCameraStream, outp
 			stream.lastUpdate = time.Now()
 			stream.mutex.Unlock()
 
-			// Log occasionally to show it's working
-			if time.Now().Unix()%10 == 0 {
-				log.Printf("Camera %s: captured frame, size: %d bytes", stream.ID, len(processedFrame))
-			}
+			// Frame processing completed silently
 		}
 	}
 }
@@ -323,7 +322,7 @@ func (m *FFmpegCmdRTSPManager) GetLatestFrame(cameraID string) ([]byte, time.Tim
 	return frameCopy, stream.lastUpdate, nil
 }
 
-// saveResultsByModel saves detection results organized by model type
+// saveResultsByModel saves detection results organized by inference server name
 func (m *FFmpegCmdRTSPManager) saveResultsByModel(cameraID, cameraName string, originalFrame, processedFrame []byte, modelResults map[string]*ModelResult) {
 	timestamp := time.Now().Format("20060102_150405")
 	
@@ -332,30 +331,29 @@ func (m *FFmpegCmdRTSPManager) saveResultsByModel(cameraID, cameraName string, o
 			continue
 		}
 		
-		// Create model-specific directory
-		modelDir := filepath.Join(m.outputDir, "models", modelType)
-		if err := os.MkdirAll(modelDir, 0755); err != nil {
-			log.Printf("Warning: Failed to create model directory for %s: %v", modelType, err)
+		// Get server name for directory creation
+		serverName := result.ServerID
+		if server, exists := dataStore.InferenceServers[result.ServerID]; exists {
+			serverName = server.Name
+		}
+		
+		// Create inference server-specific directory
+		serverDir := filepath.Join(m.outputDir, serverName)
+		if err := os.MkdirAll(serverDir, 0755); err != nil {
+			log.Printf("Warning: Failed to create server directory for %s: %v", serverName, err)
 			continue
 		}
 		
 		// Save processed frame with detections
 		filename := fmt.Sprintf("%s_%s_%s.jpg", timestamp, cameraID, modelType)
-		processedPath := filepath.Join(modelDir, filename)
+		processedPath := filepath.Join(serverDir, filename)
 		
 		if err := os.WriteFile(processedPath, processedFrame, 0644); err != nil {
-			log.Printf("Warning: Failed to save processed frame for model %s: %v", modelType, err)
+			log.Printf("Warning: Failed to save processed frame for server %s: %v", serverName, err)
 			continue
 		}
 		
-		log.Printf("Saved detection frame - Camera: %s, Model: %s, Detections: %d, Path: %s", 
-			cameraName, modelType, len(result.Detections), processedPath)
-		
-		// Also save a copy in legacy camera directory for backward compatibility
-		cameraDir := filepath.Join(m.outputDir, cameraID)
-		if err := os.MkdirAll(cameraDir, 0755); err == nil {
-			legacyPath := filepath.Join(cameraDir, fmt.Sprintf("%s_%s.jpg", timestamp, modelType))
-			os.WriteFile(legacyPath, processedFrame, 0644)
-		}
+		log.Printf("Saved detection frame - Camera: %s, Server: %s (%s), Detections: %d, Path: %s", 
+			cameraName, serverName, modelType, len(result.Detections), processedPath)
 	}
 }
