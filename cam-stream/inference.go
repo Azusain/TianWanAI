@@ -448,19 +448,6 @@ func processInferenceServer(frameData []byte, server *InferenceServer, binding *
 	return retDetections
 }
 
-// logDetections logs detection information
-func logDetections(cameraID string, server *InferenceServer, detections []Detection) {
-	if server.ModelType == "fall" {
-		slog.Info(fmt.Sprintf("FALL DETECTED by server %s: %d alerts", server.Name, len(detections)))
-	} else {
-		slog.Info(fmt.Sprintf("Camera %s, Server %s (%s): %d detections:",
-			cameraID, server.Name, server.ModelType, len(detections)))
-		for _, det := range detections {
-			slog.Info(fmt.Sprintf("%s: %.1f%%", det.Class, det.Confidence*100))
-		}
-	}
-}
-
 // AlertRequest represents the alert request format for management platform
 type AlertRequest struct {
 	Image     string  `json:"image"`
