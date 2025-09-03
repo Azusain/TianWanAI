@@ -62,17 +62,17 @@ func (ws *WebServer) Start() error {
 	api.HandleFunc("/cameras/{id}", ws.handleAPICameraByID).Methods("GET", "PUT", "DELETE", "OPTIONS")
 	api.HandleFunc("/cameras/{id}/start", ws.handleAPIStartCamera).Methods("POST", "OPTIONS")
 	api.HandleFunc("/cameras/{id}/stop", ws.handleAPIStopCamera).Methods("POST", "OPTIONS")
-	
+
 	// Inference Server API Routes
 	api.HandleFunc("/inference-servers", ws.handleAPIInferenceServers).Methods("GET", "POST", "OPTIONS")
 	api.HandleFunc("/inference-servers/{id}", ws.handleAPIInferenceServerByID).Methods("GET", "PUT", "DELETE", "OPTIONS")
-	
+
 	// Alert Server API Routes
 	api.HandleFunc("/alert-server", ws.handleAPIAlertServer).Methods("GET", "PUT", "OPTIONS")
-	
+
 	api.HandleFunc("/status", ws.handleAPIStatus).Methods("GET", "OPTIONS")
 	api.HandleFunc("/debug", ws.handleAPIDebug).Methods("GET", "OPTIONS")
-	
+
 	// Image management API routes
 	api.HandleFunc("/images/{cameraId}", ws.handleAPIImages).Methods("GET", "OPTIONS")
 	api.HandleFunc("/images/{cameraId}/{filename}", ws.handleAPIImageFile).Methods("GET", "OPTIONS")
@@ -82,10 +82,10 @@ func (ws *WebServer) Start() error {
 	router.HandleFunc("/cameras", ws.handleCameraManagement).Methods("GET")
 	router.HandleFunc("/images", ws.handleImages).Methods("GET")
 	router.HandleFunc("/alerts", ws.handleAlerts).Methods("GET")
-	
+
 	// Static file server for output directory (images)
 	router.PathPrefix("/output/").Handler(http.StripPrefix("/output/", http.FileServer(http.Dir("output/"))))
-	
+
 	// Static file server for HTML files - MUST be LAST as it's a catch-all
 	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./")))
 
@@ -215,7 +215,7 @@ type InferenceServer struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"` // User-friendly name/alias
 	URL         string    `json:"url"`
-	ModelType   string    `json:"model_type"`   // e.g., "yolo", "detectron2", "custom"
+	ModelType   string    `json:"model_type"`            // e.g., "yolo", "detectron2", "custom"
 	Description string    `json:"description,omitempty"` // Optional description
 	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -229,22 +229,21 @@ type InferenceServerBinding struct {
 }
 
 type CameraConfig struct {
-	ID                     string                     `json:"id"`
-	Name                   string                     `json:"name"` // Now directly contains KKS encoding
-	RTSPUrl                string                     `json:"rtsp_url"`
-	InferenceServerBindings []InferenceServerBinding   `json:"inference_server_bindings,omitempty"` // Array of server bindings with thresholds
-	Enabled                bool                       `json:"enabled"`
-	Running                bool                       `json:"running"`
-	CreatedAt              time.Time                  `json:"created_at"`
-	UpdatedAt              time.Time                  `json:"updated_at"`
+	ID                      string                   `json:"id"`
+	Name                    string                   `json:"name"` // Now directly contains KKS encoding
+	RTSPUrl                 string                   `json:"rtsp_url"`
+	InferenceServerBindings []InferenceServerBinding `json:"inference_server_bindings,omitempty"` // Array of server bindings with thresholds
+	Enabled                 bool                     `json:"enabled"`
+	Running                 bool                     `json:"running"`
+	CreatedAt               time.Time                `json:"created_at"`
+	UpdatedAt               time.Time                `json:"updated_at"`
 	// Keep these for backward compatibility during migration
-	InferenceServers []string `json:"inference_servers,omitempty"` // Deprecated - migrate to bindings
-	ServerUrl        string   `json:"server_url,omitempty"`        // Deprecated
-	ModelType        string   `json:"model_type,omitempty"`        // Deprecated
-	PlatformURL      string   `json:"platform_url,omitempty"`      // Deprecated - use global alert config
-	CameraKKS        string   `json:"camera_kks,omitempty"`        // Deprecated - use camera name directly
+	// InferenceServers []string `json:"inference_servers,omitempty"` // Deprecated - migrate to bindings
+	// ServerUrl        string   `json:"server_url,omitempty"`        // Deprecated
+	// ModelType        string   `json:"model_type,omitempty"`        // Deprecated
+	// PlatformURL      string   `json:"platform_url,omitempty"`      // Deprecated - use global alert config
+	// CameraKKS        string   `json:"camera_kks,omitempty"`        // Deprecated - use camera name directly
 }
-
 
 type APIResponse struct {
 	Success bool        `json:"success"`
@@ -255,17 +254,17 @@ type APIResponse struct {
 
 // AlertServerConfig represents the global alert server configuration
 type AlertServerConfig struct {
-	URL       string `json:"url"`       // Alert platform URL
-	Enabled   bool   `json:"enabled"`   // Whether alert is enabled globally
+	URL       string    `json:"url"`     // Alert platform URL
+	Enabled   bool      `json:"enabled"` // Whether alert is enabled globally
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type DataStore struct {
-	Cameras map[string]*CameraConfig `json:"cameras"`
+	Cameras          map[string]*CameraConfig    `json:"cameras"`
 	InferenceServers map[string]*InferenceServer `json:"inference_servers"`
-	AlertServer *AlertServerConfig `json:"alert_server,omitempty"` // Global alert server config
-	Counters struct {
-		Camera int `json:"camera"`
+	AlertServer      *AlertServerConfig          `json:"alert_server,omitempty"` // Global alert server config
+	Counters         struct {
+		Camera          int `json:"camera"`
 		InferenceServer int `json:"inference_server"`
 	} `json:"counters"`
 }
@@ -277,7 +276,7 @@ const (
 
 // Global data store
 var dataStore = &DataStore{
-	Cameras: make(map[string]*CameraConfig),
+	Cameras:          make(map[string]*CameraConfig),
 	InferenceServers: make(map[string]*InferenceServer),
 }
 
@@ -308,6 +307,18 @@ func loadDataStore() error {
 	}
 
 	log.Printf("Loaded %d cameras and %d inference servers from storage", len(dataStore.Cameras), len(dataStore.InferenceServers))
+
+	// Log alert server configuration status
+	if dataStore.AlertServer != nil {
+		if dataStore.AlertServer.Enabled {
+			log.Printf("Alert server configured and enabled: %s", dataStore.AlertServer.URL)
+		} else {
+			log.Printf("Alert server configured but disabled: %s", dataStore.AlertServer.URL)
+		}
+	} else {
+		log.Printf("Alert server not configured - alerts disabled")
+	}
+
 	return nil
 }
 
@@ -482,7 +493,7 @@ func (ws *WebServer) handleAPICameraByID(w http.ResponseWriter, r *http.Request)
 				log.Printf("Warning: Failed to stop RTSP stream for camera %s: %v", id, err)
 			}
 		}
-		
+
 		delete(dataStore.Cameras, id)
 
 		if err := saveDataStore(); err != nil {
@@ -609,16 +620,16 @@ func (ws *WebServer) handleAPIDebug(w http.ResponseWriter, r *http.Request) {
 	}
 
 	debugInfo := map[string]interface{}{
-		"message":              "Debug route is working!",
-		"timestamp":            time.Now().Format(time.RFC3339),
-		"routes_registered":    "API routes are properly registered",
-		"cors_enabled":         true,
-		"total_cameras":        len(dataStore.Cameras),
-		"camera_ids":           cameraIDs,
-		"persistent_storage":   true,
-		"data_file_exists":     fileExists(DataFile),
-		"request_method":       r.Method,
-		"request_path":         r.URL.Path,
+		"message":            "Debug route is working!",
+		"timestamp":          time.Now().Format(time.RFC3339),
+		"routes_registered":  "API routes are properly registered",
+		"cors_enabled":       true,
+		"total_cameras":      len(dataStore.Cameras),
+		"camera_ids":         cameraIDs,
+		"persistent_storage": true,
+		"data_file_exists":   fileExists(DataFile),
+		"request_method":     r.Method,
+		"request_path":       r.URL.Path,
 	}
 
 	response := APIResponse{
@@ -638,10 +649,10 @@ type ImageInfo struct {
 }
 
 type ImageListResponse struct {
-	Images     []ImageInfo `json:"images"`
-	TotalCount int         `json:"total_count"`
-	TotalPages int         `json:"total_pages"`
-	CurrentPage int        `json:"current_page"`
+	Images      []ImageInfo `json:"images"`
+	TotalCount  int         `json:"total_count"`
+	TotalPages  int         `json:"total_pages"`
+	CurrentPage int         `json:"current_page"`
 }
 
 // handleAPIImages returns paginated list of images for a specific camera
@@ -945,12 +956,10 @@ func (ws *WebServer) handleAPIInferenceServerByID(w http.ResponseWriter, r *http
 		json.NewEncoder(w).Encode(response)
 
 	case "DELETE":
-		// Remove this server from all cameras that reference it
 		for _, camera := range dataStore.Cameras {
-			for i, serverId := range camera.InferenceServers {
-				if serverId == id {
-					// Remove this server ID from the slice
-					camera.InferenceServers = append(camera.InferenceServers[:i], camera.InferenceServers[i+1:]...)
+			for i, serverBinding := range camera.InferenceServerBindings {
+				if serverBinding.ServerID == id {
+					camera.InferenceServerBindings = append(camera.InferenceServerBindings[:i], camera.InferenceServerBindings[i+1:]...)
 					camera.UpdatedAt = time.Now()
 					break
 				}

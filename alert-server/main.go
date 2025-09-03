@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,13 +35,28 @@ type AlertResponse struct {
 	RequestID string `json:"request_id"`
 }
 
+// CamStreamData represents the structure of cam-stream's cameras.json
+type CamStreamData struct {
+	AlertServer struct {
+		URL       string    `json:"url"`
+		Enabled   bool      `json:"enabled"`
+		UpdatedAt time.Time `json:"updated_at"`
+	} `json:"alert_server"`
+}
+
 const (
-	Port      = 8081
-	OutputDir = "received_alerts"
+	DefaultPort = 8081
+	OutputDir   = "saved_requests"
 )
 
+// Global variable to store current port
+var currentPort int
+
 func main() {
-	log.Printf("Starting Alert Platform Mock Server on port %d", Port)
+
+	currentPort = DefaultPort
+
+	log.Printf("Starting Alert Platform Mock Server on port %d", DefaultPort)
 
 	// Create output directory for saved alerts
 	if err := os.MkdirAll(OutputDir, 0755); err != nil {
@@ -56,7 +72,6 @@ func main() {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return
@@ -68,19 +83,11 @@ func main() {
 
 	// Alert endpoint - matches the API specification
 	router.HandleFunc("/alert", handleAlert).Methods("POST", "OPTIONS")
-
 	// Debug endpoints
-	router.HandleFunc("/", handleIndex).Methods("GET")
 	router.HandleFunc("/status", handleStatus).Methods("GET")
 	router.HandleFunc("/alerts", handleListAlerts).Methods("GET")
-
-	log.Printf("Mock server is running at: http://localhost:%d", Port)
-	log.Printf("Alert endpoint: http://localhost:%d/alert", Port)
-	log.Printf("Status endpoint: http://localhost:%d/status", Port)
-	log.Printf("Alert list: http://localhost:%d/alerts", Port)
-
-	// Start server
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", Port), router))
+	fmt.Println("server is up")
+	slog.Error(http.ListenAndServe(fmt.Sprintf(":%d", DefaultPort), router).Error())
 }
 
 // handleAlert processes incoming alert requests
@@ -171,69 +178,6 @@ func saveAlertToFile(alertReq AlertRequest) error {
 	return nil
 }
 
-// handleIndex serves a simple status page
-func handleIndex(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	content := `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Alert Platform Mock Server</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
-        h1 { color: #333; }
-        .status { background: #f0f8ff; padding: 15px; border-radius: 5px; margin: 20px 0; }
-        .endpoint { background: #f5f5f5; padding: 10px; margin: 10px 0; border-left: 4px solid #007cba; }
-        pre { background: #f5f5f5; padding: 15px; border-radius: 3px; overflow-x: auto; }
-    </style>
-</head>
-<body>
-    <h1>Alert Platform Mock Server</h1>
-    <div class="status">
-        <strong>Status:</strong> Server is running and ready to receive alerts
-    </div>
-    
-    <h2>Available Endpoints</h2>
-    
-    <div class="endpoint">
-        <strong>POST /alert</strong> - Receive detection alerts (main endpoint)
-    </div>
-    
-    <div class="endpoint">
-        <strong>GET /status</strong> - Server status and statistics
-    </div>
-    
-    <div class="endpoint">
-        <strong>GET /alerts</strong> - List received alerts
-    </div>
-    
-    <h2>Usage</h2>
-    <p>Configure your camera's <code>platform_url</code> to:</p>
-    <pre>http://localhost:8080/alert</pre>
-    
-    <p>Alerts will be automatically saved as JSON files in the <code>received_alerts/</code> directory.</p>
-    
-    <h2>Example Alert Request</h2>
-    <pre>{
-  "image": "base64_encoded_image",
-  "request_id": "2058ed71-6b61-4f66-83e6-59a31ba87d7b",
-  "model": "model-name-v1.0",
-  "camera_kks": "1M2DTW345TV",
-  "score": 0.95,
-  "x1": 0.1,
-  "y1": 0.2,
-  "x2": 0.4,
-  "y2": 0.6,
-  "timestamp": "2024-01-01T12:00:00+08:00"
-}</pre>
-</body>
-</html>
-	`
-
-	w.Write([]byte(content))
-}
-
 // handleStatus returns server status and statistics
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -254,7 +198,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]interface{}{
 		"server_name":     "Alert Platform Mock Server",
 		"status":          "running",
-		"port":            Port,
+		"port":            currentPort,
 		"output_dir":      OutputDir,
 		"alerts_received": alertCount,
 		"timestamp":       time.Now().Format(time.RFC3339),

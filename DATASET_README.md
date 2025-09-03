@@ -1,0 +1,4 @@
+- fashionpedia
+- [Cigarettes Detection.v13i.yolov11](https://universe.roboflow.com/new-workspace-8tfgz/cigarettes-detection-4xvub/dataset/13)
+- [CigDet (Cigarette Detection) Dataset ](https://data.mendeley.com/datasets/6hyrr8typ7/1)
+- [images.cv Smoking Labeled Image Dataset](https://www.kaggle.com/datasets/vitaminc/cigarette-smoker-detection?resource=download)
