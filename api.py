@@ -40,6 +40,62 @@ class ServiceStatus(Enum):
             return'INVALID_IMAGE_FORMAT'
         elif errno == ServiceStatus.NO_OBJECT_DETECTED.value:
             return 'NO_OBJECT_DETECTED'
+          
+          
+class YoloClassificationService():
+    def __init__(self, model_path, imgsz=224) -> None:
+        self.version = "0.0.1"
+        self.path = model_path
+        self.imgsz = imgsz
+        
+        if not os.path.exists(model_path):
+            logger.error(f"model path doesn't exist: {model_path}")
+            exit(1)
+        
+        logger.debug("loading model...")
+        self.model = YOLO(self.path)
+        self.device = (
+            torch.device('cuda') 
+            if torch.cuda.is_available() 
+            else torch.device('cpu')
+        )
+        self.model.to(self.device)
+        self.is_half = (self.device.type != 'cpu')
+        logger.info(f"device: {self.device.type}")
+        
+        logger.debug("model preheating...")
+        rand_data = torch.randn(1, 3, self.imgsz, self.imgsz)
+        rand_data = (rand_data - torch.min(rand_data)) / (torch.max(rand_data) - torch.min(rand_data))
+        self.model.predict(
+            source=rand_data,
+            verbose=False
+        )
+    
+    def Predict(self, img):
+        results = self.model.predict(
+            source=img,
+            imgsz=self.imgsz,
+            half=self.is_half,
+            verbose=False
+        )
+        
+        result = results[0]
+        probs = result.probs
+        
+        top1_class = int(probs.top1)
+        top1_prob = float(probs.top1conf)
+        all_probs = probs.data.cpu().numpy() if hasattr(probs.data, 'cpu') else probs.data
+        top5_indices = probs.top5
+        top5_confs = probs.top5conf
+        top5_classes = [(int(idx), float(conf)) for idx, conf in zip(top5_indices, top5_confs)]
+        
+        return top1_prob, top1_class, all_probs, top5_classes
+    
+    
+    def GetClassNames(self):
+        return self.model.names if hasattr(self.model, 'names') else None
+
+
 
 class YoloDetectionService():
     def __init__(self, model_path, imgsz) -> None:
@@ -329,292 +385,6 @@ class TemporalFallDetectionService:
         self.class_names = ['Standing', 'Walking', 'Sitting', 'Lying Down',
                           'Stand up', 'Sit down', 'Fall Down']
         
-    def _load_model(self):
-        """Load ST-GCN model for fall detection"""
-        try:
-            # Add fall-detection submodule to path
-            sys.path.append(os.path.join(os.path.dirname(__file__), 'fall-detection'))
-            
-            from Actionsrecognition.Models import TwoStreamSpatialTemporalGraph
-            
-            if not os.path.exists(self.model_path):
-                logger.warning(f"ST-GCN model not found at {self.model_path}")
-                logger.info("Using fallback pose-based detection")
-                self.model = None
-                return
-                
-            # Load ST-GCN model with correct parameters
-            graph_args = {'strategy': 'spatial'}  # Use default coco_cut layout
-            num_class = 7  # Based on ActionsEstLoader: Standing, Walking, Sitting, Lying Down, Stand up, Sit down, Fall Down
-            
-            self.model = TwoStreamSpatialTemporalGraph(
-                graph_args=graph_args,
-                num_class=num_class
-            )
-            
-            # Load weights
-            checkpoint = torch.load(self.model_path, map_location=self.device)
-            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                self.model.load_state_dict(checkpoint['model_state_dict'])
-            else:
-                self.model.load_state_dict(checkpoint)
-                
-            self.model.to(self.device)
-            self.model.eval()
-            logger.info("ST-GCN model loaded successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to load ST-GCN model: {e}")
-            logger.info("Using fallback pose-based detection")
-            self.model = None
-    
-    def extract_pose_keypoints(self, image):
-        """Extract pose keypoints from image using original project models"""
-        try:
-            # Step 1: Detect humans using TinyYOLO (it handles resizing internally)
-            detected = self.detect_model.detect(image, need_resize=True, expand_bb=10)
-            
-            persons = []
-            if detected is not None and len(detected) > 0:
-                # Step 2: Extract poses for each detection
-                poses = self.pose_model.predict(image, detected[:, 0:4], detected[:, 4])
-                
-                # Step 3: Create person data for each pose
-                for i, ps in enumerate(poses):
-                    # Extract keypoints (14 points + scores)
-                    kpts = ps['keypoints'].numpy()  # Shape: [14, 2]
-                    scores = ps['kp_score'].numpy()  # Shape: [14, 1]
-                    
-                    # Combine keypoints with scores for compatibility
-                    keypoints = np.concatenate([kpts, scores], axis=1)  # Shape: [14, 3]
-                    
-                    # Get bbox from keypoints
-                    bbox = self.kpt2bbox(kpts)
-                    
-                    person = {
-                        'keypoints': keypoints,  # [14, 3] - x, y, confidence
-                        'bbox': bbox,   # [x1, y1, x2, y2]
-                        'person_id': i,
-                        'raw_pose': ps  # Keep raw pose data
-                    }
-                    persons.append(person)
-                            
-            return persons
-            
-        except Exception as e:
-            logger.error(f"Pose extraction failed: {e}")
-            return []
-    
-    def detect_fall_by_pose(self, keypoints):
-        """Fallback fall detection using pose analysis"""
-        try:
-            # Extract key body points (COCO format)
-            head_y = keypoints[0, 1]      # nose
-            shoulder_y = (keypoints[5, 1] + keypoints[6, 1]) / 2  # shoulders
-            hip_y = (keypoints[11, 1] + keypoints[12, 1]) / 2     # hips
-            
-            # Check if points are valid (confidence > 0.3)
-            valid_points = [
-                keypoints[0, 2] > 0.3,    # head
-                keypoints[5, 2] > 0.3 or keypoints[6, 2] > 0.3,  # shoulders
-                keypoints[11, 2] > 0.3 or keypoints[12, 2] > 0.3  # hips
-            ]
-            
-            if not all(valid_points):
-                return False, 0.0
-            
-            # Calculate body orientation
-            body_height = abs(head_y - hip_y)
-            if body_height < 10:  # Too small to analyze
-                return False, 0.0
-                
-            # Fall detection logic
-            # 1. Head lower than hips (person lying down)
-            head_below_hips = head_y > hip_y
-            
-            # 2. Body is more horizontal than vertical
-            shoulder_hip_diff = abs(shoulder_y - hip_y)
-            horizontal_ratio = shoulder_hip_diff / body_height if body_height > 0 else 0
-            
-            is_horizontal = horizontal_ratio < 0.3  # Body is quite horizontal
-            
-            # Combine conditions
-            fall_detected = head_below_hips and is_horizontal
-            confidence = 0.8 if fall_detected else 0.2
-            
-            return fall_detected, confidence
-            
-        except Exception as e:
-            logger.error(f"Pose-based fall detection failed: {e}")
-            return False, 0.0
-    
-    def process_frame(self, image, camera_id):
-        """Process single frame for fall detection"""
-        current_time = time.time()
-        
-        # Extract pose keypoints
-        persons = self.extract_pose_keypoints(image)
-        
-        results = {
-            'camera_id': camera_id,
-            'timestamp': current_time,
-            'persons_detected': len(persons),
-            'fall_detected': False,
-            'alerts': []
-        }
-        
-        if not persons:
-            return results
-        
-        # Process each detected person
-        for person in persons[:self.max_persons]:
-            person_id = f"person_{person['person_id']}"
-            keypoints = person['keypoints']
-            
-            # Add to sequence
-            self.person_sequences[camera_id][person_id].append({
-                'keypoints': keypoints,
-                'timestamp': current_time,
-                'bbox': person['bbox']
-            })
-            
-            self.person_timestamps[camera_id][person_id] = current_time
-            
-            # Check for fall detection
-            fall_detected, confidence = self._detect_fall_for_person(
-                camera_id, person_id, keypoints
-            )
-            
-            if fall_detected and confidence > self.confidence_threshold:
-                # Check cooldown to avoid spam
-                if self._can_alert(camera_id, person_id, current_time):
-                    alert = {
-                        'person_id': person_id,
-                        'confidence': confidence,
-                        'bbox': person['bbox'].tolist(),
-                        'timestamp': current_time,
-                        'alert_type': 'FALL_DETECTED'
-                    }
-                    
-                    results['alerts'].append(alert)
-                    results['fall_detected'] = True
-                    
-                    # Record alert
-                    self.fall_alerts[camera_id].append({
-                        'person_id': person_id,
-                        'timestamp': current_time
-                    })
-                    
-                    logger.warning(f"FALL DETECTED - Camera: {camera_id}, Person: {person_id}, Confidence: {confidence:.2f}")
-        
-        # Cleanup old sequences and alerts
-        self._cleanup_old_data(camera_id, current_time)
-        
-        return results
-    
-    def _detect_fall_for_person(self, camera_id, person_id, current_keypoints):
-        """Detect fall for a specific person"""
-        sequence = self.person_sequences[camera_id][person_id]
-        
-        # If we have the ST-GCN model and enough frames
-        if self.model and len(sequence) >= self.sequence_length:
-            # Get image size from the first frame in sequence
-            image_size = (640, 480)  # Default size, could be extracted from actual image
-            return self._detect_fall_stgcn(sequence, image_size)
-        
-        # Fallback to pose-based detection
-        return self.detect_fall_by_pose(current_keypoints)
-    
-    def _detect_fall_stgcn(self, sequence, image_size=(640, 480)):
-        """Use ST-GCN model for fall detection - exactly copying original ActionsEstLoader.predict method"""
-        try:
-            # 完全按照原始 Human-Falling-Detect-Tracks 项目中的实现
-            # main.py 中创建 Detection 对象，然后 tracker.keypoints_list 包含这些 Detection 对象的关键点
-            # 在 ActionsEstLoader.py 的 predict 函数中直接处理这些关键点
-            
-            # 获取关键点序列
-            keypoints_sequence = []
-            for frame_data in sequence:
-                keypoints = frame_data['keypoints']  # [17, 3] COCO format from YOLO
-                keypoints_sequence.append(keypoints)
-            
-            # 转换为numpy数组 - 与 main.py 的 line 150 匹配: pts = np.array(track.keypoints_list, dtype=np.float32)
-            pts = np.array(keypoints_sequence, dtype=np.float32)  # [30, 17, 3]
-            
-            # 严格按照 ActionsEstLoader.predict() 处理:
-            
-            # 1. 对关键点坐标进行归一化
-            pts[:, :, :2] = normalize_points_with_size(pts[:, :, :2], image_size[0], image_size[1])
-            
-            # 2. 对关键点进行缩放
-            pts[:, :, :2] = scale_pose(pts[:, :, :2])
-            
-            # 3. 添加颈部中心点 - 使用左肩和右肩的平均值 (索引5和6是COCO格式中的左肩和右肩)
-            # 注意: 原始代码使用的是pts[:, 1, :] + pts[:, 2, :]，但这是基于不同的关键点格式
-            # 在COCO格式中，索引5和6是左肩和右肩
-            pts = np.concatenate((pts, np.expand_dims((pts[:, 5, :] + pts[:, 6, :]) / 2, 1)), axis=1)  # [30, 18, 3]
-            
-            # 4. 转换为PyTorch张量并调整维度顺序
-            pts = torch.tensor(pts, dtype=torch.float32)
-            pts = pts.permute(2, 0, 1)[None, :]  # [1, 3, 30, 18]
-            
-            # 5. 准备运动流 - 计算帧间差异
-            mot = pts[:, :2, 1:, :] - pts[:, :2, :-1, :]  # [1, 2, 29, 18]
-            mot = mot.to(self.device)
-            pts = pts.to(self.device)
-            
-            # 6. 模型推理
-            out = self.model((pts, mot))
-            
-            # 7. 转换为概率并获取跌倒检测结果
-            probabilities = torch.softmax(out, dim=1)
-            fall_prob = probabilities[0, 6].item()  # 类别6是'Fall Down'
-            
-            fall_detected = fall_prob > 0.5
-            return fall_detected, fall_prob
-            
-        except Exception as e:
-            logger.error(f"ST-GCN inference failed: {e}")
-            # 回退到基于姿态的检测
-            if sequence:
-                return self.detect_fall_by_pose(sequence[-1]['keypoints'])
-            return False, 0.0
-    
-    def _can_alert(self, camera_id, person_id, current_time):
-        """Check if we can send an alert (cooldown logic)"""
-        alerts = self.fall_alerts.get(camera_id, [])
-        
-        for alert in reversed(alerts):  # Check recent alerts first
-            if alert['person_id'] == person_id:
-                if current_time - alert['timestamp'] < self.alert_cooldown:
-                    return False
-                break
-                
-        return True
-    
-    def _cleanup_old_data(self, camera_id, current_time):
-        """Clean up old tracking data"""
-        timeout = 10.0  # Remove person data after 10 seconds of inactivity
-        
-        # Clean up person sequences
-        inactive_persons = []
-        for person_id, last_seen in self.person_timestamps[camera_id].items():
-            if current_time - last_seen > timeout:
-                inactive_persons.append(person_id)
-        
-        for person_id in inactive_persons:
-            if person_id in self.person_sequences[camera_id]:
-                del self.person_sequences[camera_id][person_id]
-            del self.person_timestamps[camera_id][person_id]
-        
-        # Clean up old alerts (keep only last hour)
-        alert_timeout = 3600.0
-        if camera_id in self.fall_alerts:
-            self.fall_alerts[camera_id] = [
-                alert for alert in self.fall_alerts[camera_id]
-                if current_time - alert['timestamp'] < alert_timeout
-            ]
-    
     def Predict(self, img):
         """Predict method to match interface with other services"""
         return self.detect(img)
