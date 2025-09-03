@@ -326,6 +326,7 @@ func (m *FFmpegCmdRTSPManager) GetLatestFrame(cameraID string) ([]byte, time.Tim
 func (m *FFmpegCmdRTSPManager) saveResultsByModel(cameraID, cameraName string, originalFrame, processedFrame []byte, modelResults map[string]*ModelResult) {
 	timestamp := time.Now().Format("20060102_150405")
 	
+	
 	for modelType, result := range modelResults {
 		if !result.ShouldSave {
 			continue
@@ -355,5 +356,35 @@ func (m *FFmpegCmdRTSPManager) saveResultsByModel(cameraID, cameraName string, o
 		
 		log.Printf("Saved detection frame - Camera: %s, Server: %s (%s), Detections: %d, Path: %s", 
 			cameraName, serverName, modelType, len(result.Detections), processedPath)
+		
+		// Send alerts for each detection if global alert system is enabled
+		if len(result.Detections) > 0 {
+			m.sendDetectionAlerts(cameraName, originalFrame, modelType, result.Detections)
+		}
+	}
+}
+
+// sendDetectionAlerts sends alert for each detection using global alert configuration
+func (m *FFmpegCmdRTSPManager) sendDetectionAlerts(cameraName string, imageData []byte, modelType string, detections []Detection) {
+	for _, detection := range detections {
+		// Convert pixel coordinates to normalized coordinates (0-1) as required by API
+		// First get image dimensions
+		imgReader := bytes.NewReader(imageData)
+		img, err := jpeg.DecodeConfig(imgReader)
+		if err != nil {
+			log.Printf("Warning: Failed to decode image config for alert: %v", err)
+			continue
+		}
+		
+		// Convert to normalized coordinates
+		x1 := float64(detection.X1) / float64(img.Width)
+		y1 := float64(detection.Y1) / float64(img.Height)
+		x2 := float64(detection.X2) / float64(img.Width)
+		y2 := float64(detection.Y2) / float64(img.Height)
+		
+		// Send alert using global configuration and camera name as KKS
+		if err := SendAlertIfConfigured(imageData, modelType, cameraName, detection.Confidence, x1, y1, x2, y2); err != nil {
+			log.Printf("Warning: Failed to send alert for camera %s: %v", cameraName, err)
+		}
 	}
 }
