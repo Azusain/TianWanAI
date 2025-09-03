@@ -280,26 +280,55 @@
             select.innerHTML = '<option value="">所有服务器</option>';
             
             try {
+                console.log('开始扫描output目录...');
                 // 扫描output目录获取实际存在的服务器目录
                 const response = await fetch('/output/');
+                console.log('Output目录响应状态:', response.status);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
                 const html = await response.text();
+                console.log('Output目录HTML响应长度:', html.length);
+                console.log('Output目录HTML前500字符:', html.substring(0, 500));
+                
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(html, 'text/html');
                 const links = doc.querySelectorAll('a[href]');
+                console.log('找到的链接数量:', links.length);
                 
                 const actualServers = [];
-                links.forEach(link => {
+                links.forEach((link, index) => {
                     const href = link.getAttribute('href');
+                    const text = link.textContent.trim();
+                    console.log(`链接 ${index}: href="${href}", text="${text}"`);
+                    
                     // 过滤掉父目录和文件，只保留目录
-                    if (href && href.endsWith('/') && href !== '../') {
+                    if (href && href.endsWith('/') && href !== '../' && href !== './') {
                         const serverName = href.replace('/', '');
-                        actualServers.push(serverName);
+                        if (serverName) {  // 确保不是空字符串
+                            actualServers.push(serverName);
+                            console.log('添加服务器目录:', serverName);
+                        }
                     }
                 });
                 
                 console.log('发现的实际推理服务器目录:', actualServers);
                 
-                // 添加实际存在的服务器选项
+                // 如果没有检测到，添加已知的服务器目录作为后备
+                const knownServers = ['Mouse', 'Gesture'];
+                knownServers.forEach(serverName => {
+                    if (!actualServers.includes(serverName)) {
+                        console.log('添加已知服务器目录:', serverName);
+                        actualServers.push(serverName);
+                    }
+                });
+                
+                // 保存到全局变量
+                servers = actualServers;
+                
+                // 添加所有服务器选项
                 actualServers.forEach(serverName => {
                     const option = document.createElement('option');
                     option.value = serverName;
@@ -307,22 +336,22 @@
                     select.appendChild(option);
                 });
                 
-                // 保存到全局变量
-                servers = actualServers;
-                
                 if (actualServers.length === 0) {
+                    console.warn('没有找到任何服务器目录');
                     const noOption = document.createElement('option');
                     noOption.value = '';
                     noOption.textContent = '暂无推理服务器目录';
                     noOption.disabled = true;
                     select.appendChild(noOption);
+                } else {
+                    console.log('成功加载服务器目录:', actualServers.join(', '));
                 }
                 
             } catch (error) {
                 console.error('加载服务器目录失败:', error);
                 const errorOption = document.createElement('option');
                 errorOption.value = '';
-                errorOption.textContent = '加载失败';
+                errorOption.textContent = '加载失败: ' + error.message;
                 errorOption.disabled = true;
                 select.appendChild(errorOption);
             }

@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"time"
+
 	"github.com/google/uuid"
 )
 
@@ -124,7 +125,6 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 		return nil, fmt.Errorf("inference server returned HTML instead of JSON - service may not be running at %s", url)
 	}
 
-
 	// Parse response
 	var response InferenceResponse
 	if err := json.Unmarshal(body, &response); err != nil {
@@ -141,10 +141,11 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 	if response.Errno != 0 && response.ErrMsg != "NO_OBJECT_DETECTED" {
 		return nil, fmt.Errorf("inference failed: %s (errno: %d)", response.ErrMsg, response.Errno)
 	}
-	
+
 	// Log when no objects are detected (for debugging)
 	if response.ErrMsg == "NO_OBJECT_DETECTED" {
-		log.Printf("No objects detected by inference server - returning empty detections")
+		// TODO: slog.Debug()
+		// log.Printf("No objects detected by inference server - returning empty detections")
 		return []Detection{}, nil // Return empty detections, not an error
 	}
 
@@ -193,7 +194,6 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 			continue
 		}
 
-
 		// Use class name from server response, or default to "detected_object"
 		className := result.Class
 		if className == "" {
@@ -218,17 +218,17 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 
 // FallDetectionResponse represents the response from fall detection API
 type FallDetectionResponse struct {
-	LogId         string                 `json:"log_id"`
-	Errno         int                    `json:"errno"`
-	ErrMsg        string                 `json:"err_msg"`
-	ApiVersion    string                 `json:"api_version"`
-	ModelVersion  string                 `json:"model_version"`
-	CameraID      string                 `json:"camera_id"`
-	Timestamp     float64                `json:"timestamp"`
-	PersonsCount  int                    `json:"persons_detected"`
-	FallDetected  bool                   `json:"fall_detected"`
-	DebugInfo     map[string]interface{} `json:"debug_info"`
-	Results       []FallDetectionResult  `json:"results"`
+	LogId        string                 `json:"log_id"`
+	Errno        int                    `json:"errno"`
+	ErrMsg       string                 `json:"err_msg"`
+	ApiVersion   string                 `json:"api_version"`
+	ModelVersion string                 `json:"model_version"`
+	CameraID     string                 `json:"camera_id"`
+	Timestamp    float64                `json:"timestamp"`
+	PersonsCount int                    `json:"persons_detected"`
+	FallDetected bool                   `json:"fall_detected"`
+	DebugInfo    map[string]interface{} `json:"debug_info"`
+	Results      []FallDetectionResult  `json:"results"`
 }
 
 // FallDetectionResult represents a single fall detection result
@@ -290,7 +290,6 @@ func (ic *InferenceClient) ProcessFrameForFallDetection(imageData []byte, camera
 	if len(body) > 0 && body[0] == '<' {
 		return nil, fmt.Errorf("fall detection API returned HTML instead of JSON - service may not be running at %s", url)
 	}
-
 
 	// Parse response using unified format
 	var response InferenceResponse
@@ -382,11 +381,11 @@ func (ic *InferenceClient) ProcessFrameForFallDetection(imageData []byte, camera
 
 // ModelResult represents detection results for a specific model
 type ModelResult struct {
-	ModelType   string      `json:"model_type"`
-	ServerID    string      `json:"server_id"`
-	Detections  []Detection `json:"detections"`
-	ShouldSave  bool        `json:"should_save"`
-	Error       error       `json:"-"`
+	ModelType  string      `json:"model_type"`
+	ServerID   string      `json:"server_id"`
+	Detections []Detection `json:"detections"`
+	ShouldSave bool        `json:"should_save"`
+	Error      error       `json:"-"`
 }
 
 // ProcessFrame processes a frame with inference using new multi-server architecture
@@ -411,7 +410,7 @@ func ProcessFrameWithInference(frameData []byte, cameraConfig *CameraConfig) ([]
 		if err != nil {
 			return processedFrame, nil, err
 		}
-		
+
 		// Convert to new format
 		results := make(map[string]*ModelResult)
 		if shouldSave {
@@ -458,17 +457,17 @@ func ProcessFrameWithInference(frameData []byte, cameraConfig *CameraConfig) ([]
 func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraConfig) ([]byte, map[string]*ModelResult, error) {
 	results := make(map[string]*ModelResult)
 	allDetections := []Detection{}
-	
+
 	// Determine server list based on configuration format
-	var serverProcessList []struct{
+	var serverProcessList []struct {
 		ServerID  string
 		Threshold float64
 	}
-	
+
 	// Use new binding format if available, otherwise fall back to legacy format
 	if len(cameraConfig.InferenceServerBindings) > 0 {
 		for _, binding := range cameraConfig.InferenceServerBindings {
-			serverProcessList = append(serverProcessList, struct{
+			serverProcessList = append(serverProcessList, struct {
 				ServerID  string
 				Threshold float64
 			}{binding.ServerID, binding.Threshold})
@@ -476,13 +475,13 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 	} else if len(cameraConfig.InferenceServers) > 0 {
 		// Legacy format - use default threshold of 0.5 for backward compatibility
 		for _, serverID := range cameraConfig.InferenceServers {
-			serverProcessList = append(serverProcessList, struct{
+			serverProcessList = append(serverProcessList, struct {
 				ServerID  string
 				Threshold float64
 			}{serverID, 0.5})
 		}
 	}
-	
+
 	// Process each inference server
 	for _, serverConfig := range serverProcessList {
 		server, exists := dataStore.InferenceServers[serverConfig.ServerID]
@@ -490,20 +489,20 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 			log.Printf("Warning: Inference server %s not found for camera %s", serverConfig.ServerID, cameraConfig.ID)
 			continue
 		}
-		
+
 		if !server.Enabled {
 			log.Printf("Skipping disabled inference server %s for camera %s", serverConfig.ServerID, cameraConfig.ID)
 			continue
 		}
-		
+
 		// Create inference client
 		client := NewInferenceClient(server.URL)
-		
+
 		// Process based on model type
 		var detections []Detection
 		var shouldSave bool
 		var err error
-		
+
 		if server.ModelType == "fall" {
 			// Handle fall detection using unified API
 			detections, err = client.ProcessFrameForFallDetection(frameData, cameraConfig.ID)
@@ -518,7 +517,7 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 				}
 				continue
 			}
-			
+
 			// For fall detection, save if any falls were detected (threshold not applicable for falls)
 			shouldSave = len(detections) > 0
 			if shouldSave {
@@ -538,7 +537,7 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 				}
 				continue
 			}
-			
+
 			// Apply confidence threshold - save if any detection meets threshold
 			shouldSave = false
 			for _, detection := range detections {
@@ -547,12 +546,12 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 					break
 				}
 			}
-			
+
 			if shouldSave {
 				log.Printf("Threshold met for server %s (threshold: %.1f%%) - saving image", server.Name, serverConfig.Threshold*100)
 			}
 		}
-		
+
 		// Store results for this model
 		results[server.ModelType] = &ModelResult{
 			ModelType:  server.ModelType,
@@ -561,27 +560,27 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 			ShouldSave: shouldSave,
 			Error:      nil,
 		}
-		
+
 		// Collect all detections for drawing
 		allDetections = append(allDetections, detections...)
-		
+
 		// Only log when detections meet threshold and will be saved
 		if shouldSave && len(detections) > 0 {
-			log.Printf("Camera %s, Server %s (%s): %d detections with confidences:", 
+			log.Printf("Camera %s, Server %s (%s): %d detections with confidences:",
 				cameraConfig.ID, server.Name, server.ModelType, len(detections))
 			for _, det := range detections {
 				log.Printf("  %s: %.1f%%", det.Class, det.Confidence*100)
 			}
 		}
 	}
-	
+
 	// Draw all detections on frame
 	processedFrame, err := DrawDetections(frameData, allDetections, cameraConfig.Name)
 	if err != nil {
 		log.Printf("Warning: Failed to draw detections for camera %s: %v", cameraConfig.ID, err)
 		return frameData, results, nil
 	}
-	
+
 	// Only log summary when threshold-meeting detections are saved
 	hasThresholdMeetingDetections := false
 	for _, result := range results {
@@ -591,10 +590,10 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 		}
 	}
 	if hasThresholdMeetingDetections {
-		log.Printf("Camera %s: %d total detections from %d inference servers (saving images)", 
+		log.Printf("Camera %s: %d total detections from %d inference servers (saving images)",
 			cameraConfig.ID, len(allDetections), len(serverProcessList))
 	}
-	
+
 	return processedFrame, results, nil
 }
 
@@ -619,7 +618,7 @@ func ProcessFrameWithFallDetection(frameData []byte, cameraConfig *CameraConfig,
 	// Save if any falls were detected
 	shouldSave := len(detections) > 0
 	if shouldSave {
-		log.Printf("🚨 FALL DETECTED in camera %s: %d alerts", 
+		log.Printf("🚨 FALL DETECTED in camera %s: %d alerts",
 			cameraConfig.ID, len(detections))
 	}
 
@@ -645,21 +644,22 @@ type AlertRequest struct {
 	Timestamp string  `json:"timestamp"`
 }
 
-// SendAlert sends detection alert to management platform
-func SendAlert(platformURL string, imageData []byte, model string, camera string, score float64, x1, y1, x2, y2 float64) error {
-	if platformURL == "" {
-		return fmt.Errorf("platform URL not configured")
+// SendAlertIfConfigured sends detection alert to management platform using global configuration
+func SendAlertIfConfigured(imageData []byte, model string, cameraName string, score float64, x1, y1, x2, y2 float64) error {
+	// Check if alert system is enabled and configured globally
+	if dataStore.AlertServer == nil || !dataStore.AlertServer.Enabled || dataStore.AlertServer.URL == "" {
+		return nil // Alert system not enabled or not configured, silently skip
 	}
 
 	// Encode image to base64
 	encodedImage := base64.StdEncoding.EncodeToString(imageData)
 
-	// Create alert request
+	// Create alert request using camera name directly as KKS
 	alertReq := AlertRequest{
 		Image:     encodedImage,
 		RequestID: uuid.New().String(),
 		Model:     model,
-		CameraKKS: camera,
+		CameraKKS: cameraName, // Use camera name directly as KKS encoding
 		Score:     score,
 		X1:        x1,
 		Y1:        y1,
@@ -679,7 +679,7 @@ func SendAlert(platformURL string, imageData []byte, model string, camera string
 
 	// Send request
 	resp, err := client.Post(
-		platformURL,
+		dataStore.AlertServer.URL,
 		"application/json",
 		bytes.NewBuffer(requestBody),
 	)
@@ -694,8 +694,13 @@ func SendAlert(platformURL string, imageData []byte, model string, camera string
 		return fmt.Errorf("platform returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	log.Printf("Alert sent successfully to platform for camera %s (model: %s, score: %.3f)", 
-		camera, model, score)
+	log.Printf("Alert sent successfully to platform for camera %s (model: %s, score: %.3f)",
+		cameraName, model, score)
 
 	return nil
+}
+
+// SendAlert is deprecated - use SendAlertIfConfigured instead
+func SendAlert(platformURL string, imageData []byte, model string, camera string, score float64, x1, y1, x2, y2 float64) error {
+	return SendAlertIfConfigured(imageData, model, camera, score, x1, y1, x2, y2)
 }

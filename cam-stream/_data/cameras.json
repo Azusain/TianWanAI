@@ -1,5 +1,21 @@
 {
-  "cameras": {},
+  "cameras": {
+    "cam_11": {
+      "id": "cam_11",
+      "name": "测试",
+      "rtsp_url": "rtsp://192.168.31.48:8554/test",
+      "inference_server_bindings": [
+        {
+          "server_id": "inf_4",
+          "threshold": 0.06
+        }
+      ],
+      "enabled": true,
+      "running": true,
+      "created_at": "2025-09-03T12:53:38.8449225+08:00",
+      "updated_at": "2025-09-03T13:38:47.7299355+08:00"
+    }
+  },
   "inference_servers": {
     "inf_3": {
       "id": "inf_3",
@@ -10,10 +26,24 @@
       "enabled": true,
       "created_at": "2025-09-02T23:49:52.6629735+08:00",
       "updated_at": "2025-09-02T23:49:52.6629735+08:00"
+    },
+    "inf_4": {
+      "id": "inf_4",
+      "name": "Gesture",
+      "url": "http://192.168.31.48:8901/gesture",
+      "model_type": "gesture",
+      "enabled": true,
+      "created_at": "2025-09-03T11:53:54.5763816+08:00",
+      "updated_at": "2025-09-03T11:53:54.5763816+08:00"
     }
   },
+  "alert_server": {
+    "url": "http://localhost:8080/alert",
+    "enabled": true,
+    "updated_at": "2025-09-03T12:53:21.6261619+08:00"
+  },
   "counters": {
-    "camera": 8,
-    "inference_server": 3
+    "camera": 11,
+    "inference_server": 4
   }
 }

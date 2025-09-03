@@ -67,6 +67,9 @@ func (ws *WebServer) Start() error {
 	api.HandleFunc("/inference-servers", ws.handleAPIInferenceServers).Methods("GET", "POST", "OPTIONS")
 	api.HandleFunc("/inference-servers/{id}", ws.handleAPIInferenceServerByID).Methods("GET", "PUT", "DELETE", "OPTIONS")
 	
+	// Alert Server API Routes
+	api.HandleFunc("/alert-server", ws.handleAPIAlertServer).Methods("GET", "PUT", "OPTIONS")
+	
 	api.HandleFunc("/status", ws.handleAPIStatus).Methods("GET", "OPTIONS")
 	api.HandleFunc("/debug", ws.handleAPIDebug).Methods("GET", "OPTIONS")
 	
@@ -78,6 +81,7 @@ func (ws *WebServer) Start() error {
 	router.HandleFunc("/", ws.handleIndex).Methods("GET")
 	router.HandleFunc("/cameras", ws.handleCameraManagement).Methods("GET")
 	router.HandleFunc("/images", ws.handleImages).Methods("GET")
+	router.HandleFunc("/alerts", ws.handleAlerts).Methods("GET")
 	
 	// Static file server for output directory (images)
 	router.PathPrefix("/output/").Handler(http.StripPrefix("/output/", http.FileServer(http.Dir("output/"))))
@@ -167,6 +171,10 @@ func (ws *WebServer) handleIndex(w http.ResponseWriter, r *http.Request) {
                 <span class="nav-icon">📷</span>
                 <div class="nav-title">图片查看器</div>
             </a>
+            <a href="/alerts" class="nav-item">
+                <span class="nav-icon">🚨</span>
+                <div class="nav-title">告警配置</div>
+            </a>
             <a href="/api/debug" class="nav-item">
                 <span class="nav-icon">🔧</span>
                 <div class="nav-title">系统调试</div>
@@ -222,7 +230,7 @@ type InferenceServerBinding struct {
 
 type CameraConfig struct {
 	ID                     string                     `json:"id"`
-	Name                   string                     `json:"name"`
+	Name                   string                     `json:"name"` // Now directly contains KKS encoding
 	RTSPUrl                string                     `json:"rtsp_url"`
 	InferenceServerBindings []InferenceServerBinding   `json:"inference_server_bindings,omitempty"` // Array of server bindings with thresholds
 	Enabled                bool                       `json:"enabled"`
@@ -233,6 +241,8 @@ type CameraConfig struct {
 	InferenceServers []string `json:"inference_servers,omitempty"` // Deprecated - migrate to bindings
 	ServerUrl        string   `json:"server_url,omitempty"`        // Deprecated
 	ModelType        string   `json:"model_type,omitempty"`        // Deprecated
+	PlatformURL      string   `json:"platform_url,omitempty"`      // Deprecated - use global alert config
+	CameraKKS        string   `json:"camera_kks,omitempty"`        // Deprecated - use camera name directly
 }
 
 
@@ -243,9 +253,17 @@ type APIResponse struct {
 	Error   string      `json:"error,omitempty"`
 }
 
+// AlertServerConfig represents the global alert server configuration
+type AlertServerConfig struct {
+	URL       string `json:"url"`       // Alert platform URL
+	Enabled   bool   `json:"enabled"`   // Whether alert is enabled globally
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type DataStore struct {
 	Cameras map[string]*CameraConfig `json:"cameras"`
 	InferenceServers map[string]*InferenceServer `json:"inference_servers"`
+	AlertServer *AlertServerConfig `json:"alert_server,omitempty"` // Global alert server config
 	Counters struct {
 		Camera int `json:"camera"`
 		InferenceServer int `json:"inference_server"`
@@ -953,4 +971,319 @@ func (ws *WebServer) handleAPIInferenceServerByID(w http.ResponseWriter, r *http
 		}
 		json.NewEncoder(w).Encode(response)
 	}
+}
+
+// Alert Server API Handler
+func (ws *WebServer) handleAPIAlertServer(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case "GET":
+		// Return current alert server configuration
+		var alertConfig *AlertServerConfig
+		if dataStore.AlertServer != nil {
+			alertConfig = dataStore.AlertServer
+		} else {
+			// Return default/empty configuration
+			alertConfig = &AlertServerConfig{
+				URL:       "",
+				Enabled:   false,
+				UpdatedAt: time.Now(),
+			}
+		}
+
+		response := APIResponse{
+			Success: true,
+			Message: "Alert server configuration retrieved successfully",
+			Data:    alertConfig,
+		}
+		json.NewEncoder(w).Encode(response)
+
+	case "PUT":
+		// Update alert server configuration
+		var updatedConfig AlertServerConfig
+		if err := json.NewDecoder(r.Body).Decode(&updatedConfig); err != nil {
+			response := APIResponse{
+				Success: false,
+				Message: "Invalid request body",
+				Error:   err.Error(),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		updatedConfig.UpdatedAt = time.Now()
+		dataStore.AlertServer = &updatedConfig
+
+		if err := saveDataStore(); err != nil {
+			log.Printf("Warning: Failed to save data store: %v", err)
+		}
+
+		log.Printf("Updated alert server configuration: URL=%s, Enabled=%t", updatedConfig.URL, updatedConfig.Enabled)
+
+		response := APIResponse{
+			Success: true,
+			Message: "Alert server configuration updated successfully",
+			Data:    &updatedConfig,
+		}
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+// handleAlerts serves the alert configuration page
+func (ws *WebServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
+	content := `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alert Configuration - Cam-Stream Platform</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding: 20px 0;
+            border-bottom: 2px solid #e9ecef;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 2rem;
+            color: #2c3e50;
+        }
+        .nav-link {
+            text-decoration: none;
+            color: #6c757d;
+            padding: 8px 16px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+        .nav-link:hover {
+            background-color: #e9ecef;
+        }
+        .alert-config {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #495057;
+        }
+        .form-group input[type="text"], .form-group input[type="url"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+        }
+        .btn {
+            background-color: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        .btn:hover {
+            background-color: #2980b9;
+        }
+        .btn:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info-box {
+            background-color: #e7f3ff;
+            border: 1px solid #b8daff;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .info-box h3 {
+            margin: 0 0 10px 0;
+            color: #004085;
+        }
+        .info-box p {
+            margin: 5px 0;
+            color: #004085;
+        }
+        .loading {
+            display: none;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Alert Configuration</h1>
+            <a href="/" class="nav-link">← Back to Dashboard</a>
+        </div>
+
+        <div class="info-box">
+            <h3>Global Alert Server Configuration</h3>
+            <p>Configure the global alert server that will receive detection alerts from all cameras.</p>
+            <p>When enabled, detection alerts will be sent to the configured URL according to the API specification.</p>
+        </div>
+
+        <div class="alert-config">
+            <div class="status" id="status"></div>
+            
+            <form id="alertForm">
+                <div class="form-group">
+                    <label for="alertUrl">Alert Platform URL:</label>
+                    <input type="url" id="alertUrl" placeholder="http://localhost:8080/alert" required>
+                </div>
+
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="alertEnabled">
+                        <label for="alertEnabled">Enable Alert System</label>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn" id="saveBtn">
+                    <span class="loading" id="loading">Saving...</span>
+                    <span id="saveText">Save Configuration</span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const alertForm = document.getElementById('alertForm');
+        const statusDiv = document.getElementById('status');
+        const saveBtn = document.getElementById('saveBtn');
+        const loading = document.getElementById('loading');
+        const saveText = document.getElementById('saveText');
+
+        // Load current configuration on page load
+        async function loadConfiguration() {
+            try {
+                const response = await fetch('/api/alert-server');
+                const result = await response.json();
+                
+                if (result.success) {
+                    const config = result.data;
+                    document.getElementById('alertUrl').value = config.url || '';
+                    document.getElementById('alertEnabled').checked = config.enabled || false;
+                }
+            } catch (error) {
+                showStatus('Failed to load current configuration', 'error');
+            }
+        }
+
+        // Save configuration
+        alertForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const alertUrl = document.getElementById('alertUrl').value;
+            const alertEnabled = document.getElementById('alertEnabled').checked;
+
+            // Show loading state
+            saveBtn.disabled = true;
+            loading.style.display = 'inline';
+            saveText.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/alert-server', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        url: alertUrl,
+                        enabled: alertEnabled
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showStatus('Alert configuration saved successfully!', 'success');
+                } else {
+                    showStatus('Failed to save configuration: ' + (result.error || result.message), 'error');
+                }
+            } catch (error) {
+                showStatus('Network error: ' + error.message, 'error');
+            } finally {
+                // Reset loading state
+                saveBtn.disabled = false;
+                loading.style.display = 'none';
+                saveText.style.display = 'inline';
+            }
+        });
+
+        function showStatus(message, type) {
+            statusDiv.textContent = message;
+            statusDiv.className = 'status ' + type;
+            statusDiv.style.display = 'block';
+            
+            // Hide status after 5 seconds
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        // Load configuration when page loads
+        loadConfiguration();
+    </script>
+</body>
+</html>
+	`
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(content))
 }
