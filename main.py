@@ -20,7 +20,7 @@ import cv2
 from uuid import uuid4 as uuid4
 
 # project 
-from api import ServiceStatus, YoloDetectionService, TshirtDetectionService, TemporalFallDetectionService
+from api import ServiceStatus, YoloClassificationService, YoloDetectionService, TshirtDetectionService, TemporalFallDetectionService
 
 # logger
 from loguru import logger
@@ -33,6 +33,7 @@ class ModelType(Enum):
     TSHIRT = "tshirt"
     MOUSE = "mouse"
     FALL = "fall"
+    CIGAR = "cigar"
 
 # return image and errno.
 def validate_img_format():
@@ -68,10 +69,12 @@ def get_service(model_type: str):
     return YoloDetectionService("models/ponding/weights/best.pt", 640), None
   if model_type == ModelType.MOUSE.value:
     return YoloDetectionService("models/mouse/weights/mouse_v4.pt", 640), None
+  if model_type == ModelType.CIGAR.value:
+    return YoloDetectionService("models/cigar/weights/cigar_v1.pt"), None
   if model_type == ModelType.SMOKE .value:
     return SmokeFileDetector("__SmokeFire/weights/smoke.pt"), None
   if model_type == ModelType.TSHIRT.value:
-    return TshirtDetectionService("models/fashionpedia", 640), None
+    return TshirtDetectionService("models/fashionpedia", 640), YoloClassificationService("models/tshirt_cls/weights/tshirt_cls_v1.pt")
   if model_type == ModelType.FALL.value:
     return TemporalFallDetectionService(), None
 
@@ -82,6 +85,7 @@ def get_service(model_type: str):
 #   - ponding
 #   - smoke
 #   - fall
+#   - cigar
 def app():
     model_type = os.environ.get('MODEL')
     if model_type:
@@ -141,88 +145,98 @@ def app():
 
     @app.route('/tshirt', methods=['POST'])
     def TshirtDetect():
-      img, errno = validate_img_format()
-      if img is None:
-          return {
-            "log_id": uuid4(),
-            "errno": errno,
-            "err_msg": ServiceStatus.stringify(errno),
-          }
+        img, errno = validate_img_format()
+        if img is None:
+            return {
+              "log_id": uuid4(),
+              "errno": errno,
+              "err_msg": ServiceStatus.stringify(errno),
+            }
 
-      H, W = img.shape[:2]
-      selected_scores, selected_labels, pixel_boxes = service.Predict(img)
-      results = []
+        H, W = img.shape[:2]
+        selected_scores, selected_labels, pixel_boxes = service.Predict(img)
+        results = []
 
-      # 收集所有 t-shirt 检测框
-      tshirt_boxes = []
-      for score, label_idx, bbox in zip(selected_scores, selected_labels, pixel_boxes):
-          label_name = service.model.config.id2label[label_idx.item()]
-          if "t-shirt" in label_name.lower():
-              tshirt_boxes.append((float(score), bbox))
+        tshirt_boxes = []
+        for score, label_idx, bbox in zip(selected_scores, selected_labels, pixel_boxes):
+            label_name = service.model.config.id2label[label_idx.item()]
+            if "t-shirt" in label_name.lower():
+                tshirt_boxes.append((float(score), bbox))
 
-      # TODO: move to utils.
-      def boxes_iou(box1, box2):
-          x1 = max(box1[0], box2[0])
-          y1 = max(box1[1], box2[1])
-          x2 = min(box1[2], box2[2])
-          y2 = min(box1[3], box2[3])
-          inter_area = max(0, x2 - x1) * max(0, y2 - y1)
-          area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
-          area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
-          union_area = area1 + area2 - inter_area
-          if union_area == 0:
-              return 0
-          return inter_area / union_area
+        def boxes_iou(box1, box2):
+            x1 = max(box1[0], box2[0])
+            y1 = max(box1[1], box2[1])
+            x2 = min(box1[2], box2[2])
+            y2 = min(box1[3], box2[3])
+            inter_area = max(0, x2 - x1) * max(0, y2 - y1)
+            area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+            area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+            union_area = area1 + area2 - inter_area
+            if union_area == 0:
+                return 0
+            return inter_area / union_area
 
-      # 过滤重叠框，只保留高分的
-      iou_threshold = 0.5
-      tshirt_boxes.sort(key=lambda x: x[0], reverse=True)  # 按分数降序
-      filtered_boxes = []
-      for score, bbox in tshirt_boxes:
-          keep = True
-          for _, kept_bbox in filtered_boxes:
-              if boxes_iou(bbox, kept_bbox) > 0:
-                  keep = False
-                  break
-          if keep:
-              filtered_boxes.append((score, bbox))
+        tshirt_boxes.sort(key=lambda x: x[0], reverse=True)
+        filtered_boxes = []
+        for score, bbox in tshirt_boxes:
+            keep = True
+            for _, kept_bbox in filtered_boxes:
+                if boxes_iou(bbox, kept_bbox) > 0:
+                    keep = False
+                    break
+            if keep:
+                filtered_boxes.append((score, bbox))
 
-      # 归一化输出
-      for score, bbox in filtered_boxes:
-          x1, y1, x2, y2 = bbox
-          width_px = x2 - x1
-          height_px = y2 - y1
-          cx = x1 + width_px / 2
-          cy = y1 + height_px / 2
-          cxn = cx / W
-          cyn = cy / H
-          width_n = width_px / W
-          height_n = height_px / H
-          left_n = cxn - width_n / 2
-          top_n = cyn - height_n / 2
-          logger.success(f"SUCCESS - score: {score}")
-          results.append({
-              "score": score,
-              "location": {
-                  "left": left_n,
-                  "top": top_n,
-                  "width": width_n,
-                  "height": height_n
-              }
-          })
-      if len(results) > 0:
-        errno = ServiceStatus.SUCCESS.value
-      else:
-        errno = ServiceStatus.NO_OBJECT_DETECTED.value
-
-      return {
-        "log_id": uuid4(),
-        "errno": errno,
-        "err_msg": ServiceStatus.stringify(errno),
-        "api_version": "0.0.1",
-        "model_version": "0.0.1",
-        "results": results
-      }
+        for score, bbox in filtered_boxes:
+            x1, y1, x2, y2 = bbox
+            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+            
+            x1 = max(0, x1)
+            y1 = max(0, y1)
+            x2 = min(W, x2)
+            y2 = min(H, y2)
+            
+            if x2 > x1 and y2 > y1:
+                cropped_region = img[y1:y2, x1:x2]
+                top1_prob, top1_class, _, _ = base.Predict(cropped_region)
+                # '0' stands for 'tshirt'
+                if top1_class == 0:
+                    width_px = x2 - x1
+                    height_px = y2 - y1
+                    cx = x1 + width_px / 2
+                    cy = y1 + height_px / 2
+                    cxn = cx / W
+                    cyn = cy / H
+                    width_n = width_px / W
+                    height_n = height_px / H
+                    left_n = cxn - width_n / 2
+                    top_n = cyn - height_n / 2
+                    
+                    logger.success(f"SUCCESS - detection score: {score}, classification score: {top1_prob}")
+                    results.append({
+                        "detection_score": score,
+                        "classification_score": top1_prob,
+                        "location": {
+                            "left": left_n,
+                            "top": top_n,
+                            "width": width_n,
+                            "height": height_n
+                        }
+                    })
+                else:
+                    logger.info(f"FILTERED - classification rejected: class {top1_class} (prob: {top1_prob})")
+        if len(results) > 0:
+          errno = ServiceStatus.SUCCESS.value
+        else:
+          errno = ServiceStatus.NO_OBJECT_DETECTED.value
+        return {
+          "log_id": uuid4(),
+          "errno": errno,
+          "err_msg": ServiceStatus.stringify(errno),
+          "api_version": "0.0.1",
+          "model_version": "0.0.1",
+          "results": results
+        }
 
     @app.route('/smoke', methods=['POST'])
     def SmokeDetect():
@@ -253,8 +267,8 @@ def app():
     return app
 
 # test on Windows.
-if __name__ == "__main__":
-  os.environ["MODEL"] = "fall"
-  app = app()
-  if app:
-    app.run(port=8091, debug=True, host='0.0.0.0')
+# if __name__ == "__main__":
+#   os.environ["MODEL"] = "fall"
+#   app = app()
+#   if app:
+#     app.run(port=8091, debug=True, host='0.0.0.0')
