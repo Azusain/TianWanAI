@@ -128,49 +128,16 @@ def app():
         img, errno = validate_img_format()
         if img is None:
             return service.Response(errno=errno)
-            
-        # Get camera ID from request (default to 'default' if not provided)
-        camera_id = request.json.get('camera_id', 'default')
         
-        # Process frame with temporal fall detection service
-        try:
-            detection_results = service.process_frame(img, camera_id)
-            
-            # Convert to unified format (score, xyxyn) like other models
-            scores = []
-            xyxyn = []
-            
-            # Convert alerts to standard YOLO-like format
-            for alert in detection_results['alerts']:
-                bbox = alert['bbox']  # [x1, y1, x2, y2] in pixels
-                H, W = img.shape[:2]
-                
-                # Convert to normalized xyxy format like other models
-                x1, y1, x2, y2 = bbox
-                x1_norm = x1 / W
-                y1_norm = y1 / H  
-                x2_norm = x2 / W
-                y2_norm = y2 / H
-                
-                scores.append(alert['confidence'])
-                xyxyn.append([x1_norm, y1_norm, x2_norm, y2_norm])
-                
-            if detection_results['fall_detected']:
-                logger.warning(f"Fall detected in camera {camera_id}: {len(scores)} alerts")
-                errno = ServiceStatus.SUCCESS.value
-            else:
-                errno = ServiceStatus.NO_OBJECT_DETECTED.value
-            
-            # Use the same response format as other models
-            return service.Response(
-                errno=errno,
-                score=scores,
-                xyxyn=xyxyn
-            )
-            
-        except Exception as e:
-            logger.error(f"Fall detection failed: {e}")
-            return service.Response(errno=ServiceStatus.INVALID_IMAGE_FORMAT.value)
+        # Use the same pattern as other detection services
+        # The detect method handles the full pipeline
+        score, xyxyn, _ = service.Predict(img)
+        
+        return service.Response(
+            errno=errno,
+            score=score,
+            xyxyn=xyxyn
+        )
 
     @app.route('/tshirt', methods=['POST'])
     def TshirtDetect():
@@ -286,8 +253,8 @@ def app():
     return app
 
 # test on Windows.
-# if __name__ == "__main__":
-#   os.environ["MODEL"] = "mouse"
-#   app = app()
-#   if app:
-#     app.run(port=8080, debug=True, host='0.0.0.0')
+if __name__ == "__main__":
+  os.environ["MODEL"] = "fall"
+  app = app()
+  if app:
+    app.run(port=8091, debug=True, host='0.0.0.0')

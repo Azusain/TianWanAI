@@ -8,10 +8,12 @@ import (
 	"image/jpeg"
 	"io/ioutil"
 	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 )
 
 // InferenceClient handles communication with inference server
@@ -63,16 +65,16 @@ type Location struct {
 }
 
 // NewInferenceClient creates a new inference client
-func NewInferenceClient(serverURL string) *InferenceClient {
+func NewInferenceClient(serverURL string) (*InferenceClient, error) {
 	if serverURL == "" {
-		serverURL = "http://localhost:8000" // Default inference server URL
+		return nil, errors.New("server url should not be empty")
 	}
 	return &InferenceClient{
 		serverURL: serverURL,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-	}
+	}, nil
 }
 
 // DetectObjects sends image to inference server and returns detections
@@ -142,11 +144,8 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 		return nil, fmt.Errorf("inference failed: %s (errno: %d)", response.ErrMsg, response.Errno)
 	}
 
-	// Log when no objects are detected (for debugging)
 	if response.ErrMsg == "NO_OBJECT_DETECTED" {
-		// TODO: slog.Debug()
-		// log.Printf("No objects detected by inference server - returning empty detections")
-		return []Detection{}, nil // Return empty detections, not an error
+		return []Detection{}, nil
 	}
 
 	// Get actual image dimensions for coordinate conversion
@@ -233,7 +232,7 @@ type FallDetectionResponse struct {
 
 // FallDetectionResult represents a single fall detection result
 type FallDetectionResult struct {
-	Score     float64  `json:"score"` // 🎯 Fall confidence score (0-1)
+	Score     float64  `json:"score"` //  Fall confidence score (0-1)
 	PersonID  string   `json:"person_id"`
 	AlertType string   `json:"alert_type"`
 	Location  Location `json:"location"`
@@ -258,7 +257,8 @@ func (ic *InferenceClient) ProcessFrameForFallDetection(imageData []byte, camera
 	}
 
 	// Use unified endpoint pattern
-	url := ic.serverURL + "/fall"
+	// TODO: trash codes.
+	url := ic.serverURL
 
 	// Send request using standard format
 	resp, err := ic.client.Post(
@@ -368,266 +368,97 @@ func (ic *InferenceClient) ProcessFrameForFallDetection(imageData []byte, camera
 		detections = append(detections, detection)
 	}
 
-	// Only log when fall detections are found
-	if len(detections) > 0 {
-		log.Printf("🚨 Fall detection completed: %d alerts with confidences:", len(detections))
-		for _, det := range detections {
-			log.Printf("  %s: %.1f%%", det.Class, det.Confidence*100)
-		}
-	}
-
 	return detections, nil
 }
 
 // ModelResult represents detection results for a specific model
 type ModelResult struct {
-	ModelType  string      `json:"model_type"`
-	ServerID   string      `json:"server_id"`
-	Detections []Detection `json:"detections"`
-	ShouldSave bool        `json:"should_save"`
-	Error      error       `json:"-"`
-}
-
-// ProcessFrame processes a frame with inference using new multi-server architecture
-func ProcessFrameWithInference(frameData []byte, cameraConfig *CameraConfig) ([]byte, map[string]*ModelResult, error) {
-	// Use new multi-server processing if inference servers are configured
-	if len(cameraConfig.InferenceServerBindings) > 0 || len(cameraConfig.InferenceServers) > 0 {
-		return ProcessFrameWithMultipleInference(frameData, cameraConfig)
-	}
-
-	// Fallback to legacy single server mode for backward compatibility
-	if cameraConfig.ServerUrl == "" {
-		processedFrame, _ := DrawDetections(frameData, []Detection{}, cameraConfig.Name)
-		return processedFrame, nil, nil
-	}
-
-	// Create inference client
-	client := NewInferenceClient(cameraConfig.ServerUrl)
-
-	// Check if this is fall detection model
-	if cameraConfig.ModelType == "fall" {
-		processedFrame, shouldSave, err := ProcessFrameWithFallDetection(frameData, cameraConfig, client)
-		if err != nil {
-			return processedFrame, nil, err
-		}
-
-		// Convert to new format
-		results := make(map[string]*ModelResult)
-		if shouldSave {
-			results["fall"] = &ModelResult{
-				ModelType:  "fall",
-				ServerID:   "legacy",
-				Detections: []Detection{},
-				ShouldSave: true,
-			}
-		}
-		return processedFrame, results, nil
-	}
-
-	// Regular object detection for other models
-	detections, err := client.DetectObjects(frameData, cameraConfig.ModelType)
-	if err != nil {
-		log.Printf("Warning: Inference failed for camera %s: %v", cameraConfig.ID, err)
-		processedFrame, _ := DrawDetections(frameData, []Detection{}, cameraConfig.Name)
-		return processedFrame, nil, nil
-	}
-
-	// Draw detections on frame
-	processedFrame, err := DrawDetections(frameData, detections, cameraConfig.Name)
-	if err != nil {
-		log.Printf("Warning: Failed to draw detections for camera %s: %v", cameraConfig.ID, err)
-		return frameData, nil, nil
-	}
-
-	// Convert to new format
-	results := make(map[string]*ModelResult)
-	if len(detections) > 0 {
-		results[cameraConfig.ModelType] = &ModelResult{
-			ModelType:  cameraConfig.ModelType,
-			ServerID:   "legacy",
-			Detections: detections,
-			ShouldSave: true,
-		}
-	}
-
-	return processedFrame, results, nil
+	ModelType          string      `json:"model_type"`
+	ServerID           string      `json:"server_id"`
+	Detections         []Detection `json:"detections"`
+	DisplayResultImage []byte      `json:"display_image"`
+	Error              error       `json:"-"`
 }
 
 // ProcessFrameWithMultipleInference processes a frame with multiple inference servers
-func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraConfig) ([]byte, map[string]*ModelResult, error) {
+func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraConfig) (map[string]*ModelResult, error) {
 	results := make(map[string]*ModelResult)
-	allDetections := []Detection{}
-
-	// Determine server list based on configuration format
-	var serverProcessList []struct {
-		ServerID  string
-		Threshold float64
-	}
-
-	// Use new binding format if available, otherwise fall back to legacy format
-	if len(cameraConfig.InferenceServerBindings) > 0 {
-		for _, binding := range cameraConfig.InferenceServerBindings {
-			serverProcessList = append(serverProcessList, struct {
-				ServerID  string
-				Threshold float64
-			}{binding.ServerID, binding.Threshold})
-		}
-	} else if len(cameraConfig.InferenceServers) > 0 {
-		// Legacy format - use default threshold of 0.5 for backward compatibility
-		for _, serverID := range cameraConfig.InferenceServers {
-			serverProcessList = append(serverProcessList, struct {
-				ServerID  string
-				Threshold float64
-			}{serverID, 0.5})
-		}
-	}
 
 	// Process each inference server
-	for _, serverConfig := range serverProcessList {
-		server, exists := dataStore.InferenceServers[serverConfig.ServerID]
+	for _, binding := range cameraConfig.InferenceServerBindings {
+		server, exists := dataStore.InferenceServers[binding.ServerID]
 		if !exists {
-			log.Printf("Warning: Inference server %s not found for camera %s", serverConfig.ServerID, cameraConfig.ID)
+			slog.Warn(fmt.Sprintf("Inference server %s not found for camera %s", binding.ServerID, cameraConfig.ID))
 			continue
 		}
-
 		if !server.Enabled {
-			log.Printf("Skipping disabled inference server %s for camera %s", serverConfig.ServerID, cameraConfig.ID)
+			slog.Warn(fmt.Sprintf("Skipping disabled inference server %s", server.Name))
 			continue
 		}
 
-		// Create inference client
-		client := NewInferenceClient(server.URL)
-
-		// Process based on model type
-		var detections []Detection
-		var shouldSave bool
-		var err error
-
-		if server.ModelType == "fall" {
-			// Handle fall detection using unified API
-			detections, err = client.ProcessFrameForFallDetection(frameData, cameraConfig.ID)
-			if err != nil {
-				log.Printf("Warning: Fall detection failed for server %s: %v", server.Name, err)
-				results[server.ModelType] = &ModelResult{
-					ModelType:  server.ModelType,
-					ServerID:   serverConfig.ServerID,
-					Detections: []Detection{},
-					ShouldSave: false,
-					Error:      err,
-				}
-				continue
-			}
-
-			// For fall detection, save if any falls were detected (threshold not applicable for falls)
-			shouldSave = len(detections) > 0
-			if shouldSave {
-				log.Printf("🚨 FALL DETECTED by server %s: %d alerts", server.Name, len(detections))
-			}
-		} else {
-			// Regular object detection
-			detections, err = client.DetectObjects(frameData, server.ModelType)
-			if err != nil {
-				log.Printf("Warning: Inference failed for server %s: %v", server.Name, err)
-				results[server.ModelType] = &ModelResult{
-					ModelType:  server.ModelType,
-					ServerID:   serverConfig.ServerID,
-					Detections: []Detection{},
-					ShouldSave: false,
-					Error:      err,
-				}
-				continue
-			}
-
-			// Apply confidence threshold - save if any detection meets threshold
-			shouldSave = false
-			for _, detection := range detections {
-				if detection.Confidence >= serverConfig.Threshold {
-					shouldSave = true
-					break
-				}
-			}
-
-			if shouldSave {
-				log.Printf("Threshold met for server %s (threshold: %.1f%%) - saving image", server.Name, serverConfig.Threshold*100)
-			}
+		detections := processInferenceServer(frameData, server, &binding, cameraConfig.ID)
+		displayedImage, err := DrawDetections(frameData, detections, cameraConfig.Name)
+		if err != nil {
+			slog.Warn(fmt.Sprintf("failed to write result for model %q", server.ModelType))
 		}
-
-		// Store results for this model
+		// Store results
 		results[server.ModelType] = &ModelResult{
-			ModelType:  server.ModelType,
-			ServerID:   serverConfig.ServerID,
-			Detections: detections,
-			ShouldSave: shouldSave,
-			Error:      nil,
-		}
-
-		// Collect all detections for drawing
-		allDetections = append(allDetections, detections...)
-
-		// Only log when detections meet threshold and will be saved
-		if shouldSave && len(detections) > 0 {
-			log.Printf("Camera %s, Server %s (%s): %d detections with confidences:",
-				cameraConfig.ID, server.Name, server.ModelType, len(detections))
-			for _, det := range detections {
-				log.Printf("  %s: %.1f%%", det.Class, det.Confidence*100)
-			}
+			ModelType:          server.ModelType,
+			ServerID:           binding.ServerID,
+			Detections:         detections,
+			DisplayResultImage: displayedImage,
+			Error:              nil,
 		}
 	}
 
-	// Draw all detections on frame
-	processedFrame, err := DrawDetections(frameData, allDetections, cameraConfig.Name)
-	if err != nil {
-		log.Printf("Warning: Failed to draw detections for camera %s: %v", cameraConfig.ID, err)
-		return frameData, results, nil
-	}
-
-	// Only log summary when threshold-meeting detections are saved
-	hasThresholdMeetingDetections := false
-	for _, result := range results {
-		if result.ShouldSave {
-			hasThresholdMeetingDetections = true
-			break
-		}
-	}
-	if hasThresholdMeetingDetections {
-		log.Printf("Camera %s: %d total detections from %d inference servers (saving images)",
-			cameraConfig.ID, len(allDetections), len(serverProcessList))
-	}
-
-	return processedFrame, results, nil
+	return results, nil
 }
 
-// ProcessFrameWithFallDetection processes a frame with fall detection using unified API
-func ProcessFrameWithFallDetection(frameData []byte, cameraConfig *CameraConfig, client *InferenceClient) ([]byte, bool, error) {
-	// Call unified fall detection API
-	detections, err := client.ProcessFrameForFallDetection(frameData, cameraConfig.ID)
+// This function never returns nil !!!
+func processInferenceServer(frameData []byte, server *InferenceServer, binding *InferenceServerBinding, cameraID string) []Detection {
+	client, err := NewInferenceClient(server.URL)
 	if err != nil {
-		log.Printf("Warning: Fall detection failed for camera %s: %v", cameraConfig.ID, err)
-		// Still draw timestamp overlay even if inference fails
-		processedFrame, _ := DrawDetections(frameData, []Detection{}, cameraConfig.Name)
-		return processedFrame, false, nil
+		slog.Warn(fmt.Sprintf("Failed to create client for server %s: %v", server.Name, err))
+		return []Detection{}
 	}
 
-	// Draw fall detections on frame
-	processedFrame, err := DrawDetections(frameData, detections, cameraConfig.Name)
+	detections := []Detection{}
+
+	// Process based on model type
+	// TODO: enum instead of hardcoding.
+	if server.ModelType == "fall" {
+		detections, err = client.ProcessFrameForFallDetection(frameData, cameraID)
+	} else {
+		detections, err = client.DetectObjects(frameData, server.ModelType)
+	}
+
 	if err != nil {
-		log.Printf("Warning: Failed to draw fall detections for camera %s: %v", cameraConfig.ID, err)
-		return frameData, false, nil
+		slog.Warn(fmt.Sprintf("inference failed for server %s: %v", server.Name, err))
+		return detections
 	}
 
-	// Save if any falls were detected
-	shouldSave := len(detections) > 0
-	if shouldSave {
-		log.Printf("🚨 FALL DETECTED in camera %s: %d alerts",
-			cameraConfig.ID, len(detections))
+	// Check if any detection meets threshold
+	retDetections := []Detection{}
+	for _, detection := range detections {
+		if detection.Confidence >= binding.Threshold {
+			retDetections = append(retDetections, detection)
+		}
 	}
 
-	return processedFrame, shouldSave, nil
+	return retDetections
 }
 
-// Helper function to check if string contains substring
-func contains(s, substr string) bool {
-	return bytes.Contains([]byte(s), []byte(substr))
+// logDetections logs detection information
+func logDetections(cameraID string, server *InferenceServer, detections []Detection) {
+	if server.ModelType == "fall" {
+		slog.Info(fmt.Sprintf("FALL DETECTED by server %s: %d alerts", server.Name, len(detections)))
+	} else {
+		slog.Info(fmt.Sprintf("Camera %s, Server %s (%s): %d detections:",
+			cameraID, server.Name, server.ModelType, len(detections)))
+		for _, det := range detections {
+			slog.Info(fmt.Sprintf("%s: %.1f%%", det.Class, det.Confidence*100))
+		}
+	}
 }
 
 // AlertRequest represents the alert request format for management platform

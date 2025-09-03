@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image/jpeg"
 	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -104,7 +105,7 @@ func (m *FFmpegCmdRTSPManager) captureFrames(stream *FFmpegCameraStream) {
 		default:
 			// Get frame rate from global config
 			frameRate := fmt.Sprintf("%d", globalConfig.FrameRate)
-			
+
 			// FFmpeg command to capture frames continuously
 			// -rtsp_transport tcp: Use TCP for more reliable connection
 			// -i: Input RTSP URL
@@ -156,6 +157,7 @@ func (m *FFmpegCmdRTSPManager) captureFrames(stream *FFmpegCameraStream) {
 // monitorFrameFile monitors the output file and updates lastFrame
 func (m *FFmpegCmdRTSPManager) monitorFrameFile(stream *FFmpegCameraStream, outputPath string) {
 	// Calculate monitoring interval based on frame rate (with minimum of 33ms for 30+ FPS)
+	// TODO: this should be configurable.
 	monitorInterval := time.Duration(1000/globalConfig.FrameRate) * time.Millisecond
 	if monitorInterval < 33*time.Millisecond {
 		monitorInterval = 33 * time.Millisecond // Cap at ~30 FPS monitoring
@@ -167,8 +169,10 @@ func (m *FFmpegCmdRTSPManager) monitorFrameFile(stream *FFmpegCameraStream, outp
 
 	for {
 		select {
+
 		case <-stream.stopChannel:
 			return
+
 		case <-ticker.C:
 			// Read the latest frame from disk
 			frameData, err := os.ReadFile(outputPath)
@@ -193,28 +197,22 @@ func (m *FFmpegCmdRTSPManager) monitorFrameFile(stream *FFmpegCameraStream, outp
 
 			// Process frame with inference if configured
 			processedFrame := frameData
-			var modelResults map[string]*ModelResult
-			if cameraConfig != nil && (len(cameraConfig.InferenceServerBindings) > 0 || len(cameraConfig.InferenceServers) > 0 || cameraConfig.ServerUrl != "") {
-				var err error
-				processedFrame, modelResults, err = ProcessFrameWithInference(frameData, cameraConfig)
-				if err != nil {
-					log.Printf("Warning: Failed to process frame with inference for camera %s: %v", stream.ID, err)
-					processedFrame = frameData // Use original frame on error
-				}
-			} else {
-				// No inference, just add timestamp overlay
-				var detections []Detection // Empty detections
-				processedFrame, err = DrawDetections(frameData, detections, stream.Name)
-				if err != nil {
-					processedFrame = frameData // Use original on error
-				}
+
+			if cameraConfig == nil || (len(cameraConfig.InferenceServerBindings) <= 0) {
+				slog.Warn("skipping detection because cameraConfig == nil or cameraConfig not valid")
+				return
 			}
-			
-			// Save results by model type (new architecture)
+			modelResults, err := ProcessFrameWithMultipleInference(frameData, cameraConfig)
+			if err != nil {
+				slog.Warn(fmt.Sprintf("Warning: Failed to process frame with inference for camera %s: %v", stream.ID, err))
+				continue
+			}
+
+			// Save results by model type.
 			if modelResults != nil {
-				m.saveResultsByModel(stream.ID, stream.Name, frameData, processedFrame, modelResults)
+				m.saveResultsByModel(stream.Name, modelResults)
 			}
-			
+
 			// Always update global latest for web interface
 			globalLatest := filepath.Join(m.outputDir, "latest_processed.jpg")
 			os.WriteFile(globalLatest, processedFrame, 0644)
@@ -225,7 +223,6 @@ func (m *FFmpegCmdRTSPManager) monitorFrameFile(stream *FFmpegCameraStream, outp
 			stream.lastUpdate = time.Now()
 			stream.mutex.Unlock()
 
-			// Frame processing completed silently
 		}
 	}
 }
@@ -323,43 +320,42 @@ func (m *FFmpegCmdRTSPManager) GetLatestFrame(cameraID string) ([]byte, time.Tim
 }
 
 // saveResultsByModel saves detection results organized by inference server name
-func (m *FFmpegCmdRTSPManager) saveResultsByModel(cameraID, cameraName string, originalFrame, processedFrame []byte, modelResults map[string]*ModelResult) {
+func (m *FFmpegCmdRTSPManager) saveResultsByModel(cameraName string, modelResults map[string]*ModelResult) {
 	timestamp := time.Now().Format("20060102_150405")
-	
-	
+
 	for modelType, result := range modelResults {
-		if !result.ShouldSave {
+		if len(result.Detections) <= 0 || result.DisplayResultImage == nil {
 			continue
 		}
-		
+
 		// Get server name for directory creation
 		serverName := result.ServerID
 		if server, exists := dataStore.InferenceServers[result.ServerID]; exists {
 			serverName = server.Name
 		}
-		
-		// Create inference server-specific directory
+
+		// Create inference server-specific directory (if not exists).
 		serverDir := filepath.Join(m.outputDir, serverName)
 		if err := os.MkdirAll(serverDir, 0755); err != nil {
-			log.Printf("Warning: Failed to create server directory for %s: %v", serverName, err)
+			slog.Warn(fmt.Sprintf("Warning: Failed to create server directory for %s: %v", serverName, err))
 			continue
 		}
-		
+
 		// Save processed frame with detections
-		filename := fmt.Sprintf("%s_%s_%s.jpg", timestamp, cameraID, modelType)
+		filename := fmt.Sprintf("%s.jpg", timestamp)
 		processedPath := filepath.Join(serverDir, filename)
-		
-		if err := os.WriteFile(processedPath, processedFrame, 0644); err != nil {
-			log.Printf("Warning: Failed to save processed frame for server %s: %v", serverName, err)
+
+		if err := os.WriteFile(processedPath, result.DisplayResultImage, 0644); err != nil {
+			slog.Warn(fmt.Sprintf("Warning: Failed to save processed frame for server %s: %v", serverName, err))
 			continue
 		}
-		
-		log.Printf("Saved detection frame - Camera: %s, Server: %s (%s), Detections: %d, Path: %s", 
+
+		log.Printf("Saved detection frame - Camera: %s, Server: %s (%s), Detections: %d, Path: %s",
 			cameraName, serverName, modelType, len(result.Detections), processedPath)
-		
+
 		// Send alerts for each detection if global alert system is enabled
 		if len(result.Detections) > 0 {
-			m.sendDetectionAlerts(cameraName, originalFrame, modelType, result.Detections)
+			m.sendDetectionAlerts(cameraName, result.DisplayResultImage, modelType, result.Detections)
 		}
 	}
 }
@@ -375,13 +371,13 @@ func (m *FFmpegCmdRTSPManager) sendDetectionAlerts(cameraName string, imageData 
 			log.Printf("Warning: Failed to decode image config for alert: %v", err)
 			continue
 		}
-		
+
 		// Convert to normalized coordinates
 		x1 := float64(detection.X1) / float64(img.Width)
 		y1 := float64(detection.Y1) / float64(img.Height)
 		x2 := float64(detection.X2) / float64(img.Width)
 		y2 := float64(detection.Y2) / float64(img.Height)
-		
+
 		// Send alert using global configuration and camera name as KKS
 		if err := SendAlertIfConfigured(imageData, modelType, cameraName, detection.Confidence, x1, y1, x2, y2); err != nil {
 			log.Printf("Warning: Failed to send alert for camera %s: %v", cameraName, err)
