@@ -410,7 +410,7 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 		}
 
 		detections := processInferenceServer(frameData, server, &binding, cameraConfig.ID)
-		displayedImage, err := DrawDetections(frameData, detections, cameraConfig.Name, true)
+		displayedImage, err := DrawDetections(frameData, detections, cameraConfig.Name, false)
 		if err != nil {
 			slog.Warn(fmt.Sprintf("failed to write result for model %q", server.ModelType))
 		}
