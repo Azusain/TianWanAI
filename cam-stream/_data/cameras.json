@@ -7,13 +7,13 @@
       "inference_server_bindings": [
         {
           "server_id": "inf_9",
-          "threshold": 0.5
+          "threshold": 0
         }
       ],
       "enabled": true,
       "running": true,
       "created_at": "2025-09-04T15:53:04.1984727+08:00",
-      "updated_at": "2025-09-04T15:53:04.1984727+08:00"
+      "updated_at": "2025-09-04T16:33:09.8432596+08:00"
     }
   },
   "inference_servers": {

@@ -266,9 +266,9 @@ def app():
 
     return app
 
-# test on Windows.
-# if __name__ == "__main__":
-#   os.environ["MODEL"] = "fall"
-#   app = app()
-#   if app:
-#     app.run(port=8091, debug=True, host='0.0.0.0')
+# comment this if not testing on Windows.
+if __name__ == "__main__":
+  os.environ["MODEL"] = "fall"
+  app = app()
+  if app:
+    app.run(port=8091, debug=True, host='0.0.0.0')
