@@ -1,58 +1,40 @@
 {
   "cameras": {
-    "cam_13": {
-      "id": "cam_13",
+    "cam_20": {
+      "id": "cam_20",
       "name": "测试",
       "rtsp_url": "rtsp://192.168.31.48:8554/test",
       "inference_server_bindings": [
         {
-          "server_id": "inf_5",
-          "threshold": 0.35
+          "server_id": "inf_8",
+          "threshold": 0.5
         }
       ],
       "enabled": true,
       "running": true,
-      "created_at": "2025-09-03T16:33:59.1663022+08:00",
-      "updated_at": "2025-09-03T22:34:18.5317268+08:00"
+      "created_at": "2025-09-04T15:33:09.9697879+08:00",
+      "updated_at": "2025-09-04T15:33:09.9697879+08:00"
     }
   },
   "inference_servers": {
-    "inf_3": {
-      "id": "inf_3",
-      "name": "Mouse",
-      "url": "http://192.168.31.48:8080/mouse",
-      "model_type": "mouse",
+    "inf_8": {
+      "id": "inf_8",
+      "name": "Tshirt",
+      "url": "http://192.168.31.48:8091/tshirt",
+      "model_type": "tshirt",
       "description": "试试",
       "enabled": true,
-      "created_at": "2025-09-02T23:49:52.6629735+08:00",
-      "updated_at": "2025-09-02T23:49:52.6629735+08:00"
-    },
-    "inf_4": {
-      "id": "inf_4",
-      "name": "Gesture",
-      "url": "http://192.168.31.48:8901/gesture",
-      "model_type": "gesture",
-      "enabled": true,
-      "created_at": "2025-09-03T11:53:54.5763816+08:00",
-      "updated_at": "2025-09-03T11:53:54.5763816+08:00"
-    },
-    "inf_5": {
-      "id": "inf_5",
-      "name": "Fall",
-      "url": "http://192.168.31.48:8091/fall",
-      "model_type": "fall",
-      "enabled": true,
-      "created_at": "2025-09-03T15:23:20.5727652+08:00",
-      "updated_at": "2025-09-03T15:23:20.5727652+08:00"
+      "created_at": "2025-09-04T14:42:59.2357757+08:00",
+      "updated_at": "2025-09-04T14:42:59.2357757+08:00"
     }
   },
   "alert_server": {
     "url": "http://localhost:8081/alert",
     "enabled": false,
-    "updated_at": "2025-09-03T14:05:31.6832583+08:00"
+    "updated_at": "2025-09-04T12:17:43.5832561+08:00"
   },
   "counters": {
-    "camera": 13,
-    "inference_server": 5
+    "camera": 20,
+    "inference_server": 8
   }
 }

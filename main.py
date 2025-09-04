@@ -112,6 +112,7 @@ def app():
     @app.route('/gesture', methods=['POST'])
     @app.route('/ponding', methods=['POST'])
     @app.route('/mouse', methods=['POST'])
+    @app.route('/cigar', methods=['POST'])
     def YoloDetect():
         img, errno = validate_img_format()
         if img is None:
@@ -199,32 +200,31 @@ def app():
             if x2 > x1 and y2 > y1:
                 cropped_region = img[y1:y2, x1:x2]
                 top1_prob, top1_class, _, _ = base.Predict(cropped_region)
-                # '0' stands for 'tshirt'
-                if top1_class == 0:
-                    width_px = x2 - x1
-                    height_px = y2 - y1
-                    cx = x1 + width_px / 2
-                    cy = y1 + height_px / 2
-                    cxn = cx / W
-                    cyn = cy / H
-                    width_n = width_px / W
-                    height_n = height_px / H
-                    left_n = cxn - width_n / 2
-                    top_n = cyn - height_n / 2
-                    
-                    logger.success(f"SUCCESS - detection score: {score}, classification score: {top1_prob}")
-                    results.append({
-                        "detection_score": score,
-                        "classification_score": top1_prob,
-                        "location": {
-                            "left": left_n,
-                            "top": top_n,
-                            "width": width_n,
-                            "height": height_n
-                        }
-                    })
-                else:
-                    logger.info(f"FILTERED - classification rejected: class {top1_class} (prob: {top1_prob})")
+                width_px = x2 - x1
+                height_px = y2 - y1
+                cx = x1 + width_px / 2
+                cy = y1 + height_px / 2
+                cxn = cx / W
+                cyn = cy / H
+                width_n = width_px / W
+                height_n = height_px / H
+                left_n = cxn - width_n / 2
+                top_n = cyn - height_n / 2
+                                
+                results.append({
+                    "det_score": score,
+                    # index '1' stands for 'tshirt'
+                    "cls_score": top1_prob if top1_class == 1 else 1 - top1_prob,
+                    "location": {
+                        "left": left_n,
+                        "top": top_n,
+                        "width": width_n,
+                        "height": height_n
+                    }
+                })
+                logger.success(f"detection score: {score}, classification score: {top1_prob}")
+
+
         if len(results) > 0:
           errno = ServiceStatus.SUCCESS.value
         else:
@@ -267,8 +267,8 @@ def app():
     return app
 
 # test on Windows.
-# if __name__ == "__main__":
-#   os.environ["MODEL"] = "fall"
-#   app = app()
-#   if app:
-#     app.run(port=8091, debug=True, host='0.0.0.0')
+if __name__ == "__main__":
+  os.environ["MODEL"] = "tshirt"
+  app = app()
+  if app:
+    app.run(port=8091, debug=True, host='0.0.0.0')
