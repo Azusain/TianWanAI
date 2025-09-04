@@ -1,470 +1,465 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>图片查看器 - Cam-Stream</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: #f5f6fa;
-            color: #2c3e50;
-            padding: 20px;
-        }
-        
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            padding: 20px;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        }
-        
-        .header h1 {
-            font-size: 28px;
-            font-weight: 600;
-            color: #2c3e50;
-            margin-bottom: 10px;
-        }
-        
-        .nav-links {
-            margin-top: 15px;
-        }
-        
-        .nav-links a {
-            color: #3498db;
-            text-decoration: none;
-            margin: 0 15px;
-            font-weight: 500;
-        }
-        
-        .nav-links a:hover {
-            color: #2980b9;
-        }
-        
-        .controls {
-            background: white;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-            display: flex;
-            gap: 20px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-        
-        .form-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .form-group label {
-            font-weight: 500;
-            color: #2c3e50;
-        }
-        
-        .form-control {
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 14px;
-        }
-        
-        .btn {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.2s;
-            text-decoration: none;
-            display: inline-block;
-        }
-        
-        .btn-primary {
-            background: #3498db;
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background: #2980b9;
-        }
-        
-        .stats {
-            background: white;
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        }
-        
-        .image-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .image-card {
-            background: white;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-            transition: transform 0.2s;
-        }
-        
-        .image-card:hover {
-            transform: translateY(-2px);
-        }
-        
-        .image-container {
-            height: 200px;
-            overflow: hidden;
-        }
-        
-        .image-container img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            cursor: pointer;
-        }
-        
-        .image-info {
-            padding: 15px;
-        }
-        
-        .image-filename {
-            font-weight: 600;
-            margin-bottom: 8px;
-            font-size: 14px;
-        }
-        
-        .image-details {
-            font-size: 12px;
-            color: #666;
-            line-height: 1.4;
-        }
-        
-        .pagination {
-            text-align: center;
-            margin: 20px 0;
-        }
-        
-        .pagination button {
-            margin: 0 5px;
-        }
-        
-        .pagination button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #888;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-            grid-column: 1 / -1;
-        }
-        
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.9);
-        }
-        
-        .modal-content {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100%;
-            padding: 20px;
-        }
-        
-        .modal img {
-            max-width: 90%;
-            max-height: 90%;
-        }
-        
-        .close {
-            position: absolute;
-            top: 20px;
-            right: 35px;
-            color: white;
-            font-size: 40px;
-            cursor: pointer;
-        }
-        
-        .close:hover {
-            opacity: 0.7;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>图片查看器 - Cam-Stream</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: #f5f6fa;
+      color: #2c3e50;
+      padding: 20px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+      padding: 20px;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    }
+
+    .header h1 {
+      font-size: 28px;
+      font-weight: 600;
+      color: #2c3e50;
+      margin-bottom: 10px;
+    }
+
+    .nav-links {
+      margin-top: 15px;
+    }
+
+    .nav-links a {
+      color: #3498db;
+      text-decoration: none;
+      margin: 0 15px;
+      font-weight: 500;
+    }
+
+    .nav-links a:hover {
+      color: #2980b9;
+    }
+
+    .controls {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .form-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .form-group label {
+      font-weight: 500;
+      color: #2c3e50;
+    }
+
+    .form-control {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s;
+      text-decoration: none;
+      display: inline-block;
+    }
+
+    .btn-primary {
+      background: #3498db;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #2980b9;
+    }
+
+    .stats {
+      background: white;
+      border-radius: 12px;
+      padding: 15px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    }
+
+    .image-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .image-card {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+      transition: transform 0.2s;
+    }
+
+    .image-card:hover {
+      transform: translateY(-2px);
+    }
+
+    .image-container {
+      height: 200px;
+      overflow: hidden;
+    }
+
+    .image-container img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      cursor: pointer;
+    }
+
+    .image-info {
+      padding: 15px;
+    }
+
+    .image-filename {
+      font-weight: 600;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .image-details {
+      font-size: 12px;
+      color: #666;
+      line-height: 1.4;
+    }
+
+    .pagination {
+      text-align: center;
+      margin: 20px 0;
+    }
+
+    .pagination button {
+      margin: 0 5px;
+    }
+
+    .pagination button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #888;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+      grid-column: 1 / -1;
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+    }
+
+    .modal-content {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100%;
+      padding: 20px;
+    }
+
+    .modal img {
+      max-width: 90%;
+      max-height: 90%;
+    }
+
+    .close {
+      position: absolute;
+      top: 20px;
+      right: 35px;
+      color: white;
+      font-size: 40px;
+      cursor: pointer;
+    }
+
+    .close:hover {
+      opacity: 0.7;
+    }
+  </style>
 </head>
+
 <body>
-    <div class="header">
-        <h1>📷 图片查看器</h1>
-        <div class="nav-links">
-            <a href="/">← 返回首页</a>
-            <a href="/cameras">摄像头管理</a>
-            <a href="/api/debug">系统调试</a>
-        </div>
+  <div class="header">
+    <h1>📷 图片查看器</h1>
+    <div class="nav-links">
+      <a href="/">← 返回首页</a>
+      <a href="/cameras">摄像头管理</a>
+      <a href="/api/debug">系统调试</a>
     </div>
-    
-    <div class="controls">
-        <div class="form-group">
-            <label>选择推理服务器:</label>
-            <select id="serverSelect" class="form-control">
-                <option value="">所有服务器</option>
-            </select>
-        </div>
-        <button onclick="refreshImages()" class="btn btn-primary">🔄 刷新</button>
-    </div>
-    
-    <div id="stats" class="stats" style="display: none;">
-        <span>总图片数: <strong id="totalImages">0</strong></span> | 
-        <span>当前服务器: <strong id="currentServer">-</strong></span>
-    </div>
-    
-    <div id="imageGrid" class="image-grid">
-        <div class="empty-state">
-            <p>正在加载图片...</p>
-        </div>
-    </div>
-    
-    <div id="pagination" class="pagination" style="display: none;">
-        <button onclick="goToPage(currentPageNum - 1)" class="btn btn-primary">上一页</button>
-        <span>第 <span id="pageDisplay">1</span> 页，共 <span id="totalPagesDisplay">1</span> 页</span>
-        <button onclick="goToPage(currentPageNum + 1)" class="btn btn-primary">下一页</button>
-    </div>
+  </div>
 
-    <!-- 图片弹窗 -->
-    <div id="imageModal" class="modal">
-        <span class="close" onclick="closeModal()">&times;</span>
-        <div class="modal-content">
-            <img id="modalImage" src="" alt="">
-        </div>
+  <div class="controls">
+    <div class="form-group">
+      <label>选择推理服务器:</label>
+      <select id="serverSelect" class="form-control">
+        <option value="">所有服务器</option>
+      </select>
     </div>
+    <button onclick="refreshImages()" class="btn btn-primary">🔄 刷新</button>
+  </div>
 
-    <script>
-        let servers = [];
-        let images = [];
-        let currentPageNum = 1;
-        let totalPages = 1;
-        let currentServer = '';
+  <div id="stats" class="stats" style="display: none;">
+    <span>总图片数: <strong id="totalImages">0</strong></span> |
+    <span>当前服务器: <strong id="currentServer">-</strong></span>
+  </div>
 
-        // 页面加载时自动启动
-        document.addEventListener('DOMContentLoaded', function() {
-            populateServerSelect();
-            loadImages();
+  <div id="imageGrid" class="image-grid">
+    <div class="empty-state">
+      <p>正在加载图片...</p>
+    </div>
+  </div>
+
+  <div id="pagination" class="pagination" style="display: none;">
+    <button onclick="goToPage(currentPageNum - 1)" class="btn btn-primary">上一页</button>
+    <span>第 <span id="pageDisplay">1</span> 页，共 <span id="totalPagesDisplay">1</span> 页</span>
+    <button onclick="goToPage(currentPageNum + 1)" class="btn btn-primary">下一页</button>
+  </div>
+
+  <!-- 图片弹窗 -->
+  <div id="imageModal" class="modal">
+    <span class="close" onclick="closeModal()">&times;</span>
+    <div class="modal-content">
+      <img id="modalImage" src="" alt="">
+    </div>
+  </div>
+
+  <script>
+    let servers = [];
+    let images = [];
+    let currentPageNum = 1;
+    let totalPages = 1;
+    let currentServer = '';
+
+    // 页面加载时自动启动
+    document.addEventListener('DOMContentLoaded', function () {
+      populateServerSelect();
+      loadImages();
+    });
+
+    async function populateServerSelect() {
+      const select = document.getElementById('serverSelect');
+      select.innerHTML = '<option value="">所有服务器</option>';
+
+      try {
+        console.log('开始扫描output目录...');
+        const response = await fetch('/output/');
+        console.log('Output目录响应状态:', response.status);
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const html = await response.text();
+        console.log('Output目录HTML响应长度:', html.length);
+
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const links = doc.querySelectorAll('a[href]');
+        console.log('找到的链接数量:', links.length);
+
+        const actualServers = [];
+        links.forEach((link, index) => {
+          const href = link.getAttribute('href');
+          const text = link.textContent.trim();
+          console.log(`链接 ${index}: href="${href}", text="${text}"`);
+
+          // 过滤掉父目录和文件，只保留目录
+          if (href && href.endsWith('/') && href !== '../' && href !== './') {
+            const serverName = href.replace('/', '');
+            if (serverName) {  // 确保不是空字符串
+              actualServers.push(serverName);
+              console.log('添加服务器目录:', serverName);
+            }
+          }
         });
 
-        async function populateServerSelect() {
-            const select = document.getElementById('serverSelect');
-            select.innerHTML = '<option value="">所有服务器</option>';
-            
-            try {
-                console.log('开始扫描output目录...');
-                // 扫描output目录获取实际存在的服务器目录
-                const response = await fetch('/output/');
-                console.log('Output目录响应状态:', response.status);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        console.log('发现的实际推理服务器目录:', actualServers);
+
+        // 保存到全局变量 - 完全同步，只保留实际扫描到的
+        servers = actualServers;
+
+        // 添加所有实际扫描到的服务器选项
+        actualServers.forEach(serverName => {
+          const option = document.createElement('option');
+          option.value = serverName;
+          option.textContent = serverName;
+          select.appendChild(option);
+        });
+
+        if (actualServers.length === 0) {
+          console.log('没有找到任何服务器目录');
+          const noOption = document.createElement('option');
+          noOption.value = '';
+          noOption.textContent = '暂无推理服务器目录';
+          noOption.disabled = true;
+          select.appendChild(noOption);
+        } else {
+          console.log('成功加载服务器目录:', actualServers.join(', '));
+        }
+
+      } catch (error) {
+        console.error('加载服务器目录失败:', error);
+        // 错误时清空服务器列表
+        servers = [];
+        const errorOption = document.createElement('option');
+        errorOption.value = '';
+        errorOption.textContent = '加载失败: ' + error.message;
+        errorOption.disabled = true;
+        select.appendChild(errorOption);
+      }
+
+      select.addEventListener('change', function () {
+        currentServer = this.value;
+        currentPageNum = 1;
+        loadImages();
+      });
+    }
+    async function loadImages() {
+      showManualImageList();
+    }
+
+    async function showManualImageList() {
+      console.log('扫描推理服务器目录中的图片...');
+
+      const allImages = [];
+
+      // 如果选择了特定服务器，只扫描该服务器；否则扫描所有发现的服务器
+      const serversToScan = currentServer ? [currentServer] : servers;
+
+      for (const serverName of serversToScan) {
+        try {
+          console.log(`检查服务器目录: ${serverName}`);
+          const response = await fetch(`/output/${serverName}/`);
+
+          if (response.ok) {
+            const html = await response.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const links = doc.querySelectorAll('a[href$=".jpg"], a[href$=".jpeg"], a[href$=".JPG"], a[href$=".JPEG"]');
+
+            console.log(`在 ${serverName} 目录下找到 ${links.length} 个图片文件`);
+
+            links.forEach(link => {
+              const filename = link.getAttribute('href');
+              if (filename && filename !== '../' && !filename.includes('/')) {
+                const match = filename.match(/(\d{8})_(\d{6})/i);
+                let displayTime = new Date().toISOString();
+
+                if (match) {
+                  const dateStr = match[1];
+                  const timeStr = match[2];
+                  const year = dateStr.slice(0, 4);
+                  const month = dateStr.slice(4, 6);
+                  const day = dateStr.slice(6, 8);
+                  const hour = timeStr.slice(0, 2);
+                  const minute = timeStr.slice(2, 4);
+                  const second = timeStr.slice(4, 6);
+
+                  displayTime = `${year}-${month}-${day}T${hour}:${minute}:${second}`;
                 }
-                
-                const html = await response.text();
-                console.log('Output目录HTML响应长度:', html.length);
-                console.log('Output目录HTML前500字符:', html.substring(0, 500));
-                
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(html, 'text/html');
-                const links = doc.querySelectorAll('a[href]');
-                console.log('找到的链接数量:', links.length);
-                
-                const actualServers = [];
-                links.forEach((link, index) => {
-                    const href = link.getAttribute('href');
-                    const text = link.textContent.trim();
-                    console.log(`链接 ${index}: href="${href}", text="${text}"`);
-                    
-                    // 过滤掉父目录和文件，只保留目录
-                    if (href && href.endsWith('/') && href !== '../' && href !== './') {
-                        const serverName = href.replace('/', '');
-                        if (serverName) {  // 确保不是空字符串
-                            actualServers.push(serverName);
-                            console.log('添加服务器目录:', serverName);
-                        }
-                    }
+
+                allImages.push({
+                  filename: filename,
+                  serverName: serverName,
+                  size: 150000 + Math.floor(Math.random() * 50000),
+                  created_at: displayTime
                 });
-                
-                console.log('发现的实际推理服务器目录:', actualServers);
-                
-                // 如果没有检测到，添加已知的服务器目录作为后备
-                const knownServers = ['Mouse', 'Gesture'];
-                knownServers.forEach(serverName => {
-                    if (!actualServers.includes(serverName)) {
-                        console.log('添加已知服务器目录:', serverName);
-                        actualServers.push(serverName);
-                    }
-                });
-                
-                // 保存到全局变量
-                servers = actualServers;
-                
-                // 添加所有服务器选项
-                actualServers.forEach(serverName => {
-                    const option = document.createElement('option');
-                    option.value = serverName;
-                    option.textContent = serverName;
-                    select.appendChild(option);
-                });
-                
-                if (actualServers.length === 0) {
-                    console.warn('没有找到任何服务器目录');
-                    const noOption = document.createElement('option');
-                    noOption.value = '';
-                    noOption.textContent = '暂无推理服务器目录';
-                    noOption.disabled = true;
-                    select.appendChild(noOption);
-                } else {
-                    console.log('成功加载服务器目录:', actualServers.join(', '));
-                }
-                
-            } catch (error) {
-                console.error('加载服务器目录失败:', error);
-                const errorOption = document.createElement('option');
-                errorOption.value = '';
-                errorOption.textContent = '加载失败: ' + error.message;
-                errorOption.disabled = true;
-                select.appendChild(errorOption);
-            }
-            
-            select.addEventListener('change', function() {
-                currentServer = this.value;
-                currentPageNum = 1;
-                loadImages();
+              }
             });
+          }
+        } catch (error) {
+          console.log(`无法访问服务器目录 ${serverName}: ${error.message}`);
         }
+      }
 
-        async function loadImages() {
-            showManualImageList();
-        }
+      if (allImages.length > 0) {
+        console.log(`总共找到 ${allImages.length} 张图片`);
 
-        async function showManualImageList() {
-            console.log('扫描推理服务器目录中的图片...');
-            
-            const allImages = [];
-            
-            // 如果选择了特定服务器，只扫描该服务器；否则扫描所有发现的服务器
-            const serversToScan = currentServer ? [currentServer] : servers;
-            
-            for (const serverName of serversToScan) {
-                try {
-                    console.log(`检查服务器目录: ${serverName}`);
-                    const response = await fetch(`/output/${serverName}/`);
-                    
-                    if (response.ok) {
-                        const html = await response.text();
-                        const parser = new DOMParser();
-                        const doc = parser.parseFromString(html, 'text/html');
-                        const links = doc.querySelectorAll('a[href$=".jpg"], a[href$=".jpeg"], a[href$=".JPG"], a[href$=".JPEG"]');
-                        
-                        console.log(`在 ${serverName} 目录下找到 ${links.length} 个图片文件`);
-                        
-                        links.forEach(link => {
-                            const filename = link.getAttribute('href');
-                            if (filename && filename !== '../' && !filename.includes('/')) {
-                                const match = filename.match(/(\d{8})_(\d{6})/i);
-                                let displayTime = new Date().toISOString();
-                                
-                                if (match) {
-                                    const dateStr = match[1];
-                                    const timeStr = match[2];
-                                    const year = dateStr.slice(0, 4);
-                                    const month = dateStr.slice(4, 6);
-                                    const day = dateStr.slice(6, 8);
-                                    const hour = timeStr.slice(0, 2);
-                                    const minute = timeStr.slice(2, 4);
-                                    const second = timeStr.slice(4, 6);
-                                    
-                                    displayTime = `${year}-${month}-${day}T${hour}:${minute}:${second}`;
-                                }
-                                
-                                allImages.push({
-                                    filename: filename,
-                                    serverName: serverName,
-                                    size: 150000 + Math.floor(Math.random() * 50000),
-                                    created_at: displayTime
-                                });
-                            }
-                        });
-                    }
-                } catch (error) {
-                    console.log(`无法访问服务器目录 ${serverName}: ${error.message}`);
-                }
-            }
-            
-            if (allImages.length > 0) {
-                console.log(`总共找到 ${allImages.length} 张图片`);
-                
-                // 按时间排序（最新的在前）
-                allImages.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                
-                const pageSize = 24;
-                const totalImages = allImages.length;
-                totalPages = Math.ceil(totalImages / pageSize);
-                const startIndex = (currentPageNum - 1) * pageSize;
-                const endIndex = Math.min(startIndex + pageSize, totalImages);
-                
-                images = allImages.slice(startIndex, endIndex);
-                
-                const data = {
-                    total_count: totalImages,
-                    total_pages: totalPages,
-                    current_page: currentPageNum,
-                    images: images
-                };
-                
-                updateStats(data);
-                renderImages();
-                updatePagination();
-            } else {
-                showEmptyState();
-            }
-        }
+        // 按时间排序（最新的在前）
+        allImages.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-        function updateStats(data) {
-            document.getElementById('totalImages').textContent = data.total_count || 0;
-            document.getElementById('currentServer').textContent = currentServer || '所有服务器';
-            document.getElementById('stats').style.display = 'block';
-        }
+        const pageSize = 24;
+        const totalImages = allImages.length;
+        totalPages = Math.ceil(totalImages / pageSize);
+        const startIndex = (currentPageNum - 1) * pageSize;
+        const endIndex = Math.min(startIndex + pageSize, totalImages);
 
-        function renderImages() {
-            const grid = document.getElementById('imageGrid');
-            
-            if (images.length === 0) {
-                showEmptyState();
-                return;
-            }
-            
-            grid.innerHTML = images.map(img => `
+        // 关键：用扫描结果完全替换内存数据
+        images = allImages.slice(startIndex, endIndex);
+
+        const data = {
+          total_count: totalImages,
+          total_pages: totalPages,
+          current_page: currentPageNum,
+          images: images
+        };
+
+        updateStats(data);
+        renderImages();
+        updatePagination();
+      } else {
+        // 关键：没有扫描到文件时，清空内存数据
+        images = [];
+        showEmptyState();
+      }
+    }
+
+    function updateStats(data) {
+      document.getElementById('totalImages').textContent = data.total_count || 0;
+      document.getElementById('currentServer').textContent = currentServer || '所有服务器';
+      document.getElementById('stats').style.display = 'block';
+    }
+
+    function renderImages() {
+      const grid = document.getElementById('imageGrid');
+
+      if (images.length === 0) {
+        showEmptyState();
+        return;
+      }
+
+      grid.innerHTML = images.map(img => `
                 <div class="image-card">
                     <div class="image-container">
                         <img src="output/${img.serverName}/${img.filename}" 
@@ -482,67 +477,68 @@
                     </div>
                 </div>
             `).join('');
-        }
+    }
 
-        function showEmptyState() {
-            const grid = document.getElementById('imageGrid');
-            grid.innerHTML = `
+    function showEmptyState() {
+      const grid = document.getElementById('imageGrid');
+      grid.innerHTML = `
                 <div class="empty-state">
                     <h3>暂无检测图片</h3>
                     <p>系统中还没有保存的检测图片</p>
                     <p style="margin-top: 10px; font-size: 0.9rem;">图片保存路径: output/[推理服务器名称]/</p>
                 </div>
             `;
-        }
+    }
 
-        function updatePagination() {
-            const pagination = document.getElementById('pagination');
-            const prevBtn = pagination.querySelector('button:first-child');
-            const nextBtn = pagination.querySelector('button:last-child');
-            
-            prevBtn.disabled = currentPageNum <= 1;
-            nextBtn.disabled = currentPageNum >= totalPages;
-            
-            document.getElementById('pageDisplay').textContent = currentPageNum;
-            document.getElementById('totalPagesDisplay').textContent = totalPages;
-            
-            pagination.style.display = totalPages > 1 ? 'block' : 'none';
-        }
+    function updatePagination() {
+      const pagination = document.getElementById('pagination');
+      const prevBtn = pagination.querySelector('button:first-child');
+      const nextBtn = pagination.querySelector('button:last-child');
 
-        function goToPage(page) {
-            if (page < 1 || page > totalPages) return;
-            currentPageNum = page;
-            loadImages();
-        }
+      prevBtn.disabled = currentPageNum <= 1;
+      nextBtn.disabled = currentPageNum >= totalPages;
 
-        function openModal(imageSrc) {
-            const modal = document.getElementById('imageModal');
-            const modalImg = document.getElementById('modalImage');
-            modal.style.display = 'block';
-            modalImg.src = imageSrc;
-        }
+      document.getElementById('pageDisplay').textContent = currentPageNum;
+      document.getElementById('totalPagesDisplay').textContent = totalPages;
 
-        function closeModal() {
-            document.getElementById('imageModal').style.display = 'none';
-        }
+      pagination.style.display = totalPages > 1 ? 'block' : 'none';
+    }
 
-        function refreshImages() {
-            currentPageNum = 1;
-            loadImages();
-        }
+    function goToPage(page) {
+      if (page < 1 || page > totalPages) return;
+      currentPageNum = page;
+      loadImages();
+    }
 
-        function formatDateTime(dateString) {
-            const date = new Date(dateString);
-            return date.toLocaleDateString('zh-CN') + ' ' + date.toLocaleTimeString('zh-CN');
-        }
+    function openModal(imageSrc) {
+      const modal = document.getElementById('imageModal');
+      const modalImg = document.getElementById('modalImage');
+      modal.style.display = 'block';
+      modalImg.src = imageSrc;
+    }
 
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-    </script>
+    function closeModal() {
+      document.getElementById('imageModal').style.display = 'none';
+    }
+
+    function refreshImages() {
+      currentPageNum = 1;
+      loadImages();
+    }
+
+    function formatDateTime(dateString) {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('zh-CN') + ' ' + date.toLocaleTimeString('zh-CN');
+    }
+
+    function formatFileSize(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+  </script>
 </body>
+
 </html>

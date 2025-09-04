@@ -51,7 +51,10 @@ type InferenceResponse struct {
 
 // DetectionResult represents a single detection result from Python server
 type DetectionResult struct {
-	Score    float64  `json:"score"`
+	Score float64 `json:"score"`
+	// TODO: this is used by 'tshirt' service.
+	DetScore *float64 `json:"det_score,omitempty"`
+	ClsScore *float64 `json:"cls_score,omitempty"`
 	Location Location `json:"location"`
 	Class    string   `json:"class,omitempty"` // Class name if provided by server
 }
@@ -160,9 +163,19 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 	// Convert Python server results to our Detection format
 	var detections []Detection
 	for _, result := range response.Results {
-		// Skip results with no score (no detection)
-		if result.Score <= 0 || result.Location.Left < 0 {
-			log.Printf("Skipping invalid detection with score %.3f", result.Score)
+		confidence := 0.0
+		// TODO: use enumerate instead.
+		validRegularScore := modelType != "tshirt" && result.Score > 0 && result.Location.Left > 0
+		validTshirtScore := modelType == "tshirt" && result.DetScore != nil && result.ClsScore != nil && *result.DetScore > 0 && *result.ClsScore > 0
+		if validTshirtScore {
+			// TODO: better algorithm.
+			// confidence = math.Exp(math.Log(*result.DetScore) + math.Log(*result.ClsScore))
+			confidence = *result.ClsScore
+			slog.Info(fmt.Sprintf("det: %f , cls: %f", *result.DetScore, *result.ClsScore))
+		} else if validRegularScore {
+			confidence = result.Score
+		} else {
+			slog.Warn("invalid detection result from inference server")
 			continue
 		}
 
@@ -201,7 +214,7 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 
 		detection := Detection{
 			Class:      className,
-			Confidence: result.Score,
+			Confidence: confidence,
 			X1:         x1,
 			Y1:         y1,
 			X2:         x2,
@@ -397,7 +410,7 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 		}
 
 		detections := processInferenceServer(frameData, server, &binding, cameraConfig.ID)
-		displayedImage, err := DrawDetections(frameData, detections, cameraConfig.Name)
+		displayedImage, err := DrawDetections(frameData, detections, cameraConfig.Name, true)
 		if err != nil {
 			slog.Warn(fmt.Sprintf("failed to write result for model %q", server.ModelType))
 		}

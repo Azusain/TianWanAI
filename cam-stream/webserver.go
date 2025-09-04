@@ -1044,14 +1044,14 @@ func (ws *WebServer) handleAPIAlertServer(w http.ResponseWriter, r *http.Request
 func (ws *WebServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	content := `
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alert Configuration - Cam-Stream Platform</title>
+    <title>告警配置 - Cam-Stream 平台</title>
     <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
             background-color: #f8f9fa;
             color: #333;
             margin: 0;
@@ -1107,6 +1107,7 @@ func (ws *WebServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
             border-radius: 6px;
             font-size: 14px;
             transition: border-color 0.2s;
+            box-sizing: border-box;
         }
         .form-group input:focus {
             outline: none;
@@ -1178,14 +1179,14 @@ func (ws *WebServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 <body>
     <div class="container">
         <div class="header">
-            <h1>Alert Configuration</h1>
-            <a href="/" class="nav-link">← Back to Dashboard</a>
+            <h1>告警配置</h1>
+            <a href="/" class="nav-link">← 返回仪表板</a>
         </div>
 
         <div class="info-box">
-            <h3>Global Alert Server Configuration</h3>
-            <p>Configure the global alert server that will receive detection alerts from all cameras.</p>
-            <p>When enabled, detection alerts will be sent to the configured URL according to the API specification.</p>
+            <h3>全局告警服务器配置</h3>
+            <p>配置全局告警服务器，用于接收所有摄像头的检测告警。</p>
+            <p>启用后，检测告警将根据API规范发送到配置的URL地址。</p>
         </div>
 
         <div class="alert-config">
@@ -1193,20 +1194,20 @@ func (ws *WebServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
             
             <form id="alertForm">
                 <div class="form-group">
-                    <label for="alertUrl">Alert Platform URL:</label>
+                    <label for="alertUrl">告警平台URL：</label>
                     <input type="url" id="alertUrl" placeholder="http://localhost:8080/alert" required>
                 </div>
 
                 <div class="form-group">
                     <div class="checkbox-group">
                         <input type="checkbox" id="alertEnabled">
-                        <label for="alertEnabled">Enable Alert System</label>
+                        <label for="alertEnabled">启用告警系统</label>
                     </div>
                 </div>
 
                 <button type="submit" class="btn" id="saveBtn">
-                    <span class="loading" id="loading">Saving...</span>
-                    <span id="saveText">Save Configuration</span>
+                    <span class="loading" id="loading">保存中...</span>
+                    <span id="saveText">保存配置</span>
                 </button>
             </form>
         </div>
@@ -1219,7 +1220,7 @@ func (ws *WebServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
         const loading = document.getElementById('loading');
         const saveText = document.getElementById('saveText');
 
-        // Load current configuration on page load
+        // 页面加载时获取当前配置
         async function loadConfiguration() {
             try {
                 const response = await fetch('/api/alert-server');
@@ -1231,18 +1232,18 @@ func (ws *WebServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
                     document.getElementById('alertEnabled').checked = config.enabled || false;
                 }
             } catch (error) {
-                showStatus('Failed to load current configuration', 'error');
+                showStatus('加载当前配置失败', 'error');
             }
         }
 
-        // Save configuration
+        // 保存配置
         alertForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
             const alertUrl = document.getElementById('alertUrl').value;
             const alertEnabled = document.getElementById('alertEnabled').checked;
 
-            // Show loading state
+            // 显示加载状态
             saveBtn.disabled = true;
             loading.style.display = 'inline';
             saveText.style.display = 'none';
@@ -1262,14 +1263,14 @@ func (ws *WebServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
                 const result = await response.json();
                 
                 if (result.success) {
-                    showStatus('Alert configuration saved successfully!', 'success');
+                    showStatus('告警配置保存成功！', 'success');
                 } else {
-                    showStatus('Failed to save configuration: ' + (result.error || result.message), 'error');
+                    showStatus('保存配置失败：' + (result.error || result.message), 'error');
                 }
             } catch (error) {
-                showStatus('Network error: ' + error.message, 'error');
+                showStatus('网络错误：' + error.message, 'error');
             } finally {
-                // Reset loading state
+                // 重置加载状态
                 saveBtn.disabled = false;
                 loading.style.display = 'none';
                 saveText.style.display = 'inline';
@@ -1281,13 +1282,13 @@ func (ws *WebServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
             statusDiv.className = 'status ' + type;
             statusDiv.style.display = 'block';
             
-            // Hide status after 5 seconds
+            // 5秒后隐藏状态提示
             setTimeout(() => {
                 statusDiv.style.display = 'none';
             }, 5000);
         }
 
-        // Load configuration when page loads
+        // 页面加载时获取配置
         loadConfiguration();
     </script>
 </body>
