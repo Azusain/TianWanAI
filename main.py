@@ -1,29 +1,22 @@
-# api packages
 import binascii
 from enum import Enum
 import os
 import sys
+# git submodule.
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '__SmokeFire')))
-
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '__Fall')))
+from __Fall import FallDetector, ResultHandler
 from __SmokeFire.smoke import SmokeFileDetector
-import torch
-
 from flask import Flask, request
 from uuid import uuid4 as uuid4
 import base64
-
-# image processing
 import numpy as np
 import cv2
-
-# api
 from uuid import uuid4 as uuid4
-
-# project 
-from api import ServiceStatus, YoloClassificationService, YoloDetectionService, TshirtDetectionService, TemporalFallDetectionService
-
-# logger
+from api import ServiceStatus, YoloClassificationService, YoloDetectionService, TshirtDetectionService
 from loguru import logger
+import threading
+from flask import Flask, request, jsonify
 
 
 class ModelType(Enum):
@@ -63,21 +56,23 @@ def validate_img_format():
 
 # TODO: move this to configuration file.
 def get_service(model_type: str):
-  if model_type == ModelType.GESTURE.value:
-    return YoloDetectionService("models/gesture/weights/gesture_v2.pt", 640), None
-  if model_type == ModelType.PONDING.value:
-    return YoloDetectionService("models/ponding/weights/best.pt", 640), None
-  if model_type == ModelType.MOUSE.value:
-    return YoloDetectionService("models/mouse/weights/mouse_v4.pt", 640), None
-  if model_type == ModelType.CIGAR.value:
-    return YoloDetectionService("models/cigar/weights/cigar_v1.pt", 640), None
-  if model_type == ModelType.SMOKE .value:
-    return SmokeFileDetector("__SmokeFire/weights/smoke.pt"), None
-  if model_type == ModelType.TSHIRT.value:
-    return TshirtDetectionService("models/fashionpedia", 640), YoloClassificationService("models/tshirt_cls/weights/tshirt_cls_v1.pt")
-  if model_type == ModelType.FALL.value:
-    return TemporalFallDetectionService(), None
+    if model_type == ModelType.GESTURE.value:
+        return YoloDetectionService("models/gesture/weights/gesture_v2.pt", 640), None
+    if model_type == ModelType.PONDING.value:
+        return YoloDetectionService("models/ponding/weights/best.pt", 640), None
+    if model_type == ModelType.MOUSE.value:
+        return YoloDetectionService("models/mouse/weights/mouse_v4.pt", 640), None
+    if model_type == ModelType.CIGAR.value:
+        return YoloDetectionService("models/cigar/weights/cigar_v1.pt", 640), None
+    if model_type == ModelType.SMOKE .value:
+        return SmokeFileDetector("__SmokeFire/weights/smoke.pt"), None
+    if model_type == ModelType.TSHIRT.value:
+        return TshirtDetectionService("models/fashionpedia", 640), YoloClassificationService("models/tshirt_cls/weights/tshirt_cls_v1.pt")
+    return None, None
 
+
+
+        
 # model:
 #   - gesture
 #   - tshirt
@@ -87,15 +82,9 @@ def get_service(model_type: str):
 #   - fall
 #   - cigar
 def app():
-    model_type = os.environ.get('MODEL')
-    if model_type:
-      print(f"Using model: {model_type}")
-    else:
-      print("Environment variable `MODEL` not set")
-      return 
-  
     # runtime initiaization
-    log_path = f"logs/{model_type}/" + "runtime_{time}.log"
+    # TODO: differed by model.
+    log_path = f"logs/" + "runtime_{time}.log"
     logger.add(
         log_path,
         rotation="2 GB", 
@@ -104,7 +93,8 @@ def app():
     
     app = Flask(__name__)
 
-    service, base = get_service(model_type)
+    # TODO: lazy loading.
+    service, base = get_service("")
     logger.info("server is up!")
     
     # router settings, no trailing slash so that:
@@ -127,24 +117,99 @@ def app():
             xyxyn=xyxyn
         )
     
-    # TODO: support this one day.
     # Temporal Fall Detection using ST-GCN - Now follows unified design pattern
-    # @app.route('/fall', methods=['POST'])
-    # def FallDetect():
-    #     img, errno = validate_img_format()
-    #     if img is None:
-    #         return service.Response(errno=errno)
+    @app.route('/fall/start', methods=['POST'])
+    def StartFallDetection():
+        # check args.
+        req = None
+        try:
+            req = request.json              
+        except Exception:         
+            return None, ServiceStatus.INVALID_CONTENT_TYPE.value
+        if not req.__contains__('rtsp_address') or req['rtsp_address'] == '':         
+            return {
+                "err_msg": "missing json field: rtsp_address",
+            }, 400
+        if not req.__contains__('device') or req['device'] == '':         
+            return {
+                "err_msg": "missing json field: device",
+            }, 400
         
-    #     # Use the same pattern as other detection services
-    #     # The detect method handles the full pipeline
-    #     score, xyxyn, _ = service.Predict(img)
-        
-    #     return service.Response(
-    #         errno=errno,
-    #         score=score,
-    #         xyxyn=xyxyn
-    #     )
+        # spawn a new thread.
+        task_id = str(uuid4())
+        with FallDetector.g_tasks_lock:
+            FallDetector.g_tasks[task_id] = False
+        threading.Thread(
+            target=FallDetector.fall_detection_task, 
+            args=(task_id, req['rtsp_address'], req['device'])
+        ).start()
+        logger.warning(f"spawn new worker thread for task {task_id}")
+        return {
+            "err_msg": "success",
+            "task_id": task_id
+        }
+      
+    @app.route('/fall/stop', methods=['POST'])
+    def StopFallDetectionById():
+        data = request.get_json()
+        task_id = data.get("task_id") if data else None
+        if not task_id:
+            return {
+                "err_msg": "missing json field: task_id"
+            }, 400
 
+        with FallDetector.g_tasks_lock:
+            if (not task_id in FallDetector.g_tasks) or FallDetector.g_tasks[task_id] is None or FallDetector.g_tasks[task_id] is True:
+                return {
+                    "err_msg": f"task {task_id} not found"
+                }, 400
+            FallDetector.g_tasks[task_id] = True
+            return {
+                "err_msg": f"successfully stop task {task_id}"
+            }
+    
+    # TODO: error and err_msg.
+    @app.route('/fall/result', methods=['POST'])
+    def GetDetectionResultById():
+        data = request.get_json()
+        task_id = data.get("task_id")
+        # if the json field 'limit' is not set, return all result.
+        limit = data.get("limit", None) 
+
+        if not task_id:
+            return jsonify({"error": "task_id is required"}), 400
+
+        with ResultHandler.g_images_lock:
+            if task_id not in ResultHandler.g_images or len(ResultHandler.g_images[task_id]) == 0:
+                return jsonify({"results": []})
+            
+            if limit is not None:
+                try:
+                    limit = int(limit)
+                    if limit <= 0:
+                        return jsonify({"error": "limit must be positive"}), 400
+                except ValueError:
+                    return jsonify({"error": "limit must be an integer"}), 400
+
+                results_list = []
+                for _ in range(min(limit, len(ResultHandler.g_images[task_id]))):
+                    results_list.append(ResultHandler.g_images[task_id].popleft())
+            else:
+                results_list = list(ResultHandler.g_images[task_id])
+                ResultHandler.g_images[task_id].clear()
+
+        resp = []
+        for item in results_list:
+            import cv2, base64
+            _, buffer = cv2.imencode('.jpg', item["image"])
+            img_b64 = base64.b64encode(buffer).decode('utf-8')
+            resp.append({
+                "image": img_b64,
+                "results": item["results"]
+            })
+
+        return jsonify(resp)
+        
     @app.route('/tshirt', methods=['POST'])
     def TshirtDetect():
         img, errno = validate_img_format()
@@ -268,8 +333,7 @@ def app():
     return app
 
 # comment this if not testing on Windows.
-# if __name__ == "__main__":
-#   os.environ["MODEL"] = "cigar"
-#   app = app()
-#   if app:
-#     app.run(port=8091, debug=True, host='0.0.0.0')
+if __name__ == "__main__":
+  app = app()
+  if app:
+    app.run(port=8091, debug=True, host='0.0.0.0')
