@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -47,6 +49,7 @@ type CamStreamData struct {
 const (
 	DefaultPort = 8081
 	OutputDir   = "saved_requests"
+	ImagesDir   = "saved_images"
 )
 
 // Global variable to store current port
@@ -58,9 +61,12 @@ func main() {
 
 	log.Printf("Starting Alert Platform Mock Server on port %d", DefaultPort)
 
-	// Create output directory for saved alerts
+	// Create output directories for saved alerts and images
 	if err := os.MkdirAll(OutputDir, 0755); err != nil {
 		log.Fatalf("Failed to create output directory: %v", err)
+	}
+	if err := os.MkdirAll(ImagesDir, 0755); err != nil {
+		log.Fatalf("Failed to create images directory: %v", err)
 	}
 
 	// Set up HTTP routes
@@ -138,12 +144,26 @@ func handleAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save image if present
+	var imageSaveErr error
+	if alertReq.Image != "" {
+		if err := saveImageToFile(alertReq); err != nil {
+			log.Printf("Failed to save image to file: %v", err)
+			imageSaveErr = err
+		}
+	}
+
 	log.Printf("Alert saved successfully for camera %s (Request ID: %s)", alertReq.CameraKKS, alertReq.RequestID)
 
 	// Send success response
+	message := "Alert received and saved successfully"
+	if imageSaveErr != nil {
+		message += " (warning: image save failed)"
+	}
+
 	response := AlertResponse{
 		Success:   true,
-		Message:   "Alert received and saved successfully",
+		Message:   message,
 		RequestID: alertReq.RequestID,
 	}
 	w.WriteHeader(http.StatusOK)
@@ -178,6 +198,73 @@ func saveAlertToFile(alertReq AlertRequest) error {
 	return nil
 }
 
+// saveImageToFile decodes and saves the base64 image to a file
+func saveImageToFile(alertReq AlertRequest) error {
+	if alertReq.Image == "" {
+		return nil
+	}
+
+	// Create timestamp for filename
+	timestamp := time.Now().Format("20060102_150405_000")
+
+	// Remove data URL prefix if present (e.g., "data:image/jpeg;base64,")
+	imageData := alertReq.Image
+	if strings.Contains(imageData, ",") {
+		parts := strings.SplitN(imageData, ",", 2)
+		if len(parts) == 2 {
+			imageData = parts[1]
+		}
+	}
+
+	// Decode base64 image
+	decodedImage, err := base64.StdEncoding.DecodeString(imageData)
+	if err != nil {
+		return fmt.Errorf("failed to decode base64 image: %v", err)
+	}
+
+	// Determine file extension based on image magic bytes
+	ext := getImageExtension(decodedImage)
+
+	// Create filename with camera, model and timestamp info
+	filename := fmt.Sprintf("%s_%s_%s_%s%s",
+		timestamp, alertReq.CameraKKS, alertReq.Model, alertReq.RequestID, ext)
+
+	// Ensure filename is safe
+	filename = filepath.Base(filename)
+	filePath := filepath.Join(ImagesDir, filename)
+
+	// Write image to file
+	if err := ioutil.WriteFile(filePath, decodedImage, 0644); err != nil {
+		return fmt.Errorf("failed to write image file: %v", err)
+	}
+
+	log.Printf("Image saved to file: %s", filePath)
+	return nil
+}
+
+// getImageExtension determines the file extension based on image magic bytes
+func getImageExtension(data []byte) string {
+	if len(data) < 8 {
+		return ".bin"
+	}
+
+	// Check for common image formats
+	switch {
+	case len(data) >= 2 && data[0] == 0xFF && data[1] == 0xD8: // JPEG
+		return ".jpg"
+	case len(data) >= 8 && string(data[0:8]) == "\x89PNG\x0D\x0A\x1A\x0A": // PNG
+		return ".png"
+	case len(data) >= 6 && string(data[0:6]) == "GIF87a" || string(data[0:6]) == "GIF89a": // GIF
+		return ".gif"
+	case len(data) >= 4 && string(data[0:4]) == "RIFF" && len(data) >= 12 && string(data[8:12]) == "WEBP": // WEBP
+		return ".webp"
+	case len(data) >= 2 && data[0] == 'B' && data[1] == 'M': // BMP
+		return ".bmp"
+	default:
+		return ".bin"
+	}
+}
+
 // handleStatus returns server status and statistics
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -195,12 +282,30 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Count image files
+	imageFiles, err := ioutil.ReadDir(ImagesDir)
+	if err != nil {
+		log.Printf("Failed to read images directory: %v", err)
+	}
+
+	imageCount := 0
+	for _, file := range imageFiles {
+		if !file.IsDir() {
+			ext := strings.ToLower(filepath.Ext(file.Name()))
+			if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" || ext == ".bmp" {
+				imageCount++
+			}
+		}
+	}
+
 	status := map[string]interface{}{
 		"server_name":     "Alert Platform Mock Server",
 		"status":          "running",
 		"port":            currentPort,
 		"output_dir":      OutputDir,
+		"images_dir":      ImagesDir,
 		"alerts_received": alertCount,
+		"images_saved":    imageCount,
 		"timestamp":       time.Now().Format(time.RFC3339),
 		"endpoints": map[string]string{
 			"alert":  "/alert",
@@ -241,6 +346,7 @@ func handleListAlerts(w http.ResponseWriter, r *http.Request) {
 		"total_alerts": len(alerts),
 		"alerts":       alerts,
 		"output_dir":   OutputDir,
+		"images_dir":   ImagesDir,
 	}
 
 	json.NewEncoder(w).Encode(response)

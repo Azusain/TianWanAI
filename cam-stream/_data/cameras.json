@@ -1,49 +1,40 @@
 {
   "cameras": {
-    "cam_21": {
-      "id": "cam_21",
+    "cam_22": {
+      "id": "cam_22",
       "name": "测试",
       "rtsp_url": "rtsp://192.168.31.48:8554/test",
       "inference_server_bindings": [
         {
-          "server_id": "inf_9",
-          "threshold": 0
+          "server_id": "inf_10",
+          "threshold": 0.5
         }
       ],
       "enabled": true,
       "running": true,
-      "created_at": "2025-09-04T15:53:04.1984727+08:00",
-      "updated_at": "2025-09-04T16:33:09.8432596+08:00"
+      "created_at": "2025-09-05T10:57:57.8790346+08:00",
+      "updated_at": "2025-09-05T10:57:57.8790346+08:00"
     }
   },
   "inference_servers": {
-    "inf_8": {
-      "id": "inf_8",
-      "name": "Tshirt",
-      "url": "http://192.168.31.48:8091/tshirt",
-      "model_type": "tshirt",
+    "inf_10": {
+      "id": "inf_10",
+      "name": "Cigar",
+      "url": "http://192.168.31.48:8091/cigar",
+      "model_type": "cigar",
       "description": "试试",
       "enabled": true,
-      "created_at": "2025-09-04T14:42:59.2357757+08:00",
-      "updated_at": "2025-09-04T14:42:59.2357757+08:00"
-    },
-    "inf_9": {
-      "id": "inf_9",
-      "name": "Fall",
-      "url": "http://192.168.31.48:8091/fall",
-      "model_type": "fall",
-      "enabled": true,
-      "created_at": "2025-09-04T15:52:56.7058639+08:00",
-      "updated_at": "2025-09-04T15:52:56.7058639+08:00"
+      "created_at": "2025-09-05T10:57:49.8131863+08:00",
+      "updated_at": "2025-09-05T10:57:49.8131863+08:00"
     }
   },
   "alert_server": {
     "url": "http://localhost:8081/alert",
-    "enabled": false,
-    "updated_at": "2025-09-04T12:17:43.5832561+08:00"
+    "enabled": true,
+    "updated_at": "2025-09-05T11:01:06.3339647+08:00"
   },
   "counters": {
-    "camera": 21,
-    "inference_server": 9
+    "camera": 22,
+    "inference_server": 10
   }
 }
