@@ -34,6 +34,7 @@
 /Dockerfile_CUDA_10_2 filter=lfs diff=lfs merge=lfs -text
 /Dockerfile_Actions filter=lfs diff=lfs merge=lfs -text
 /cam-stream/version filter=lfs diff=lfs merge=lfs -text
+/alert-server/mock-server filter=lfs diff=lfs merge=lfs -text
 *.py !text !filter !merge !diff
 *.go !text !filter !merge !diff
 *.md !text !filter !merge !diff

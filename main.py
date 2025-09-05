@@ -32,7 +32,7 @@ class ModelType(Enum):
     SMOKE = "smoke"
     TSHIRT = "tshirt"
     MOUSE = "mouse"
-    FALL = "fall"
+    # FALL = "fall"
     CIGAR = "cigar"
 
 # return image and errno.
@@ -70,7 +70,7 @@ def get_service(model_type: str):
   if model_type == ModelType.MOUSE.value:
     return YoloDetectionService("models/mouse/weights/mouse_v4.pt", 640), None
   if model_type == ModelType.CIGAR.value:
-    return YoloDetectionService("models/cigar/weights/cigar_v1.pt"), None
+    return YoloDetectionService("models/cigar/weights/cigar_v1.pt", 640), None
   if model_type == ModelType.SMOKE .value:
     return SmokeFileDetector("__SmokeFire/weights/smoke.pt"), None
   if model_type == ModelType.TSHIRT.value:
@@ -127,22 +127,23 @@ def app():
             xyxyn=xyxyn
         )
     
+    # TODO: support this one day.
     # Temporal Fall Detection using ST-GCN - Now follows unified design pattern
-    @app.route('/fall', methods=['POST'])
-    def FallDetect():
-        img, errno = validate_img_format()
-        if img is None:
-            return service.Response(errno=errno)
+    # @app.route('/fall', methods=['POST'])
+    # def FallDetect():
+    #     img, errno = validate_img_format()
+    #     if img is None:
+    #         return service.Response(errno=errno)
         
-        # Use the same pattern as other detection services
-        # The detect method handles the full pipeline
-        score, xyxyn, _ = service.Predict(img)
+    #     # Use the same pattern as other detection services
+    #     # The detect method handles the full pipeline
+    #     score, xyxyn, _ = service.Predict(img)
         
-        return service.Response(
-            errno=errno,
-            score=score,
-            xyxyn=xyxyn
-        )
+    #     return service.Response(
+    #         errno=errno,
+    #         score=score,
+    #         xyxyn=xyxyn
+    #     )
 
     @app.route('/tshirt', methods=['POST'])
     def TshirtDetect():
@@ -267,8 +268,8 @@ def app():
     return app
 
 # comment this if not testing on Windows.
-if __name__ == "__main__":
-  os.environ["MODEL"] = "fall"
-  app = app()
-  if app:
-    app.run(port=8091, debug=True, host='0.0.0.0')
+# if __name__ == "__main__":
+#   os.environ["MODEL"] = "cigar"
+#   app = app()
+#   if app:
+#     app.run(port=8091, debug=True, host='0.0.0.0')

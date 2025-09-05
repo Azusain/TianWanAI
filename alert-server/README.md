@@ -44,8 +44,12 @@ Use the test client to send a sample alert:
 ```bash
 # Build and run the test client
 cd cmd/test-client
-go build
-./test-client.exe
+
+# Linux
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -a -ldflags '-extldflags "-static" -w -s' -o alert-server main.go
+
+# Cross Platform Building on Windows
+$env:GOOS="linux"; $env:GOARCH="amd64"; $env:CGO_ENABLED="0"; go build -a -ldflags '-extldflags "-static" -w -s' -o alert-server main.go 
 
 # Or run directly
 go run main.go
