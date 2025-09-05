@@ -1,6 +1,6 @@
 [submodule "__Fall"]
 	path = __Fall
-	url = https://github.com/Azusain/ism_person_openpose
+	url = https://github.com/Azusain/Human-Falling-Detect-Tracks
 [submodule "__SmokeFire"]
 	path = __SmokeFire
 	url = https://github.com/Azusain/Smoke_Fire_Detection

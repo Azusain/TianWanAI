@@ -1,31 +1,30 @@
 {
   "cameras": {
-    "cam_22": {
-      "id": "cam_22",
+    "cam_23": {
+      "id": "cam_23",
       "name": "测试",
       "rtsp_url": "rtsp://192.168.31.48:8554/test",
       "inference_server_bindings": [
         {
-          "server_id": "inf_10",
+          "server_id": "inf_11",
           "threshold": 0.5
         }
       ],
       "enabled": true,
       "running": true,
-      "created_at": "2025-09-05T10:57:57.8790346+08:00",
-      "updated_at": "2025-09-05T10:57:57.8790346+08:00"
+      "created_at": "2025-09-05T15:16:01.8723148+08:00",
+      "updated_at": "2025-09-05T15:17:05.4764247+08:00"
     }
   },
   "inference_servers": {
-    "inf_10": {
-      "id": "inf_10",
-      "name": "Cigar",
-      "url": "http://192.168.31.48:8091/cigar",
-      "model_type": "cigar",
-      "description": "试试",
+    "inf_11": {
+      "id": "inf_11",
+      "name": "Ponding",
+      "url": "http://192.168.31.48:8091/ponding",
+      "model_type": "ponding",
       "enabled": true,
-      "created_at": "2025-09-05T10:57:49.8131863+08:00",
-      "updated_at": "2025-09-05T10:57:49.8131863+08:00"
+      "created_at": "2025-09-05T15:14:54.935037+08:00",
+      "updated_at": "2025-09-05T15:14:54.935037+08:00"
     }
   },
   "alert_server": {
@@ -34,7 +33,7 @@
     "updated_at": "2025-09-05T11:01:06.3339647+08:00"
   },
   "counters": {
-    "camera": 22,
-    "inference_server": 10
+    "camera": 23,
+    "inference_server": 11
   }
 }

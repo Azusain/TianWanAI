@@ -16,6 +16,15 @@ import (
 	"github.com/gorilla/mux"
 )
 
+func prettyPrint(v interface{}) {
+	b, err := json.MarshalIndent(v, "", "  ") // 第二个参数是前缀，第三个是缩进
+	if err != nil {
+		log.Printf("error: %v", err)
+		return
+	}
+	log.Println(string(b))
+}
+
 // AlertRequest represents the alert request format from management platform
 type AlertRequest struct {
 	Image     string  `json:"image"`
@@ -128,8 +137,12 @@ func handleAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Alert received - Camera: %s, Model: %s, Score: %.3f, Request ID: %s",
-		alertReq.CameraKKS, alertReq.Model, alertReq.Score, alertReq.RequestID)
+	// log.Printf("Alert received - Camera: %s, Model: %s, Score: %.3f, Request ID: %s",
+	// 	alertReq.CameraKKS, alertReq.Model, alertReq.Score, alertReq.RequestID)
+
+	copy := alertReq
+	copy.Image = copy.Image[:10] + "..."
+	prettyPrint(copy)
 
 	// Save alert to file
 	if err := saveAlertToFile(alertReq); err != nil {
