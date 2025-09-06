@@ -277,7 +277,7 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 		}
 
 		detections := processInferenceServer(frameData, server, &binding, cameraConfig.ID)
-		displayedImage, err := DrawDetections(frameData, detections, cameraConfig.Name, false)
+		displayedImage, err := DrawDetections(frameData, detections, cameraConfig.Name)
 		if err != nil {
 			slog.Warn(fmt.Sprintf("failed to write result for model %q", server.ModelType))
 		}
@@ -320,6 +320,7 @@ func processInferenceServer(frameData []byte, server *InferenceServer, binding *
 	// Check if any detection meets threshold
 	retDetections := []Detection{}
 	for _, detection := range detections {
+		slog.Error(fmt.Sprintf("fall confidence -> %f", detection.Confidence))
 		if detection.Confidence >= binding.Threshold {
 			retDetections = append(retDetections, detection)
 		}
@@ -425,51 +426,22 @@ func getFallDetectionResults(server *InferenceServer, cameraID string) []Detecti
 	// Convert results to Detection format
 	var detections []Detection
 	for _, result := range results {
-		if result.Results == nil {
-			continue // Skip results without detection info
+		// Extract detection information from tianwan results
+		// tianwan returns pixel coordinates that need to be used directly
+		// Note: tianwan returns confidence as percentage (0-100), normalize to (0-1)
+		confidence := result.Results.Score
+		if confidence > 1.0 {
+			// If confidence > 1, assume it's in percentage format, convert to decimal
+			confidence = confidence / 100.0
 		}
 
-		// Try to parse the results field - it might contain detection information
-		resultsMap, ok := result.Results.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		// Extract fall detection information
-		// The exact format depends on tianwan service response format
-		// For now, we'll create a generic fall detection
 		detection := Detection{
 			Class:      "FALL_DETECTED",
-			Confidence: 0.9, // High confidence since it's from fall detection service
-			X1:         0,   // We don't have specific coordinates from the results
-			Y1:         0,   // so we'll use full image bounds
-			X2:         1920, // Default image dimensions
-			Y2:         1080,
-		}
-
-		// Try to extract confidence if available
-		if confidence, exists := resultsMap["confidence"]; exists {
-			if confFloat, ok := confidence.(float64); ok {
-				detection.Confidence = confFloat
-			}
-		}
-
-		// Try to extract coordinates if available
-		if bbox, exists := resultsMap["bbox"]; exists {
-			if bboxSlice, ok := bbox.([]interface{}); ok && len(bboxSlice) >= 4 {
-				if x1, ok := bboxSlice[0].(float64); ok {
-					detection.X1 = int(x1)
-				}
-				if y1, ok := bboxSlice[1].(float64); ok {
-					detection.Y1 = int(y1)
-				}
-				if x2, ok := bboxSlice[2].(float64); ok {
-					detection.X2 = int(x2)
-				}
-				if y2, ok := bboxSlice[3].(float64); ok {
-					detection.Y2 = int(y2)
-				}
-			}
+			Confidence: confidence,
+			X1:         int(result.Results.Location.Left),
+			Y1:         int(result.Results.Location.Top),
+			X2:         int(result.Results.Location.Left + result.Results.Location.Width),
+			Y2:         int(result.Results.Location.Top + result.Results.Location.Height),
 		}
 
 		detections = append(detections, detection)

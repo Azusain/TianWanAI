@@ -33,10 +33,24 @@ type FallDetectionResultRequest struct {
 	Limit  *int   `json:"limit,omitempty"`
 }
 
-// FallDetectionResult represents a single fall detection result
+// FallDetectionResultItem represents a single fall detection result from tianwan API
 type FallDetectionResultItem struct {
-	Image   string      `json:"image"`   // Base64 encoded image
-	Results interface{} `json:"results"` // Detection results
+	Image   string                   `json:"image"`   // Base64 encoded image
+	Results FallDetectionResultData `json:"results"` // Detection results
+}
+
+// FallDetectionResultData represents the detection data structure
+type FallDetectionResultData struct {
+	Score    float64                     `json:"score"`    // Confidence score
+	Location FallDetectionResultLocation `json:"location"` // Bounding box location
+}
+
+// FallDetectionResultLocation represents the bounding box location
+type FallDetectionResultLocation struct {
+	Left   float64 `json:"left"`   // X coordinate (pixel)
+	Top    float64 `json:"top"`    // Y coordinate (pixel)
+	Width  float64 `json:"width"`  // Width (pixel)
+	Height float64 `json:"height"` // Height (pixel)
 }
 
 // StartFallDetection starts fall detection for a camera using the specified inference server
@@ -46,7 +60,8 @@ func StartFallDetection(server *InferenceServer, camera *CameraConfig) (string, 
 	// Send start request to tianwan service
 	startReq := FallDetectionStartRequest{
 		RTSPAddress: camera.RTSPUrl,
-		Device:      "cuda", // Default to CUDA, could be configurable
+		// TODO: make it configurabe
+		Device: "cpu", // Default to CUDA, could be configurable
 	}
 
 	reqBody, err := json.Marshal(startReq)
@@ -144,10 +159,22 @@ func GetFallDetectionResults(server *InferenceServer, taskID string, limit *int)
 		return nil, fmt.Errorf("tianwan service returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var results []FallDetectionResultItem
-	if err := json.Unmarshal(body, &results); err != nil {
-		return nil, fmt.Errorf("failed to parse results: %v", err)
+	// Parse as object with "results" field - now unified API format
+	var response struct {
+		Results []FallDetectionResultItem `json:"results"`
+		Error   string                    `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse tianwan /result response: %v, body: %s", err, string(body))
 	}
 
-	return results, nil
+	if response.Error != "" {
+		return nil, fmt.Errorf("tianwan service error: %s", response.Error)
+	}
+
+	if len(response.Results) > 0 {
+		slog.Info("got fall detection results", "count", len(response.Results), "task_id", taskID)
+	}
+
+	return response.Results, nil
 }
