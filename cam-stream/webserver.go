@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -259,6 +260,17 @@ type AlertServerConfig struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// FallDetectionTaskState represents the state of a fall detection task
+type FallDetectionTaskState struct {
+	TaskID    string    `json:"task_id"`   // Task ID from tianwan service
+	CameraID  string    `json:"camera_id"` // Camera ID
+	ServerID  string    `json:"server_id"` // Inference server ID
+	Status    string    `json:"status"`    // "running", "stopped", "error"
+	StartedAt time.Time `json:"started_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	ErrorMsg  string    `json:"error_msg,omitempty"`
+}
+
 type DataStore struct {
 	Cameras          map[string]*CameraConfig    `json:"cameras"`
 	InferenceServers map[string]*InferenceServer `json:"inference_servers"`
@@ -279,6 +291,9 @@ var dataStore = &DataStore{
 	Cameras:          make(map[string]*CameraConfig),
 	InferenceServers: make(map[string]*InferenceServer),
 }
+
+// Runtime-only fall detection task tracking (not persisted)
+var fallDetectionTasks = make(map[string]*FallDetectionTaskState)
 
 // Data persistence functions
 func loadDataStore() error {
@@ -531,11 +546,19 @@ func (ws *WebServer) handleAPIStartCamera(w http.ResponseWriter, r *http.Request
 	camera.Enabled = true
 	camera.UpdatedAt = time.Now()
 
-	if err := saveDataStore(); err != nil {
-		log.Printf("Warning: Failed to save data store: %v", err)
+	// Start fall detection tasks for any bound fall detection servers
+	for _, binding := range camera.InferenceServerBindings {
+		server, serverExists := dataStore.InferenceServers[binding.ServerID]
+		if serverExists && server.Enabled && server.ModelType == "fall" {
+			ws.startFallDetectionTask(camera, server)
+		}
 	}
 
-	log.Printf("Started camera: %s", id)
+	if err := saveDataStore(); err != nil {
+		slog.Warn(fmt.Sprintf("Warning: Failed to save data store: %v", err))
+	}
+
+	slog.Info(fmt.Sprintf("started camera: %s", id))
 
 	response := APIResponse{
 		Success: true,
@@ -564,6 +587,14 @@ func (ws *WebServer) handleAPIStopCamera(w http.ResponseWriter, r *http.Request)
 
 	camera.Running = false
 	camera.UpdatedAt = time.Now()
+
+	// Stop fall detection tasks for any bound fall detection servers
+	for _, binding := range camera.InferenceServerBindings {
+		server, serverExists := dataStore.InferenceServers[binding.ServerID]
+		if serverExists && server.ModelType == "fall" {
+			ws.stopFallDetectionTasksForCamera(camera.ID, server.ID)
+		}
+	}
 
 	if err := saveDataStore(); err != nil {
 		log.Printf("Warning: Failed to save data store: %v", err)
@@ -1296,4 +1327,87 @@ func (ws *WebServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(content))
+}
+
+// Fall Detection Task Management Functions
+
+// startFallDetectionTask starts a fall detection task for a camera with a fall detection server
+func (ws *WebServer) startFallDetectionTask(camera *CameraConfig, server *InferenceServer) {
+	// Check if there's already a running task for this camera-server combination
+	for _, task := range fallDetectionTasks {
+		if task.CameraID == camera.ID && task.ServerID == server.ID && task.Status == "running" {
+			log.Printf("fall detection task already running for camera %s with server %s (task: %s)", camera.ID, server.ID, task.TaskID)
+			return
+		}
+	}
+
+	// Start the fall detection task
+	taskID, err := StartFallDetection(server, camera)
+	if err != nil {
+		log.Printf("failed to start fall detection task for camera %s with server %s: %v", camera.ID, server.ID, err)
+		// Create error task state
+		fallDetectionTasks["error_"+camera.ID+"_"+server.ID] = &FallDetectionTaskState{
+			TaskID:    "",
+			CameraID:  camera.ID,
+			ServerID:  server.ID,
+			Status:    "error",
+			StartedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			ErrorMsg:  err.Error(),
+		}
+		return
+	}
+
+	// Create successful task state using the returned taskID as key
+	fallDetectionTasks[taskID] = &FallDetectionTaskState{
+		TaskID:    taskID,
+		CameraID:  camera.ID,
+		ServerID:  server.ID,
+		Status:    "running",
+		StartedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	log.Printf("started fall detection task %s for camera %s with server %s", taskID, camera.ID, server.ID)
+}
+
+// stopFallDetectionTasksForCamera stops all fall detection tasks for a specific camera-server combination
+func (ws *WebServer) stopFallDetectionTasksForCamera(cameraID, serverID string) {
+	var tasksToStop []string
+
+	// Find all running tasks for this camera-server combination
+	for taskID, task := range fallDetectionTasks {
+		if task.CameraID == cameraID && task.ServerID == serverID && task.Status == "running" {
+			tasksToStop = append(tasksToStop, taskID)
+		}
+	}
+
+	if len(tasksToStop) == 0 {
+		log.Printf("no running fall detection tasks found for camera %s with server %s", cameraID, serverID)
+		return
+	}
+
+	server, serverExists := dataStore.InferenceServers[serverID]
+	if !serverExists {
+		log.Printf("inference server %s not found when stopping fall detection tasks", serverID)
+		return
+	}
+
+	// Stop each task
+	for _, taskID := range tasksToStop {
+		task := fallDetectionTasks[taskID]
+		err := StopFallDetection(server, taskID)
+		if err != nil {
+			log.Printf("failed to stop fall detection task %s: %v", taskID, err)
+			// Update task state to error
+			task.Status = "error"
+			task.ErrorMsg = err.Error()
+			task.UpdatedAt = time.Now()
+		} else {
+			// Update task state to stopped
+			task.Status = "stopped"
+			task.UpdatedAt = time.Now()
+			log.Printf("stopped fall detection task %s for camera %s with server %s", taskID, cameraID, serverID)
+		}
+	}
 }

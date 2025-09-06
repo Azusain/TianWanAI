@@ -8,17 +8,15 @@ import (
 
 // Config application configuration structure
 type Config struct {
-	DebugMode    bool `json:"debug_mode"`
-	FrameRate    int  `json:"frame_rate"`     // frames per second for sampling
-	OutputWidth  int  `json:"output_width"`  // output image width
-	OutputHeight int  `json:"output_height"` // output image height
-	WebPort      int  `json:"web_port"`       // web interface port
+	FrameRate    int `json:"frame_rate"`     // frames per second for sampling
+	OutputWidth  int `json:"output_width"`  // output image width
+	OutputHeight int `json:"output_height"` // output image height
+	WebPort      int `json:"web_port"`       // web interface port
 }
 
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		DebugMode:    true,
 		FrameRate:    30, // 30 frames per second for fall detection
 		OutputWidth:  1920,
 		OutputHeight: 1080,
