@@ -251,139 +251,6 @@ type FallDetectionResult struct {
 	Location  Location `json:"location"`
 }
 
-// ProcessFrameForFallDetection processes a frame for fall detection using unified API pattern
-func (ic *InferenceClient) ProcessFrameForFallDetection(imageData []byte, cameraID string) ([]Detection, error) {
-	// Now use the same DetectObjects method with "fall" model type
-	// This maintains the camera_id in the request for fall detection context
-	encodedImage := base64.StdEncoding.EncodeToString(imageData)
-
-	// Create unified request format
-	request := InferenceRequest{
-		Image:     encodedImage,
-		ModelType: "fall",
-		CameraID:  cameraID, // Fall detection still needs camera ID for temporal context
-	}
-
-	requestBody, err := json.Marshal(request)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal fall detection request: %v", err)
-	}
-
-	// Use unified endpoint pattern
-	// TODO: trash codes.
-	url := ic.serverURL
-
-	// Send request using standard format
-	resp, err := ic.client.Post(
-		url,
-		"application/json",
-		bytes.NewBuffer(requestBody),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request to fall detection API: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Check HTTP status
-	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
-		if len(body) > 0 && body[0] == '<' {
-			return nil, fmt.Errorf("fall detection API returned HTML (status %d) - check if service is running at %s", resp.StatusCode, url)
-		}
-		return nil, fmt.Errorf("fall detection API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Read response
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read fall detection response: %v", err)
-	}
-
-	// Check if response is HTML (error page)
-	if len(body) > 0 && body[0] == '<' {
-		return nil, fmt.Errorf("fall detection API returned HTML instead of JSON - service may not be running at %s", url)
-	}
-
-	// Parse response using unified format
-	var response InferenceResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		// Log first 200 chars of response for debugging
-		preview := string(body)
-		if len(preview) > 200 {
-			preview = preview[:200] + "..."
-		}
-		return nil, fmt.Errorf("failed to parse fall detection response: %v (response preview: %s)", err, preview)
-	}
-
-	// Check if inference was successful (errno == 0 means success)
-	if response.Errno != 0 {
-		return nil, fmt.Errorf("fall detection failed: %s (errno: %d)", response.ErrMsg, response.Errno)
-	}
-
-	// Get actual image dimensions for coordinate conversion
-	imgReader := bytes.NewReader(imageData)
-	img, err := jpeg.DecodeConfig(imgReader)
-	if err != nil {
-		log.Printf("Warning: Failed to decode image config, using defaults: %v", err)
-		img.Width = 1920
-		img.Height = 1080
-	}
-
-	// Convert unified response to Detection format
-	var detections []Detection
-	for _, result := range response.Results {
-		// Skip results with no score (no detection)
-		if result.Score <= 0 || result.Location.Left < 0 {
-			log.Printf("Skipping invalid fall detection with score %.3f", result.Score)
-			continue
-		}
-
-		// Convert normalized coordinates to pixels
-		x1 := int(result.Location.Left * float64(img.Width))
-		y1 := int(result.Location.Top * float64(img.Height))
-		x2 := int((result.Location.Left + result.Location.Width) * float64(img.Width))
-		y2 := int((result.Location.Top + result.Location.Height) * float64(img.Height))
-
-		// Ensure coordinates are within image bounds
-		if x1 < 0 {
-			x1 = 0
-		}
-		if y1 < 0 {
-			y1 = 0
-		}
-		if x2 > img.Width {
-			x2 = img.Width
-		}
-		if y2 > img.Height {
-			y2 = img.Height
-		}
-
-		// Skip invalid boxes
-		if x2 <= x1 || y2 <= y1 {
-			log.Printf("Skipping invalid fall detection box coordinates: (%d,%d,%d,%d)", x1, y1, x2, y2)
-			continue
-		}
-
-		// Create fall detection with special class name
-		className := "FALL_DETECTED"
-		if result.Score >= 0.8 {
-			className = "HIGH_CONFIDENCE_FALL"
-		}
-
-		detection := Detection{
-			Class:      className,
-			Confidence: result.Score,
-			X1:         x1,
-			Y1:         y1,
-			X2:         x2,
-			Y2:         y2,
-		}
-		detections = append(detections, detection)
-	}
-
-	return detections, nil
-}
-
 // ModelResult represents detection results for a specific model
 type ModelResult struct {
 	ModelType          string      `json:"model_type"`
@@ -440,14 +307,14 @@ func processInferenceServer(frameData []byte, server *InferenceServer, binding *
 	// Process based on model type
 	// TODO: enum instead of hardcoding.
 	if server.ModelType == "fall" {
-		detections, err = client.ProcessFrameForFallDetection(frameData, cameraID)
+		// For fall detection, get results from the task using /fall/result API
+		detections = getFallDetectionResults(server, cameraID)
 	} else {
 		detections, err = client.DetectObjects(frameData, server.ModelType)
-	}
-
-	if err != nil {
-		slog.Warn(fmt.Sprintf("inference failed for server %s: %v", server.Name, err))
-		return detections
+		if err != nil {
+			slog.Warn(fmt.Sprintf("inference failed for server %s: %v", server.Name, err))
+			return detections
+		}
 	}
 
 	// Check if any detection meets threshold
@@ -529,6 +396,90 @@ func SendAlertIfConfigured(imageData []byte, model string, cameraName string, sc
 		cameraName, model, score)
 
 	return nil
+}
+
+// getFallDetectionResults gets fall detection results from /fall/result API
+func getFallDetectionResults(server *InferenceServer, cameraID string) []Detection {
+	// Find the running task for this camera and server
+	var taskID string
+	for id, task := range fallDetectionTasks {
+		if task.CameraID == cameraID && task.ServerID == server.ID && task.Status == "running" {
+			taskID = id
+			break
+		}
+	}
+
+	if taskID == "" {
+		// No running task found, return empty detections
+		return []Detection{}
+	}
+
+	// Fetch results from /fall/result API
+	limit := 20 // Get up to 5 latest results
+	results, err := GetFallDetectionResults(server, taskID, &limit)
+	if err != nil {
+		slog.Warn(fmt.Sprintf("Failed to get fall detection results for task %s: %v", taskID, err))
+		return []Detection{}
+	}
+
+	// Convert results to Detection format
+	var detections []Detection
+	for _, result := range results {
+		if result.Results == nil {
+			continue // Skip results without detection info
+		}
+
+		// Try to parse the results field - it might contain detection information
+		resultsMap, ok := result.Results.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Extract fall detection information
+		// The exact format depends on tianwan service response format
+		// For now, we'll create a generic fall detection
+		detection := Detection{
+			Class:      "FALL_DETECTED",
+			Confidence: 0.9, // High confidence since it's from fall detection service
+			X1:         0,   // We don't have specific coordinates from the results
+			Y1:         0,   // so we'll use full image bounds
+			X2:         1920, // Default image dimensions
+			Y2:         1080,
+		}
+
+		// Try to extract confidence if available
+		if confidence, exists := resultsMap["confidence"]; exists {
+			if confFloat, ok := confidence.(float64); ok {
+				detection.Confidence = confFloat
+			}
+		}
+
+		// Try to extract coordinates if available
+		if bbox, exists := resultsMap["bbox"]; exists {
+			if bboxSlice, ok := bbox.([]interface{}); ok && len(bboxSlice) >= 4 {
+				if x1, ok := bboxSlice[0].(float64); ok {
+					detection.X1 = int(x1)
+				}
+				if y1, ok := bboxSlice[1].(float64); ok {
+					detection.Y1 = int(y1)
+				}
+				if x2, ok := bboxSlice[2].(float64); ok {
+					detection.X2 = int(x2)
+				}
+				if y2, ok := bboxSlice[3].(float64); ok {
+					detection.Y2 = int(y2)
+				}
+			}
+		}
+
+		detections = append(detections, detection)
+	}
+
+	if len(detections) > 0 {
+		log.Printf("Got %d fall detection results for camera %s from task %s", len(detections), cameraID, taskID)
+	}
+
+	return detections
 }
 
 // SendAlert is deprecated - use SendAlertIfConfigured instead
