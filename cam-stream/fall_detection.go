@@ -13,7 +13,6 @@ import (
 // FallDetectionStartRequest represents the request to start fall detection
 type FallDetectionStartRequest struct {
 	RTSPAddress string `json:"rtsp_address"`
-	Device      string `json:"device"`
 }
 
 // FallDetectionStartResponse represents the response from starting fall detection
@@ -60,8 +59,6 @@ func StartFallDetection(server *InferenceServer, camera *CameraConfig) (string, 
 	// Send start request to tianwan service
 	startReq := FallDetectionStartRequest{
 		RTSPAddress: camera.RTSPUrl,
-		// TODO: make it configurabe
-		Device: "cpu", // Default to CUDA, could be configurable
 	}
 
 	reqBody, err := json.Marshal(startReq)

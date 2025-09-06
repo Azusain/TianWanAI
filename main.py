@@ -180,10 +180,10 @@ def app():
             return {
                 "err_msg": "missing json field: rtsp_address",
             }, 400
-        if not req.__contains__('device') or req['device'] == '':         
-            return {
-                "err_msg": "missing json field: device",
-            }, 400
+        
+        # Auto-detect device
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         
         # spawn a new thread.
         task_id = str(uuid4())
@@ -191,9 +191,9 @@ def app():
             FallDetector.g_tasks[task_id] = False
         threading.Thread(
             target=FallDetector.fall_detection_task, 
-            args=(task_id, req['rtsp_address'], req['device'])
+            args=(task_id, req['rtsp_address'], device)
         ).start()
-        logger.warning(f"spawn new worker thread for task {task_id}")
+        logger.warning(f"spawn new worker thread for task {task_id} using device: {device}")
         return {
             "err_msg": "success",
             "task_id": task_id
