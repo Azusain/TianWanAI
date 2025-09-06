@@ -33,7 +33,6 @@ COPY --from=builder /app/*.html ./
 COPY --from=builder /app/web ./web
 COPY --from=builder /app/assets ./assets
 COPY --from=builder /app/configs ./configs
-COPY --from=builder /app/fonts ./fonts
 
 # Change ownership
 RUN chown -R appuser:appuser /app
