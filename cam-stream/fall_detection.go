@@ -54,7 +54,7 @@ func StartFallDetection(server *InferenceServer, camera *CameraConfig) (string, 
 		return "", fmt.Errorf("failed to marshal start request: %v", err)
 	}
 
-	url := fmt.Sprintf("%s/fall/start", server.URL)
+	url := fmt.Sprintf("%s/start", server.URL)
 	resp, err := client.Post(url, "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		return "", fmt.Errorf("failed to send start request: %v", err)
@@ -97,7 +97,7 @@ func StopFallDetection(server *InferenceServer, taskID string) error {
 		return fmt.Errorf("failed to marshal stop request: %v", err)
 	}
 
-	url := fmt.Sprintf("%s/fall/stop", server.URL)
+	url := fmt.Sprintf("%s/stop", server.URL)
 	resp, err := client.Post(url, "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		return fmt.Errorf("failed to send stop request: %v", err)
@@ -128,7 +128,7 @@ func GetFallDetectionResults(server *InferenceServer, taskID string, limit *int)
 		return nil, fmt.Errorf("failed to marshal result request: %v", err)
 	}
 
-	url := fmt.Sprintf("%s/fall/result", server.URL)
+	url := fmt.Sprintf("%s/result", server.URL)
 	resp, err := client.Post(url, "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to send result request: %v", err)

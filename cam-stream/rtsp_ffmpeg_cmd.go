@@ -58,8 +58,8 @@ func (m *FFmpegCmdRTSPManager) StartCamera(camera *CameraConfig) error {
 		return fmt.Errorf("camera %s is already running", camera.ID)
 	}
 
-	log.Printf("Starting FFmpeg RTSP stream for camera: %s (%s)", camera.Name, camera.ID)
-	log.Printf("RTSP URL: %s", camera.RTSPUrl)
+	slog.Info(fmt.Sprintf("Starting FFmpeg RTSP stream for camera: %s (%s)", camera.Name, camera.ID))
+	slog.Info(fmt.Sprintf("RTSP URL: %s", camera.RTSPUrl))
 
 	// Create camera stream
 	stream := &FFmpegCameraStream{
