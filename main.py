@@ -1,5 +1,4 @@
 import binascii
-from enum import Enum
 import os
 import sys
 # git submodule.
@@ -18,15 +17,14 @@ from loguru import logger
 import threading
 from flask import Flask, request, jsonify
 
-
-class ModelType(Enum):
-    GESTURE = "gesture"
-    PONDING = "ponding"
-    SMOKE = "smoke"
-    TSHIRT = "tshirt"
-    MOUSE = "mouse"
-    # FALL = "fall"
-    CIGAR = "cigar"
+# Global model instances (initialized at startup)
+g_gesture_service = None
+g_ponding_service = None
+g_mouse_service = None
+g_cigar_service = None
+g_smoke_service = None
+g_tshirt_service = None
+g_tshirt_classifier = None
 
 # return image and errno.
 def validate_img_format():
@@ -54,25 +52,43 @@ def validate_img_format():
     except binascii.Error: 
         return None, ServiceStatus.INVALID_IMAGE_FORMAT.value
 
-# TODO: move this to configuration file.
-def get_service(model_type: str):
-    if model_type == ModelType.GESTURE.value:
-        return YoloDetectionService("models/gesture/weights/gesture_v2.pt", 640), None
-    if model_type == ModelType.PONDING.value:
-        return YoloDetectionService("models/ponding/weights/best.pt", 640), None
-    if model_type == ModelType.MOUSE.value:
-        return YoloDetectionService("models/mouse/weights/mouse_v4.pt", 640), None
-    if model_type == ModelType.CIGAR.value:
-        return YoloDetectionService("models/cigar/weights/cigar_v1.pt", 640), None
-    if model_type == ModelType.SMOKE .value:
-        return SmokeFileDetector("__SmokeFire/weights/smoke.pt"), None
-    if model_type == ModelType.TSHIRT.value:
-        return TshirtDetectionService("models/fashionpedia", 640), YoloClassificationService("models/tshirt_cls/weights/tshirt_cls_v1.pt")
-    return None, None
-
-
-
+def initialize_models():
+    """Initialize all models at startup (except Fall which has special handling)"""
+    global g_gesture_service, g_ponding_service, g_mouse_service, g_cigar_service
+    global g_smoke_service, g_tshirt_service, g_tshirt_classifier
+    
+    logger.info("Starting model initialization...")
+    
+    try:
+        # Initialize YOLO detection models
+        logger.info("loading gesture detection model...")
+        g_gesture_service = YoloDetectionService("models/gesture/weights/gesture_v2.pt", 640)
         
+        logger.info("loading ponding detection model...")
+        g_ponding_service = YoloDetectionService("models/ponding/weights/best.pt", 640)
+        
+        logger.info("loading mouse detection model...")
+        g_mouse_service = YoloDetectionService("models/mouse/weights/mouse_v4.pt", 640)
+        
+        logger.info("loading cigar detection model...")
+        g_cigar_service = YoloDetectionService("models/cigar/weights/cigar_v1.pt", 640)
+        
+        logger.info("loading smoke detection model...")
+        g_smoke_service = SmokeFileDetector("__SmokeFire/weights/smoke.pt")
+        
+        # Initialize tshirt models (detection + classification)
+        logger.info("loading tshirt detection model...")
+        g_tshirt_service = TshirtDetectionService("models/fashionpedia", 640)
+        
+        logger.info("loading tshirt classification model...")
+        g_tshirt_classifier = YoloClassificationService("models/tshirt_cls/weights/tshirt_cls_v1.pt")
+        
+        logger.success("all models initialized successfully!")
+        
+    except Exception as e:
+        logger.error(f"failed to initialize models: {e}")
+        raise e
+
 # model:
 #   - gesture
 #   - tshirt
@@ -93,25 +109,59 @@ def app():
     
     app = Flask(__name__)
 
-    # TODO: lazy loading.
-    service, base = get_service("")
+    # Initialize all models at startup
+    initialize_models()
     logger.info("server is up!")
     
     # router settings, no trailing slash so that:
     #   /GeneralClassifyService == /GeneralClassifyService/
     @app.route('/gesture', methods=['POST'])
-    @app.route('/ponding', methods=['POST'])
-    @app.route('/mouse', methods=['POST'])
-    @app.route('/cigar', methods=['POST'])
-    def YoloDetect():
+    def GestureDetect():
         img, errno = validate_img_format()
         if img is None:
-            return service.Response(errno=errno)
+            return g_gesture_service.Response(errno=errno)
         # inference.
-        # each result represents a classification of a single image,
-        # containing multiple boxes' coordinates
-        score, xyxyn, _ = service.Predict(img)
-        return service.Response(
+        score, xyxyn, _ = g_gesture_service.Predict(img)
+        return g_gesture_service.Response(
+            errno=errno,
+            score=score,
+            xyxyn=xyxyn
+        )
+    
+    @app.route('/ponding', methods=['POST'])
+    def PondingDetect():
+        img, errno = validate_img_format()
+        if img is None:
+            return g_ponding_service.Response(errno=errno)
+        # inference.
+        score, xyxyn, _ = g_ponding_service.Predict(img)
+        return g_ponding_service.Response(
+            errno=errno,
+            score=score,
+            xyxyn=xyxyn
+        )
+    
+    @app.route('/mouse', methods=['POST'])
+    def MouseDetect():
+        img, errno = validate_img_format()
+        if img is None:
+            return g_mouse_service.Response(errno=errno)
+        # inference.
+        score, xyxyn, _ = g_mouse_service.Predict(img)
+        return g_mouse_service.Response(
+            errno=errno,
+            score=score,
+            xyxyn=xyxyn
+        )
+    
+    @app.route('/cigar', methods=['POST'])
+    def CigarDetect():
+        img, errno = validate_img_format()
+        if img is None:
+            return g_cigar_service.Response(errno=errno)
+        # inference.
+        score, xyxyn, _ = g_cigar_service.Predict(img)
+        return g_cigar_service.Response(
             errno=errno,
             score=score,
             xyxyn=xyxyn
@@ -221,12 +271,12 @@ def app():
             }
 
         H, W = img.shape[:2]
-        selected_scores, selected_labels, pixel_boxes = service.Predict(img)
+        selected_scores, selected_labels, pixel_boxes = g_tshirt_service.Predict(img)
         results = []
 
         tshirt_boxes = []
         for score, label_idx, bbox in zip(selected_scores, selected_labels, pixel_boxes):
-            label_name = service.model.config.id2label[label_idx.item()]
+            label_name = g_tshirt_service.model.config.id2label[label_idx.item()]
             if "t-shirt" in label_name.lower():
                 tshirt_boxes.append((float(score), bbox))
 
@@ -265,7 +315,7 @@ def app():
             
             if x2 > x1 and y2 > y1:
                 cropped_region = img[y1:y2, x1:x2]
-                top1_prob, top1_class, _, _ = base.Predict(cropped_region)
+                top1_prob, top1_class, _, _ = g_tshirt_classifier.Predict(cropped_region)
                 width_px = x2 - x1
                 height_px = y2 - y1
                 cx = x1 + width_px / 2
@@ -317,7 +367,7 @@ def app():
       # inference.
       errno = ServiceStatus.SUCCESS.value
       # input cv2 format image.
-      batch_results = service.Inference([img])
+      batch_results = g_smoke_service.Inference([img])
       if len(batch_results) == 0:
         errno = ServiceStatus.NO_OBJECT_DETECTED
         
