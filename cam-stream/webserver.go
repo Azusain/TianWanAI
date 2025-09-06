@@ -61,8 +61,6 @@ func (ws *WebServer) Start() error {
 	api := router.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/cameras", ws.handleAPICameras).Methods("GET", "POST", "OPTIONS")
 	api.HandleFunc("/cameras/{id}", ws.handleAPICameraByID).Methods("GET", "PUT", "DELETE", "OPTIONS")
-	api.HandleFunc("/cameras/{id}/start", ws.handleAPIStartCamera).Methods("POST", "OPTIONS")
-	api.HandleFunc("/cameras/{id}/stop", ws.handleAPIStopCamera).Methods("POST", "OPTIONS")
 
 	// Inference Server API Routes
 	api.HandleFunc("/inference-servers", ws.handleAPIInferenceServers).Methods("GET", "POST", "OPTIONS")
@@ -430,6 +428,14 @@ func (ws *WebServer) handleAPICameras(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// Start fall detection tasks for any bound fall detection servers
+		for _, binding := range newCamera.InferenceServerBindings {
+			server, serverExists := dataStore.InferenceServers[binding.ServerID]
+			if serverExists && server.Enabled && server.ModelType == "fall" {
+				ws.startFallDetectionTask(&newCamera, server)
+			}
+		}
+
 		log.Printf("Created camera: %s (%s)", newCamera.ID, newCamera.Name)
 
 		response := APIResponse{
@@ -509,6 +515,14 @@ func (ws *WebServer) handleAPICameraByID(w http.ResponseWriter, r *http.Request)
 			}
 		}
 
+		// Stop fall detection tasks for this camera
+		for _, binding := range camera.InferenceServerBindings {
+			server, serverExists := dataStore.InferenceServers[binding.ServerID]
+			if serverExists && server.ModelType == "fall" {
+				ws.stopFallDetectionTasksForCamera(camera.ID, server.ID)
+			}
+		}
+
 		delete(dataStore.Cameras, id)
 
 		if err := saveDataStore(); err != nil {
@@ -525,90 +539,6 @@ func (ws *WebServer) handleAPICameraByID(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-func (ws *WebServer) handleAPIStartCamera(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	vars := mux.Vars(r)
-	id := vars["id"]
-
-	camera, exists := dataStore.Cameras[id]
-	if !exists {
-		response := APIResponse{
-			Success: false,
-			Message: "Camera not found",
-		}
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
-	camera.Running = true
-	camera.Enabled = true
-	camera.UpdatedAt = time.Now()
-
-	// Start fall detection tasks for any bound fall detection servers
-	for _, binding := range camera.InferenceServerBindings {
-		server, serverExists := dataStore.InferenceServers[binding.ServerID]
-		if serverExists && server.Enabled && server.ModelType == "fall" {
-			ws.startFallDetectionTask(camera, server)
-		}
-	}
-
-	if err := saveDataStore(); err != nil {
-		slog.Warn(fmt.Sprintf("Warning: Failed to save data store: %v", err))
-	}
-
-	slog.Info(fmt.Sprintf("started camera: %s", id))
-
-	response := APIResponse{
-		Success: true,
-		Message: "Camera started successfully",
-		Data:    camera,
-	}
-	json.NewEncoder(w).Encode(response)
-}
-
-func (ws *WebServer) handleAPIStopCamera(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	vars := mux.Vars(r)
-	id := vars["id"]
-
-	camera, exists := dataStore.Cameras[id]
-	if !exists {
-		response := APIResponse{
-			Success: false,
-			Message: "Camera not found",
-		}
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
-	camera.Running = false
-	camera.UpdatedAt = time.Now()
-
-	// Stop fall detection tasks for any bound fall detection servers
-	for _, binding := range camera.InferenceServerBindings {
-		server, serverExists := dataStore.InferenceServers[binding.ServerID]
-		if serverExists && server.ModelType == "fall" {
-			ws.stopFallDetectionTasksForCamera(camera.ID, server.ID)
-		}
-	}
-
-	if err := saveDataStore(); err != nil {
-		log.Printf("Warning: Failed to save data store: %v", err)
-	}
-
-	log.Printf("Stopped camera: %s", id)
-
-	response := APIResponse{
-		Success: true,
-		Message: "Camera stopped successfully",
-		Data:    camera,
-	}
-	json.NewEncoder(w).Encode(response)
-}
 
 func (ws *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -907,15 +837,15 @@ func (ws *WebServer) handleAPIInferenceServers(w http.ResponseWriter, r *http.Re
 
 		newServer.CreatedAt = time.Now()
 		newServer.UpdatedAt = time.Now()
-		newServer.Enabled = true // Default to enabled
+		newServer.Enabled = true
 
 		dataStore.InferenceServers[newServer.ID] = &newServer
 
 		if err := saveDataStore(); err != nil {
-			log.Printf("Warning: Failed to save data store: %v", err)
+			slog.Warn(fmt.Sprintf("Warning: Failed to save data store: %v", err))
 		}
 
-		log.Printf("Created inference server: %s (%s)", newServer.ID, newServer.Name)
+		slog.Info(fmt.Sprintf("Created inference server: %s (%s)", newServer.ID, newServer.Name))
 
 		response := APIResponse{
 			Success: true,
