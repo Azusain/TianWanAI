@@ -7,15 +7,14 @@ import (
 	"image/color"
 	"image/draw"
 	"image/jpeg"
-	"os"
-	"path/filepath"
+	"log/slog"
 	"time"
 
 	"github.com/fogleman/gg"
 )
 
 // DrawDetections draws detection boxes on the image
-func DrawDetections(imageData []byte, detections []Detection, cameraName string, saveCrops bool) ([]byte, error) {
+func DrawDetections(imageData []byte, detections []Detection, cameraName string) ([]byte, error) {
 	// Decode JPEG
 	img, err := jpeg.Decode(bytes.NewReader(imageData))
 	if err != nil {
@@ -27,16 +26,9 @@ func DrawDetections(imageData []byte, detections []Detection, cameraName string,
 	rgbaImg := image.NewRGBA(bounds)
 	draw.Draw(rgbaImg, bounds, img, bounds.Min, draw.Src)
 
-	// 如果需要保存裁剪框，先保存原图的检测区域
-	if saveCrops && len(detections) > 0 {
-		if err := saveCroppedDetections(img, detections, cameraName); err != nil {
-			// 记录错误但不中断主流程
-			fmt.Printf("Warning: failed to save cropped boxes: %v\n", err)
-		}
-	}
-
 	// Draw detection boxes
 	for _, det := range detections {
+		slog.Error(fmt.Sprintf("draw.go:DrawDetection:31 -> Confidence %f", det.Confidence))
 		drawDetectionBox(rgbaImg, det)
 	}
 
@@ -50,75 +42,6 @@ func DrawDetections(imageData []byte, detections []Detection, cameraName string,
 	}
 
 	return buf.Bytes(), nil
-}
-
-// saveCroppedDetections 保存检测框区域的图片
-func saveCroppedDetections(img image.Image, detections []Detection, cameraName string) error {
-	// 创建保存目录
-	saveDir := "./crops"
-	if err := os.MkdirAll(saveDir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory %s: %v", saveDir, err)
-	}
-
-	timestamp := time.Now().Format("20060102_150405")
-
-	for i, det := range detections {
-		// 获取检测框的边界（XYXY格式：X1, Y1, X2, Y2）
-		x1 := int(det.X1)
-		y1 := int(det.Y1)
-		x2 := int(det.X2)
-		y2 := int(det.Y2)
-
-		// 确保坐标顺序正确和在图片范围内
-		bounds := img.Bounds()
-		if x1 > x2 {
-			x1, x2 = x2, x1
-		}
-		if y1 > y2 {
-			y1, y2 = y2, y1
-		}
-
-		// 限制在图片边界内
-		if x1 < bounds.Min.X {
-			x1 = bounds.Min.X
-		}
-		if y1 < bounds.Min.Y {
-			y1 = bounds.Min.Y
-		}
-		if x2 > bounds.Max.X {
-			x2 = bounds.Max.X
-		}
-		if y2 > bounds.Max.Y {
-			y2 = bounds.Max.Y
-		}
-
-		// 创建裁剪区域
-		cropRect := image.Rect(x1, y1, x2, y2)
-		croppedImg := image.NewRGBA(cropRect)
-
-		// 裁剪图片
-		draw.Draw(croppedImg, cropRect, img, image.Point{x1, y1}, draw.Src)
-
-		// 生成文件名
-		filename := fmt.Sprintf("%s_%s_detection_%d.jpg", cameraName, timestamp, i)
-		filepath := filepath.Join(saveDir, filename)
-
-		// 保存裁剪后的图片
-		file, err := os.Create(filepath)
-		if err != nil {
-			return fmt.Errorf("failed to create file %s: %v", filepath, err)
-		}
-
-		if err := jpeg.Encode(file, croppedImg, &jpeg.Options{Quality: 90}); err != nil {
-			file.Close()
-			return fmt.Errorf("failed to encode cropped image: %v", err)
-		}
-
-		file.Close()
-		fmt.Printf("Saved cropped detection to: %s\n", filepath)
-	}
-
-	return nil
 }
 
 // drawDetectionBox draws a single detection box with confidence score

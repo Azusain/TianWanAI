@@ -258,7 +258,7 @@ def app():
                 "results": item["results"]
             })
 
-        return jsonify(resp)
+        return jsonify({"results": resp})
         
     @app.route('/tshirt', methods=['POST'])
     def TshirtDetect():
