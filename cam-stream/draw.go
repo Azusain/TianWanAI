@@ -223,6 +223,7 @@ func addClearOverlay(img *image.RGBA, cameraName string, detectionCount int) {
 	fontSize := 32.0
 
 	// Load Microsoft YaHei font from project fonts directory
+	// TODO: hard coding.
 	fontPath := "./assets/fonts/msyh.ttc"
 
 	fontLoaded := false
