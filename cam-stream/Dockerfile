@@ -30,7 +30,6 @@ WORKDIR /app
 # Copy binary and assets
 COPY --from=builder /app/cam-stream-backend .
 COPY --from=builder /app/*.html ./
-COPY --from=builder /app/web ./web
 COPY --from=builder /app/assets ./assets
 COPY --from=builder /app/configs ./configs
 
