@@ -174,7 +174,11 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 
 		// TODO: this is really weird.
 		if modelType == "smoke" && *className == "fire" {
-			slog.Warn("filter out the class `fire` from the smoke inference server.")
+			slog.Warn("filter out the class `fire` from the smokexfire inference server.")
+			continue
+		}
+		if modelType == "fire" && *className == "smoke" {
+			slog.Warn("filter out the class `smoke` from the smokexfire inference server.")
 			continue
 		}
 
