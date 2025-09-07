@@ -236,12 +236,6 @@ type CameraConfig struct {
 	Running                 bool                     `json:"running"`
 	CreatedAt               time.Time                `json:"created_at"`
 	UpdatedAt               time.Time                `json:"updated_at"`
-	// Keep these for backward compatibility during migration
-	// InferenceServers []string `json:"inference_servers,omitempty"` // Deprecated - migrate to bindings
-	// ServerUrl        string   `json:"server_url,omitempty"`        // Deprecated
-	// ModelType        string   `json:"model_type,omitempty"`        // Deprecated
-	// PlatformURL      string   `json:"platform_url,omitempty"`      // Deprecated - use global alert config
-	// CameraKKS        string   `json:"camera_kks,omitempty"`        // Deprecated - use camera name directly
 }
 
 type APIResponse struct {
@@ -538,7 +532,6 @@ func (ws *WebServer) handleAPICameraByID(w http.ResponseWriter, r *http.Request)
 		json.NewEncoder(w).Encode(response)
 	}
 }
-
 
 func (ws *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
