@@ -56,7 +56,9 @@ type DetectionResult struct {
 	DetScore *float64 `json:"det_score,omitempty"`
 	ClsScore *float64 `json:"cls_score,omitempty"`
 	Location Location `json:"location"`
-	Class    string   `json:"class,omitempty"` // Class name if provided by server
+	// Class name if provided by server
+	// TODO: only smoke detection supports this field.
+	Class *string `json:"label,omitempty"`
 }
 
 // Location represents the location of a detected object
@@ -155,7 +157,7 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 	imgReader := bytes.NewReader(imageData)
 	img, err := jpeg.DecodeConfig(imgReader)
 	if err != nil {
-		log.Printf("Warning: Failed to decode image config, using defaults: %v", err)
+		slog.Warn(fmt.Sprintf("Failed to decode image config, using defaults: %v", err))
 		img.Width = 1920
 		img.Height = 1080
 	}
@@ -163,6 +165,19 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 	// Convert Python server results to our Detection format
 	var detections []Detection
 	for _, result := range response.Results {
+		// Use class name from server response, or default to "unknown_class"
+		className := result.Class
+		if className == nil || *className == "" {
+			className = new(string)
+			*className = "unknown_class" // Default class name
+		}
+
+		// TODO: this is really weird.
+		if modelType == "smoke" && *className == "fire" {
+			slog.Warn("filter out the class `fire` from the smoke inference server.")
+			continue
+		}
+
 		confidence := 0.0
 		// TODO: use enumerate instead.
 		validRegularScore := modelType != "tshirt" && result.Score > 0 && result.Location.Left > 0
@@ -206,14 +221,8 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 			continue
 		}
 
-		// Use class name from server response, or default to "detected_object"
-		className := result.Class
-		if className == "" {
-			className = "detected_object" // Default class name
-		}
-
 		detection := Detection{
-			Class:      className,
+			Class:      *className,
 			Confidence: confidence,
 			X1:         x1,
 			Y1:         y1,
@@ -320,7 +329,6 @@ func processInferenceServer(frameData []byte, server *InferenceServer, binding *
 	// Check if any detection meets threshold
 	retDetections := []Detection{}
 	for _, detection := range detections {
-		slog.Error(fmt.Sprintf("fall confidence -> %f", detection.Confidence))
 		if detection.Confidence >= binding.Threshold {
 			retDetections = append(retDetections, detection)
 		}

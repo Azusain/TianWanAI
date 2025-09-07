@@ -375,6 +375,7 @@ def app():
         "log_id": uuid4(),
         "errno": errno,
         "err_msg": ServiceStatus.stringify(errno),
+        # TODO: version fields are not used.
         "api_version": "0.0.1",
         "model_version": "0.0.1",
         "results": batch_results[0]
@@ -386,4 +387,4 @@ def app():
 if __name__ == "__main__":
   app = app()
   if app:
-    app.run(port=8091, debug=True, host='0.0.0.0')
+    app.run(port=8901, debug=True, host='0.0.0.0')

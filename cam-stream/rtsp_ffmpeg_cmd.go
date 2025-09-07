@@ -123,12 +123,12 @@ func (m *FFmpegCmdRTSPManager) captureFrames(stream *FFmpegCameraStream) {
 			)
 
 			// Start FFmpeg
-			log.Printf("Starting FFmpeg for camera %s", stream.ID)
+			slog.Info(fmt.Sprintf("Starting FFmpeg for camera %s", stream.ID))
 			stderr := &bytes.Buffer{}
 			stream.cmd.Stderr = stderr
 
 			if err := stream.cmd.Start(); err != nil {
-				log.Printf("Failed to start FFmpeg for camera %s: %v", stream.ID, err)
+				slog.Error(fmt.Sprintf("Failed to start FFmpeg for camera %s: %v", stream.ID, err))
 				time.Sleep(5 * time.Second) // Wait before retry
 				continue
 			}
@@ -147,7 +147,8 @@ func (m *FFmpegCmdRTSPManager) captureFrames(stream *FFmpegCameraStream) {
 					// Error occurred
 					log.Printf("FFmpeg error for camera %s: %v", stream.ID, err)
 					log.Printf("FFmpeg stderr: %s", stderr.String())
-					time.Sleep(5 * time.Second) // Wait before retry
+					// Wait before retry
+					time.Sleep(5 * time.Second)
 				}
 			}
 		}
@@ -175,6 +176,7 @@ func (m *FFmpegCmdRTSPManager) monitorFrameFile(stream *FFmpegCameraStream, outp
 
 		case <-ticker.C:
 			// Read the latest frame from disk
+			// TODO: this is really gross.
 			frameData, err := os.ReadFile(outputPath)
 			if err != nil {
 				continue // File might not exist yet
