@@ -1,48 +1,30 @@
 {
   "cameras": {
-    "cam_34": {
-      "id": "cam_34",
-      "name": "一号摄像头",
-      "rtsp_url": "rtsp://localhost:8554/test",
+    "cam_42": {
+      "id": "cam_42",
+      "name": "三号摄像头",
+      "rtsp_url": "rtsp://192.168.31.48:8554/test",
       "inference_server_bindings": [
         {
-          "server_id": "inf_14",
-          "threshold": 0
+          "server_id": "inf_20",
+          "threshold": 0.1
         }
       ],
       "enabled": true,
       "running": true,
-      "created_at": "2025-09-06T23:07:02.7977538+08:00",
-      "updated_at": "2025-09-06T23:08:38.9863539+08:00"
+      "created_at": "2025-09-07T21:27:04.0607853+08:00",
+      "updated_at": "2025-09-07T21:27:04.0607853+08:00"
     }
   },
   "inference_servers": {
-    "inf_12": {
-      "id": "inf_12",
-      "name": "test",
-      "url": "http://localhost:8091/gesture",
-      "model_type": "gesture",
+    "inf_20": {
+      "id": "inf_20",
+      "name": "Tshirt",
+      "url": "http://localhost:8901/tshirt",
+      "model_type": "tshirt",
       "enabled": true,
-      "created_at": "2025-09-06T18:15:20.078955+08:00",
-      "updated_at": "2025-09-06T18:15:20.078955+08:00"
-    },
-    "inf_13": {
-      "id": "inf_13",
-      "name": "Ponding",
-      "url": "http://localhost:8091/ponding",
-      "model_type": "ponding",
-      "enabled": true,
-      "created_at": "2025-09-06T18:23:41.0817467+08:00",
-      "updated_at": "2025-09-06T18:23:41.0817467+08:00"
-    },
-    "inf_14": {
-      "id": "inf_14",
-      "name": "Fall_v2",
-      "url": "http://localhost:8091/fall",
-      "model_type": "fall",
-      "enabled": true,
-      "created_at": "2025-09-06T18:30:31.3006629+08:00",
-      "updated_at": "2025-09-06T18:30:31.3006629+08:00"
+      "created_at": "2025-09-07T21:26:38.2064581+08:00",
+      "updated_at": "2025-09-07T21:26:38.2064581+08:00"
     }
   },
   "alert_server": {
@@ -51,7 +33,7 @@
     "updated_at": "2025-09-06T18:19:30.297474+08:00"
   },
   "counters": {
-    "camera": 34,
-    "inference_server": 14
+    "camera": 42,
+    "inference_server": 20
   }
 }
