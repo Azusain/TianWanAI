@@ -20,7 +20,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w -extldflags '-static'" -o 
 FROM alpine:latest
 
 # Install only essential runtime dependencies
-RUN apk add --no-cache ca-certificates curl
+RUN apk add --no-cache ca-certificates curl ffmpeg
 
 # Create non-root user
 RUN adduser -D -s /bin/sh appuser
