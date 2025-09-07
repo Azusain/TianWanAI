@@ -68,7 +68,7 @@ def initialize_models():
         g_ponding_service = YoloDetectionService("models/ponding/weights/best.pt", 640)
         
         logger.info("loading mouse detection model...")
-        g_mouse_service = YoloDetectionService("models/mouse/weights/mouse_v4.pt", 640)
+        g_mouse_service = YoloDetectionService("models/mouse/weights/mouse_v5.pt", 640)
         
         logger.info("loading cigar detection model...")
         g_cigar_service = YoloDetectionService("models/cigar/weights/cigar_v1.pt", 640)
