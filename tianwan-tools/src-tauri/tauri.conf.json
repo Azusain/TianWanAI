@@ -12,13 +12,36 @@
   "app": {
     "windows": [
       {
-        "title": "tianwan-tools",
-        "width": 800,
-        "height": 600
+        "title": "Tianwan AI Tools",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600
       }
     ],
     "security": {
       "csp": null
+    }
+  },
+  "plugins": {
+    "dialog": {
+      "all": true,
+      "ask": true,
+      "confirm": true,
+      "message": true,
+      "open": true,
+      "save": true
+    },
+    "fs": {
+      "all": true,
+      "readFile": true,
+      "writeFile": true,
+      "readDir": true,
+      "copyFile": true,
+      "createDir": true,
+      "removeDir": true,
+      "removeFile": true,
+      "renameFile": true
     }
   },
   "bundle": {
