@@ -276,7 +276,7 @@ def app():
             }
 
         # use new pose-based detection logic
-        results = g_tshirt_service.Predict(img)
+        results = g_tshirt_service.Predict(img, g_pose_service, g_tshirt_classifier)
         
         # log results
         for result in results:

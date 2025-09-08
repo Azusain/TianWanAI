@@ -290,9 +290,16 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 		}
 
 		detections := processInferenceServer(frameData, server, &binding, cameraConfig.ID)
-		displayedImage, err := DrawDetections(frameData, detections, cameraConfig.Name)
+		
+		// IMPORTANT: Create a copy of frameData for each inference server to avoid concurrent drawing issues
+		// This prevents multiple models from drawing on the same image buffer
+		frameDataCopy := make([]byte, len(frameData))
+		copy(frameDataCopy, frameData)
+		slog.Info(fmt.Sprintf("Created independent image copy for model %s (size: %d bytes)", server.ModelType, len(frameDataCopy)))
+		
+		displayedImage, err := DrawDetections(frameDataCopy, detections, cameraConfig.Name)
 		if err != nil {
-			slog.Warn(fmt.Sprintf("failed to write result for model %q", server.ModelType))
+			slog.Warn(fmt.Sprintf("failed to draw results for model %q: %v", server.ModelType, err))
 		}
 		// Store results
 		results[server.ModelType] = &ModelResult{
