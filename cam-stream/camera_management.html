@@ -233,7 +233,7 @@
         <div class="form-group">
           <label for="inferenceServers">推理服务器</label>
           <div id="inferenceServersList"
-            style="border: 1px solid #ddd; border-radius: 6px; padding: 10px; max-height: 150px; overflow-y: auto;">
+            style="border: 1px solid #ddd; border-radius: 6px; padding: 10px; max-height: 600px; overflow-y: auto;">
             <div style="color: #7f8c8d; font-size: 14px;">加载推理服务器列表...</div>
           </div>
           <small style="color: #7f8c8d; font-size: 12px;">可选：选择一个或多个推理服务器</small>
@@ -515,8 +515,6 @@
           const result = await response.json();
 
           if (result.success) {
-            // 清空表单
-            document.getElementById('cameraForm').reset();
             // 重新加载摄像头列表
             this.loadCameras();
             alert('摄像头添加成功并已自动启动！');
@@ -578,7 +576,7 @@
                             </div>
                             <div class="form-group">
                                 <label>推理服务器绑定</label>
-                                <div id="editInferenceServersList" style="border: 1px solid #ddd; border-radius: 6px; padding: 10px; max-height: 200px; overflow-y: auto;">
+                                <div id="editInferenceServersList" style="border: 1px solid #ddd; border-radius: 6px; padding: 10px; max-height: 600px; overflow-y: auto;">
                                     <div style="color: #7f8c8d; font-size: 14px;">加载中...</div>
                                 </div>
                             </div>
@@ -918,7 +916,6 @@
           const result = await response.json();
 
           if (result.success) {
-            document.getElementById('serverForm').reset();
             this.loadServers();
             alert('推理服务器添加成功！');
           } else {
