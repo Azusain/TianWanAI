@@ -8,7 +8,6 @@ from uuid import uuid4 as uuid4
 # model
 from ultralytics import YOLO
 import torch
-from transformers import YolosImageProcessor, YolosForObjectDetection
 
 # temporal fall detection - moved to this file
 import sys
@@ -186,42 +185,88 @@ class YoloDetectionService():
         }
         
 class TshirtDetectionService():
-    def __init__(self, model_dir_path, imgsz) -> None:
-      self.version = "0.0.1"
-      self.path = model_dir_path
-      self.imgsz = imgsz
-      self.feature_extractor = YolosImageProcessor.from_pretrained(
-        model_dir_path, local_files_only=True, size={"shortest_edge": imgsz, "longest_edge": imgsz}  
-      )
-      self.model = YolosForObjectDetection.from_pretrained(model_dir_path, local_files_only=True)
-      self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-      self.model.to(self.device)
-      logger.info(f"device: {self.device.type}")
-      
+    def __init__(self) -> None:
+        self.version = "0.0.1"
+        
     def Predict(self, img):
-      encoding = self.feature_extractor(images=img, return_tensors="pt")
-      encoding = {k: v.to(self.device) for k, v in encoding.items()}
-      with torch.no_grad():
-          outputs = self.model(**encoding)
-      scores = outputs.logits.softmax(-1)[0, :, :-1]  
-      labels = scores.argmax(-1)
-      scores = scores.max(-1).values
-      boxes = outputs.pred_boxes[0]
-      threshold = 0.2
-      selected = torch.where(scores > threshold)
-      selected_scores = scores[selected]
-      selected_labels = labels[selected]
-      selected_boxes = boxes[selected]
-      h, w = img.shape[:2]
-      pixel_boxes = []
-      for box in selected_boxes:
-          cx, cy, bw, bh = box
-          x1 = (cx - bw / 2) * w
-          x2 = (cx + bw / 2) * w
-          y1 = (cy - bh / 2) * h
-          y2 = (cy + bh / 2) * h
-          pixel_boxes.append([x1.item(), y1.item(), x2.item(), y2.item()])
-      return selected_scores, selected_labels, pixel_boxes
+        """detect persons using pose model, extract upper body, classify tshirt"""
+        # need to access global variables
+        import main
+        
+        # step 1: detect persons using pose model
+        pose_results = main.g_pose_service.model.predict(
+            source=img,
+            imgsz=640,
+            verbose=False
+        )
+        
+        result = pose_results[0]
+        persons_results = []
+        
+        if result.keypoints is not None and result.boxes is not None:
+            keypoints = result.keypoints.data  # [N, 17, 3] for COCO format
+            boxes = result.boxes.data  # [N, 6] - xyxy + conf + cls
+            H, W = img.shape[:2]
+            
+            for i in range(len(keypoints)):
+                person_keypoints = keypoints[i].cpu().numpy()  # [17, 3]
+                person_box = boxes[i].cpu().numpy()  # [6]
+                
+                # extract shoulder and hip keypoints (COCO format)
+                left_shoulder = person_keypoints[5]   # [x, y, conf]
+                right_shoulder = person_keypoints[6]  # [x, y, conf] 
+                left_hip = person_keypoints[11]       # [x, y, conf]
+                right_hip = person_keypoints[12]      # [x, y, conf]
+                
+                # find shoulder top and hip bottom
+                shoulder_y_min = min(left_shoulder[1], right_shoulder[1])
+                hip_y_max = max(left_hip[1], right_hip[1])
+                
+                # use person bbox for x boundaries  
+                x1, y1, x2, y2 = person_box[:4]
+                
+                # calculate upper body region with margin
+                margin_y = int((hip_y_max - shoulder_y_min) * 0.1)
+                upper_y = max(0, int(shoulder_y_min - margin_y))
+                lower_y = min(H, int(hip_y_max + margin_y))
+                
+                x1, y1, x2, y2 = int(x1), int(upper_y), int(x2), int(lower_y)
+                x1 = max(0, x1)
+                y1 = max(0, y1)
+                x2 = min(W, x2)
+                y2 = min(H, y2)
+                
+                if x2 > x1 and y2 > y1:
+                    # crop upper body region
+                    upper_body_region = img[y1:y2, x1:x2]
+                    
+                    # classify tshirt
+                    top1_prob, top1_class, _, _ = main.g_tshirt_classifier.Predict(upper_body_region)
+                    
+                    # calculate normalized coordinates
+                    width_px = x2 - x1
+                    height_px = y2 - y1
+                    cx = x1 + width_px / 2
+                    cy = y1 + height_px / 2
+                    cxn = cx / W
+                    cyn = cy / H
+                    width_n = width_px / W
+                    height_n = height_px / H
+                    left_n = cxn - width_n / 2
+                    top_n = cyn - height_n / 2
+                    
+                    persons_results.append({
+                        "det_score": float(person_box[4]),  # person detection confidence
+                        "cls_score": top1_prob if top1_class == 1 else 1 - top1_prob,  # assume class 1 is tshirt
+                        "location": {
+                            "left": left_n,
+                            "top": top_n,
+                            "width": width_n,
+                            "height": height_n
+                        }
+                    })
+                    
+        return persons_results
 
 
 # Pose utilities for fall detection

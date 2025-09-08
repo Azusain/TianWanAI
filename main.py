@@ -23,6 +23,7 @@ g_ponding_service = None
 g_mouse_service = None
 g_cigar_service = None
 g_smoke_service = None
+g_pose_service = None
 g_tshirt_service = None
 g_tshirt_classifier = None
 
@@ -55,9 +56,9 @@ def validate_img_format():
 def initialize_models():
     """Initialize all models at startup (except Fall which has special handling)"""
     global g_gesture_service, g_ponding_service, g_mouse_service, g_cigar_service
-    global g_smoke_service, g_tshirt_service, g_tshirt_classifier
+    global g_smoke_service, g_pose_service, g_tshirt_service, g_tshirt_classifier
     
-    logger.info("Starting model initialization...")
+    logger.info("starting model initialization...")
     
     try:
         # Initialize YOLO detection models
@@ -76,9 +77,13 @@ def initialize_models():
         logger.info("loading smoke detection model...")
         g_smoke_service = SmokeFileDetector("__SmokeFire/weights/smoke.pt")
         
-        # Initialize tshirt models (detection + classification)
-        logger.info("loading tshirt detection model...")
-        g_tshirt_service = TshirtDetectionService("models/fashionpedia", 640)
+        # Initialize pose detection model for tshirt service
+        logger.info("loading pose detection model...")
+        g_pose_service = YoloDetectionService("models/yolo11m-pose.pt", 640)
+        
+        # Initialize tshirt service and classifier
+        logger.info("loading tshirt service...")
+        g_tshirt_service = TshirtDetectionService()
         
         logger.info("loading tshirt classification model...")
         g_tshirt_classifier = YoloClassificationService("models/tshirt_cls/weights/tshirt_cls_v1.pt")
@@ -270,81 +275,18 @@ def app():
               "err_msg": ServiceStatus.stringify(errno),
             }
 
-        H, W = img.shape[:2]
-        selected_scores, selected_labels, pixel_boxes = g_tshirt_service.Predict(img)
-        results = []
-
-        tshirt_boxes = []
-        for score, label_idx, bbox in zip(selected_scores, selected_labels, pixel_boxes):
-            label_name = g_tshirt_service.model.config.id2label[label_idx.item()]
-            if "t-shirt" in label_name.lower():
-                tshirt_boxes.append((float(score), bbox))
-
-        def boxes_iou(box1, box2):
-            x1 = max(box1[0], box2[0])
-            y1 = max(box1[1], box2[1])
-            x2 = min(box1[2], box2[2])
-            y2 = min(box1[3], box2[3])
-            inter_area = max(0, x2 - x1) * max(0, y2 - y1)
-            area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
-            area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
-            union_area = area1 + area2 - inter_area
-            if union_area == 0:
-                return 0
-            return inter_area / union_area
-
-        tshirt_boxes.sort(key=lambda x: x[0], reverse=True)
-        filtered_boxes = []
-        for score, bbox in tshirt_boxes:
-            keep = True
-            for _, kept_bbox in filtered_boxes:
-                if boxes_iou(bbox, kept_bbox) > 0:
-                    keep = False
-                    break
-            if keep:
-                filtered_boxes.append((score, bbox))
-
-        for score, bbox in filtered_boxes:
-            x1, y1, x2, y2 = bbox
-            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-            
-            x1 = max(0, x1)
-            y1 = max(0, y1)
-            x2 = min(W, x2)
-            y2 = min(H, y2)
-            
-            if x2 > x1 and y2 > y1:
-                cropped_region = img[y1:y2, x1:x2]
-                top1_prob, top1_class, _, _ = g_tshirt_classifier.Predict(cropped_region)
-                width_px = x2 - x1
-                height_px = y2 - y1
-                cx = x1 + width_px / 2
-                cy = y1 + height_px / 2
-                cxn = cx / W
-                cyn = cy / H
-                width_n = width_px / W
-                height_n = height_px / H
-                left_n = cxn - width_n / 2
-                top_n = cyn - height_n / 2
-                                
-                results.append({
-                    "det_score": score,
-                    # index '1' stands for 'tshirt'
-                    "cls_score": top1_prob if top1_class == 1 else 1 - top1_prob,
-                    "location": {
-                        "left": left_n,
-                        "top": top_n,
-                        "width": width_n,
-                        "height": height_n
-                    }
-                })
-                logger.success(f"detection score: {score}, classification score: {top1_prob}")
-
+        # use new pose-based detection logic
+        results = g_tshirt_service.Predict(img)
+        
+        # log results
+        for result in results:
+            logger.success(f"detection score: {result['det_score']}, classification score: {result['cls_score']}")
 
         if len(results) > 0:
           errno = ServiceStatus.SUCCESS.value
         else:
           errno = ServiceStatus.NO_OBJECT_DETECTED.value
+          
         return {
           "log_id": uuid4(),
           "errno": errno,
