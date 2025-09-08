@@ -188,13 +188,10 @@ class TshirtDetectionService():
     def __init__(self) -> None:
         self.version = "0.0.1"
         
-    def Predict(self, img):
+    def Predict(self, img, pose_service, classifier_service):
         """detect persons using pose model, extract upper body, classify tshirt"""
-        # need to access global variables
-        import main
-        
         # step 1: detect persons using pose model
-        pose_results = main.g_pose_service.model.predict(
+        pose_results = pose_service.model.predict(
             source=img,
             imgsz=640,
             verbose=False
@@ -241,7 +238,7 @@ class TshirtDetectionService():
                     upper_body_region = img[y1:y2, x1:x2]
                     
                     # classify tshirt
-                    top1_prob, top1_class, _, _ = main.g_tshirt_classifier.Predict(upper_body_region)
+                    top1_prob, top1_class, _, _ = classifier_service.Predict(upper_body_region)
                     
                     # calculate normalized coordinates
                     width_px = x2 - x1

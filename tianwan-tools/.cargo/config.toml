@@ -3,11 +3,7 @@ target = "x86_64-pc-windows-msvc"
 
 [target.x86_64-pc-windows-msvc]
 rustflags = [
-    "-C", "target-feature=+crt-static"
+    "-C", "link-args=/DEFAULTLIB:msvcprt.lib",
+    "-C", "link-args=/DEFAULTLIB:vcruntime.lib",
+    "-C", "link-args=/DEFAULTLIB:ucrt.lib"
 ]
-
-[env]
-CARGO_CFG_WINDOWS = "1"
-# Skip VS detection to avoid vswhom-sys issues
-VSWHERE = "false"
-VS_UNICODE_OUTPUT = "1"
