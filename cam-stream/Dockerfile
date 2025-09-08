@@ -19,8 +19,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w -extldflags '-static'" -o 
 # Runtime stage - minimal Alpine
 FROM alpine:latest
 
-# Install only essential runtime dependencies
-RUN apk add --no-cache ca-certificates curl ffmpeg
+# Install only essential runtime dependencies and set timezone
+RUN apk add --no-cache ca-certificates curl ffmpeg tzdata && \
+    ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
 # Create non-root user
 RUN adduser -D -s /bin/sh appuser
