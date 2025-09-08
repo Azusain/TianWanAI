@@ -729,7 +729,9 @@ func (ws *WebServer) handleAPIImageFile(w http.ResponseWriter, r *http.Request) 
 
 	// Set appropriate headers
 	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age=3600") // Cache for 1 hour
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate") // No cache for real-time monitoring
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 
 	// Serve the file
 	http.ServeFile(w, r, filePath)
