@@ -204,7 +204,7 @@ func (m *FFmpegCmdRTSPManager) monitorFrameFile(stream *FFmpegCameraStream, outp
 				slog.Warn("skipping detection because cameraConfig == nil or cameraConfig not valid")
 				return
 			}
-			modelResults, err := ProcessFrameWithMultipleInference(frameData, cameraConfig)
+			modelResults, err := ProcessFrameWithMultipleInference(frameData, cameraConfig, m)
 			if err != nil {
 				slog.Warn(fmt.Sprintf("Warning: Failed to process frame with inference for camera %s: %v", stream.ID, err))
 				continue

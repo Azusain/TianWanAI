@@ -1,3 +1,216 @@
+# Tools Directory - Refactored
+
+This directory contains refactored and optimized tools for the tianwan project. The original scattered tools have been consolidated into more powerful and user-friendly utilities.
+
+## 📁 Directory Structure
+
+```
+tools/
+├── README.md                    # This file
+├── body_part_extractor.py      # Enhanced multi-threaded body part extraction
+├── video_processor.py          # Unified video frame extraction
+├── dataset_manager.py          # Comprehensive dataset management
+├── test/                       # Testing utilities
+│   ├── test_extraction.py      # Frame extraction testing
+│   ├── test_interface.py       # API interface testing  
+│   └── testRes.py             # Result testing
+└── [legacy files...]           # Original tools (to be deprecated)
+```
+
+## 🚀 Main Tools
+
+### 1. Body Part Extractor (`body_part_extractor.py`)
+
+**Enhanced multi-threaded tool for extracting different body regions from videos**
+
+**Features:**
+- Multi-threading for high performance (4+ workers)
+- Support for multiple body regions:
+  - `upper_body` - Shoulders to hips
+  - `head` - Head and neck region
+  - `lower_body` - Hips to knees/ankles
+  - `full_body` - Complete person
+- Pose estimation based cropping using YOLO
+- Batch processing of videos
+- Smart aspect ratio filtering
+- Comprehensive statistics and logging
+
+**Usage:**
+```bash
+# Extract upper body from single video
+python body_part_extractor.py video.mp4 -m models/yolo11m-pose.pt -r upper_body
+
+# Extract head and upper body from directory
+python body_part_extractor.py videos/ -m models/yolo11m-pose.pt -r head upper_body --workers 6
+
+# Advanced options
+python body_part_extractor.py video.mp4 -m models/yolo11m-pose.pt \
+    -r upper_body -o output_crops --interval 30 --max-frames 1000 \
+    --confidence 0.7 --margin 0.15 --batch-size 8
+```
+
+**Replaces:** `extract_upper_body_mt.py`, `upper_body_extractor.py`
+
+### 2. Video Processor (`video_processor.py`)
+
+**Unified tool for video frame extraction with multiple strategies**
+
+**Features:**
+- Smart sampling (target frame count or fixed interval)
+- Support for lossy (JPG) and lossless (PNG) formats
+- Timeout protection for problematic videos
+- Batch processing of multiple videos
+- Chinese path support
+- Comprehensive progress logging
+- Automatic interval calculation
+
+**Usage:**
+```bash
+# Extract 200 frames from video
+python video_processor.py video.mp4 -o output_frames --target-frames 200
+
+# Extract frames at fixed interval with PNG format
+python video_processor.py video.mp4 -o output_frames --interval 30 -f png -q 5
+
+# Process entire directory
+python video_processor.py videos/ --target-frames 500 --prefix extracted
+```
+
+**Replaces:** `extract_frames_lossless.py`, `extract_mouse3_final.py`, `extract_mouse3_frames.py`, `extract_mouse_200frames.py`, `frame-extraction.py`
+
+### 3. Dataset Manager (`dataset_manager.py`)
+
+**Comprehensive tool for YOLO dataset management**
+
+**Features:**
+- Dataset analysis and health checks
+- Train/validation splitting with multiple modes
+- Dataset visualization with bounding box overlay
+- Missing label detection
+- Class distribution analysis
+- Automatic YOLO configuration generation
+- Support for unlabeled images
+
+**Usage:**
+```bash
+# Analyze dataset
+python dataset_manager.py dataset_path analyze
+
+# Split dataset (80/20)
+python dataset_manager.py dataset_path split output_split --ratio 0.8
+
+# Enhanced split with unlabeled handling
+python dataset_manager.py dataset_path split output_split --mode enhanced
+
+# Visualize samples
+python dataset_manager.py dataset_path visualize --samples 10 --output visualizations/
+```
+
+**Replaces:** `dataset_splitter.py`, `split_mouse_dataset_v6.py`, `split_train_test.py`, `dataset_statistics.py`, `visualize_dataset.py`, `find_missing_labels.py`
+
+## 🧪 Test Directory
+
+The `test/` directory contains testing utilities:
+- `test_extraction.py` - Test frame extraction functionality
+- `test_interface.py` - Test API interface connectivity
+- `testRes.py` - General result testing
+
+## ⚡ Key Improvements
+
+### Performance
+- **Multi-threading:** All tools support parallel processing
+- **Batch processing:** Efficient handling of multiple files
+- **Memory optimization:** Streaming processing for large datasets
+- **GPU acceleration:** CUDA support where applicable
+
+### Usability  
+- **Unified interfaces:** Consistent command-line arguments
+- **Auto-detection:** Smart detection of directory structures
+- **Progress logging:** Detailed progress and statistics
+- **Error handling:** Robust error recovery and reporting
+
+### Features
+- **Format support:** Multiple image/video formats
+- **Chinese paths:** Full Unicode path support
+- **Configuration:** Flexible parameter tuning
+- **Documentation:** Comprehensive help and examples
+
+## 🔧 Requirements
+
+```bash
+pip install ultralytics opencv-python loguru matplotlib pathlib argparse
+```
+
+For body part extraction:
+```bash
+# Download YOLO pose model
+yolo download yolo11m-pose.pt
+```
+
+## 📊 Migration Guide
+
+### From old frame extraction tools:
+```bash
+# Old way
+python extract_mouse_200frames.py  # Fixed paths, limited options
+
+# New way  
+python video_processor.py video.mp4 -o output --target-frames 200 --format jpg
+```
+
+### From old dataset tools:
+```bash
+# Old way
+python split_train_test.py  # Basic 4:1 split only
+
+# New way
+python dataset_manager.py dataset split output --ratio 0.8 --mode enhanced
+```
+
+### From old body extraction:
+```bash
+# Old way
+python extract_upper_body_mt.py  # Upper body only, complex setup
+
+# New way
+python body_part_extractor.py video.mp4 -m pose_model.pt -r upper_body head
+```
+
+## 🗑️ Deprecated Files
+
+The following original tools are now deprecated and replaced:
+- `extract_frames_lossless.py` → `video_processor.py`
+- `extract_mouse3_final.py` → `video_processor.py`  
+- `extract_mouse3_frames.py` → `video_processor.py`
+- `extract_mouse_200frames.py` → `video_processor.py`
+- `frame-extraction.py` → `video_processor.py`
+- `extract_upper_body_mt.py` → `body_part_extractor.py`
+- `upper_body_extractor.py` → `body_part_extractor.py`
+- `dataset_splitter.py` → `dataset_manager.py`
+- `split_mouse_dataset_v6.py` → `dataset_manager.py`
+- `split_train_test.py` → `dataset_manager.py`
+- `dataset_statistics.py` → `dataset_manager.py`
+- `visualize_dataset.py` → `dataset_manager.py`
+- `find_missing_labels.py` → `dataset_manager.py`
+
+These files can be safely removed after verifying the new tools work correctly for your use cases.
+
+## 💡 Tips
+
+1. **Start small:** Test new tools on small datasets first
+2. **Check logs:** All tools provide detailed logging for debugging
+3. **Use help:** Run tools with `--help` for detailed usage information
+4. **Monitor resources:** Multi-threaded tools can be resource-intensive
+5. **Backup data:** Always backup important datasets before processing
+
+## 🤝 Contributing
+
+When adding new functionality:
+1. Follow the established patterns in existing tools
+2. Add comprehensive logging and error handling  
+3. Include command-line help and examples
+4. Update this README with new features
+
 # Tianwan 工具集合
 
 本目录包含各种用于数据处理、模型训练和评估的工具脚本。
