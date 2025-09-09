@@ -105,24 +105,26 @@ class MultiThreadUpperBodyExtractor:
         left_hip = keypoints[11]       # [x, y, conf]
         right_hip = keypoints[12]      # [x, y, conf]
         
-        # find shoulder top and hip bottom
-        shoulder_y_min = min(left_shoulder[1], right_shoulder[1])
-        hip_y_max = max(left_hip[1], right_hip[1])
+        # find the highest and lowest points among shoulders and hips
+        # this handles both normal and inverted poses correctly
+        all_y_coords = [left_shoulder[1], right_shoulder[1], left_hip[1], right_hip[1]]
+        upper_y = min(all_y_coords)  # highest point (smallest Y coordinate)
+        lower_y = max(all_y_coords)  # lowest point (largest Y coordinate)
         
         # use person bbox for x boundaries
         bbox = person_data['bbox']
         x1, y1, x2, y2 = bbox
         
         # calculate upper body region with margin
-        margin_y = int((hip_y_max - shoulder_y_min) * margin_ratio)
-        upper_y = max(0, int(shoulder_y_min - margin_y))
-        lower_y = min(H, int(hip_y_max + margin_y))
+        margin_y = int((lower_y - upper_y) * margin_ratio)
+        crop_upper_y = max(0, int(upper_y - margin_y))
+        crop_lower_y = min(H, int(lower_y + margin_y))
         
         # ensure boundaries are within image and bbox
         x1 = max(0, int(x1))
-        y1 = max(0, upper_y)
+        y1 = max(0, crop_upper_y)
         x2 = min(W, int(x2))
-        y2 = min(H, lower_y)
+        y2 = min(H, crop_lower_y)
         
         if x2 <= x1 or y2 <= y1:
             return None
