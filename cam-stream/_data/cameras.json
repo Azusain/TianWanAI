@@ -1,75 +1,39 @@
 {
   "cameras": {
-    "cam_47": {
-      "id": "cam_47",
+    "cam_54": {
+      "id": "cam_54",
       "name": "三号摄像头",
       "rtsp_url": "rtsp://192.168.31.48:8554/test",
       "inference_server_bindings": [
         {
-          "server_id": "inf_20",
+          "server_id": "inf_28",
           "threshold": 0
         }
       ],
       "enabled": true,
       "running": true,
-      "created_at": "2025-09-09T10:20:16.2147183+08:00",
-      "updated_at": "2025-09-09T10:20:16.2147183+08:00"
+      "created_at": "2025-09-09T13:10:28.2481503+08:00",
+      "updated_at": "2025-09-09T13:10:28.2481503+08:00"
     }
   },
   "inference_servers": {
-    "inf_20": {
-      "id": "inf_20",
-      "name": "Tshirt",
-      "url": "http://localhost:8901/tshirt",
-      "model_type": "tshirt",
-      "enabled": true,
-      "created_at": "2025-09-07T21:26:38.2064581+08:00",
-      "updated_at": "2025-09-07T21:26:38.2064581+08:00"
-    },
-    "inf_22": {
-      "id": "inf_22",
-      "name": "Fall_v2",
-      "url": "http://192.168.31.48:8091/helmet",
-      "model_type": "helmet",
-      "enabled": true,
-      "created_at": "2025-09-08T12:04:34.4660467+08:00",
-      "updated_at": "2025-09-08T12:04:34.4660467+08:00"
-    },
-    "inf_23": {
-      "id": "inf_23",
-      "name": "Helmet",
-      "url": "http://192.168.31.48:8091/safetybelt",
-      "model_type": "safetybelt",
-      "enabled": true,
-      "created_at": "2025-09-08T12:04:38.1440356+08:00",
-      "updated_at": "2025-09-08T12:04:38.1440356+08:00"
-    },
-    "inf_24": {
-      "id": "inf_24",
+    "inf_28": {
+      "id": "inf_28",
       "name": "Safetybelt",
-      "url": "http://localhost:8901/mouse",
-      "model_type": "mouse",
+      "url": "http://192.168.31.48:8903/predict",
+      "model_type": "predict",
       "enabled": true,
-      "created_at": "2025-09-08T12:04:41.9221124+08:00",
-      "updated_at": "2025-09-08T12:04:41.9221124+08:00"
+      "created_at": "2025-09-09T12:18:20.6671454+08:00",
+      "updated_at": "2025-09-09T12:18:20.6671454+08:00"
     },
-    "inf_25": {
-      "id": "inf_25",
-      "name": "Mouse",
-      "url": "http://localhost:8901/mouse",
-      "model_type": "mouse",
-      "enabled": true,
-      "created_at": "2025-09-08T12:04:45.8062236+08:00",
-      "updated_at": "2025-09-08T12:04:45.8062236+08:00"
-    },
-    "inf_26": {
-      "id": "inf_26",
+    "inf_29": {
+      "id": "inf_29",
       "name": "Helmet",
-      "url": "http://localhost:8901/mouse",
-      "model_type": "mouse",
+      "url": "http://192.168.31.48:8902/predict",
+      "model_type": "predict",
       "enabled": true,
-      "created_at": "2025-09-08T12:09:33.9870825+08:00",
-      "updated_at": "2025-09-08T12:09:33.9870825+08:00"
+      "created_at": "2025-09-09T12:55:52.7527603+08:00",
+      "updated_at": "2025-09-09T12:55:52.7527603+08:00"
     }
   },
   "alert_server": {
@@ -78,7 +42,7 @@
     "updated_at": "2025-09-06T18:19:30.297474+08:00"
   },
   "counters": {
-    "camera": 47,
-    "inference_server": 26
+    "camera": 54,
+    "inference_server": 29
   }
 }
