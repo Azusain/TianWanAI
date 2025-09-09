@@ -236,6 +236,17 @@ class TshirtDetectionService():
                 y2 = min(H, y2)
                 
                 if x2 > x1 and y2 > y1:
+                    # check aspect ratio to filter out abnormal detections
+                    width_px = x2 - x1
+                    height_px = y2 - y1
+                    aspect_ratio = width_px / height_px
+                    
+                    # filter out extreme aspect ratios (too wide or too tall)
+                    # normal human upper body should have reasonable proportions
+                    if aspect_ratio > 3.0 or aspect_ratio < 0.3:
+                        logger.debug(f"skipping detection with abnormal aspect ratio: {aspect_ratio:.2f} (width={width_px}, height={height_px})")
+                        continue
+                    
                     # crop upper body region
                     upper_body_region = img[y1:y2, x1:x2]
                     
@@ -243,8 +254,6 @@ class TshirtDetectionService():
                     top1_prob, top1_class, _, _ = classifier_service.Predict(upper_body_region)
                     
                     # calculate normalized coordinates
-                    width_px = x2 - x1
-                    height_px = y2 - y1
                     cx = x1 + width_px / 2
                     cy = y1 + height_px / 2
                     cxn = cx / W
