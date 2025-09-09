@@ -1,9 +1,0 @@
-[build]
-target = "x86_64-pc-windows-msvc"
-
-[target.x86_64-pc-windows-msvc]
-rustflags = [
-    "-C", "link-args=/DEFAULTLIB:msvcprt.lib",
-    "-C", "link-args=/DEFAULTLIB:vcruntime.lib",
-    "-C", "link-args=/DEFAULTLIB:ucrt.lib"
-]

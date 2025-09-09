@@ -12,3 +12,4 @@ pyvenv.cfg
 **/logs/
 **/.cache/
 tianwan.code-workspace
+tianwan-tools/
