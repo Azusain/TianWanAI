@@ -215,19 +215,21 @@ class TshirtDetectionService():
                 left_hip = person_keypoints[11]       # [x, y, conf]
                 right_hip = person_keypoints[12]      # [x, y, conf]
                 
-                # find shoulder top and hip bottom
-                shoulder_y_min = min(left_shoulder[1], right_shoulder[1])
-                hip_y_max = max(left_hip[1], right_hip[1])
+                # find the highest and lowest points among shoulders and hips
+                # this handles both normal and inverted poses correctly
+                all_y_coords = [left_shoulder[1], right_shoulder[1], left_hip[1], right_hip[1]]
+                upper_y = min(all_y_coords)  # highest point (smallest Y coordinate)
+                lower_y = max(all_y_coords)  # lowest point (largest Y coordinate)
                 
                 # use person bbox for x boundaries  
                 x1, y1, x2, y2 = person_box[:4]
                 
                 # calculate upper body region with margin
-                margin_y = int((hip_y_max - shoulder_y_min) * 0.1)
-                upper_y = max(0, int(shoulder_y_min - margin_y))
-                lower_y = min(H, int(hip_y_max + margin_y))
+                margin_y = int((lower_y - upper_y) * 0.1)
+                crop_upper_y = max(0, int(upper_y - margin_y))
+                crop_lower_y = min(H, int(lower_y + margin_y))
                 
-                x1, y1, x2, y2 = int(x1), int(upper_y), int(x2), int(lower_y)
+                x1, y1, x2, y2 = int(x1), int(crop_upper_y), int(x2), int(crop_lower_y)
                 x1 = max(0, x1)
                 y1 = max(0, y1)
                 x2 = min(W, x2)
@@ -254,7 +256,7 @@ class TshirtDetectionService():
                     
                     persons_results.append({
                         "det_score": float(person_box[4]),  # person detection confidence
-                        "cls_score": top1_prob if top1_class == 1 else 1 - top1_prob,  # assume class 1 is tshirt
+                        "cls_score": top1_prob if top1_class == 1 else 0.0,  # only output confidence when tshirt is detected
                         "location": {
                             "left": left_n,
                             "top": top_n,
@@ -265,86 +267,4 @@ class TshirtDetectionService():
                     
         return persons_results
 
-
-# Pose utilities for fall detection
-def normalize_points_with_size(xy, width, height, flip=False):
-    """Normalize scale points in image with size of image to (0-1).
-    xy : (frames, parts, xy) or (parts, xy)
-    """
-    if xy.ndim == 2:
-        xy = np.expand_dims(xy, 0)
-    xy[:, :, 0] /= width
-    xy[:, :, 1] /= height
-    if flip:
-        xy[:, :, 0] = 1 - xy[:, :, 0]
-    return xy
-
-
-def scale_pose(xy):
-    """Normalize pose points by scale with max/min value of each pose.
-    xy : (frames, parts, xy) or (parts, xy)
-    """
-    if xy.ndim == 2:
-        xy = np.expand_dims(xy, 0)
-    xy_min = np.nanmin(xy, axis=1)
-    xy_max = np.nanmax(xy, axis=1)
-    for i in range(xy.shape[0]):
-        xy[i] = ((xy[i] - xy_min[i]) / (xy_max[i] - xy_min[i])) * 2 - 1
-    return xy.squeeze()
-
-
-def convert_coco_to_coco_cut(coco_keypoints):
-    """Convert COCO 17-point keypoints to coco_cut 14-point format."""
-    if coco_keypoints.ndim == 2:
-        # Single frame: [17, 3] -> [14, 3]
-        coco_cut = np.zeros((14, 3))
-        
-        # Map COCO indices to coco_cut indices (skip eyes and ears)
-        coco_to_cut_mapping = {
-            0: 0,   # nose -> nose
-            5: 1,   # left_shoulder -> left_shoulder  
-            6: 2,   # right_shoulder -> right_shoulder
-            7: 3,   # left_elbow -> left_elbow
-            8: 4,   # right_elbow -> right_elbow
-            9: 5,   # left_wrist -> left_wrist
-            10: 6,  # right_wrist -> right_wrist
-            11: 7,  # left_hip -> left_hip
-            12: 8,  # right_hip -> right_hip
-            13: 9,  # left_knee -> left_knee
-            14: 10, # right_knee -> right_knee
-            15: 11, # left_ankle -> left_ankle
-            16: 12, # right_ankle -> right_ankle
-        }
-        
-        # Copy mapped keypoints
-        for coco_idx, cut_idx in coco_to_cut_mapping.items():
-            coco_cut[cut_idx] = coco_keypoints[coco_idx]
-        
-        # Calculate neck center from shoulders (index 13)
-        left_shoulder = coco_keypoints[5]   # COCO left_shoulder
-        right_shoulder = coco_keypoints[6]  # COCO right_shoulder
-        
-        if left_shoulder[2] > 0.1 and right_shoulder[2] > 0.1:  # Both shoulders visible
-            coco_cut[13] = (left_shoulder + right_shoulder) / 2
-        elif left_shoulder[2] > 0.1:  # Only left shoulder visible
-            coco_cut[13] = left_shoulder
-        elif right_shoulder[2] > 0.1:  # Only right shoulder visible
-            coco_cut[13] = right_shoulder
-        else:  # Neither shoulder visible
-            coco_cut[13] = np.array([0, 0, 0])
-            
-        return coco_cut
-        
-    elif coco_keypoints.ndim == 3:
-        # Multiple frames: [T, 17, 3] -> [T, 14, 3]
-        T = coco_keypoints.shape[0]
-        coco_cut_sequence = np.zeros((T, 14, 3))
-        
-        for t in range(T):
-            coco_cut_sequence[t] = convert_coco_to_coco_cut(coco_keypoints[t])
-            
-        return coco_cut_sequence
-    
-    else:
-        raise ValueError(f"Unsupported keypoints shape: {coco_keypoints.shape}")
 
