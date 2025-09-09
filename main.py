@@ -86,7 +86,7 @@ def initialize_models():
         g_tshirt_service = TshirtDetectionService()
         
         logger.info("loading tshirt classification model...")
-        g_tshirt_classifier = YoloClassificationService("models/tshirt_cls/weights/tshirt_cls_v1.pt")
+        g_tshirt_classifier = YoloClassificationService("models/tshirt_cls/weights/tshirt_cls_v2.pt")
         
         logger.success("all models initialized successfully!")
         
