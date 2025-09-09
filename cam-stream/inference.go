@@ -241,28 +241,6 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 	return detections, nil
 }
 
-// FallDetectionResponse represents the response from fall detection API
-type FallDetectionResponse struct {
-	LogId        string                 `json:"log_id"`
-	Errno        int                    `json:"errno"`
-	ErrMsg       string                 `json:"err_msg"`
-	ApiVersion   string                 `json:"api_version"`
-	ModelVersion string                 `json:"model_version"`
-	CameraID     string                 `json:"camera_id"`
-	Timestamp    float64                `json:"timestamp"`
-	PersonsCount int                    `json:"persons_detected"`
-	FallDetected bool                   `json:"fall_detected"`
-	DebugInfo    map[string]interface{} `json:"debug_info"`
-	Results      []FallDetectionResult  `json:"results"`
-}
-
-// FallDetectionResult represents a single fall detection result
-type FallDetectionResult struct {
-	Score     float64  `json:"score"` //  Fall confidence score (0-1)
-	PersonID  string   `json:"person_id"`
-	AlertType string   `json:"alert_type"`
-	Location  Location `json:"location"`
-}
 
 // ModelResult represents detection results for a specific model
 type ModelResult struct {
@@ -274,7 +252,7 @@ type ModelResult struct {
 }
 
 // ProcessFrameWithMultipleInference processes a frame with multiple inference servers
-func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraConfig) (map[string]*ModelResult, error) {
+func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraConfig, manager *FFmpegCmdRTSPManager) (map[string]*ModelResult, error) {
 	results := make(map[string]*ModelResult)
 
 	// Process each inference server
@@ -289,19 +267,21 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 			continue
 		}
 
+		// For fall detection, process each result on its own image
+		if server.ModelType == "fall" {
+			processFallDetectionResults(server, cameraConfig, &binding, manager)
+			// No ModelResult needed for fall detection
+			continue
+		}
+
+		// Other models: draw on current frame
 		detections := processInferenceServer(frameData, server, &binding, cameraConfig.ID)
-		
-		// IMPORTANT: Create a copy of frameData for each inference server to avoid concurrent drawing issues
-		// This prevents multiple models from drawing on the same image buffer
 		frameDataCopy := make([]byte, len(frameData))
 		copy(frameDataCopy, frameData)
-		slog.Info(fmt.Sprintf("Created independent image copy for model %s (size: %d bytes)", server.ModelType, len(frameDataCopy)))
-		
 		displayedImage, err := DrawDetections(frameDataCopy, detections, cameraConfig.Name)
 		if err != nil {
 			slog.Warn(fmt.Sprintf("failed to draw results for model %q: %v", server.ModelType, err))
 		}
-		// Store results
 		results[server.ModelType] = &ModelResult{
 			ModelType:          server.ModelType,
 			ServerID:           binding.ServerID,
@@ -327,8 +307,8 @@ func processInferenceServer(frameData []byte, server *InferenceServer, binding *
 	// Process based on model type
 	// TODO: enum instead of hardcoding.
 	if server.ModelType == "fall" {
-		// For fall detection, get results from the task using /fall/result API
-		detections = getFallDetectionResults(server, cameraID)
+		// Fall detection is handled separately in ProcessFrameWithMultipleInference
+		return []Detection{}
 	} else {
 		detections, err = client.DetectObjects(frameData, server.ModelType)
 		if err != nil {
@@ -418,40 +398,54 @@ func SendAlertIfConfigured(imageData []byte, model string, cameraName string, sc
 	return nil
 }
 
-// getFallDetectionResults gets fall detection results from /fall/result API
-func getFallDetectionResults(server *InferenceServer, cameraID string) []Detection {
+// processFallDetectionResults processes fall detection results independently
+func processFallDetectionResults(server *InferenceServer, cameraConfig *CameraConfig, binding *InferenceServerBinding, manager *FFmpegCmdRTSPManager) {
 	// Find the running task for this camera and server
 	var taskID string
 	for id, task := range fallDetectionTasks {
-		if task.CameraID == cameraID && task.ServerID == server.ID && task.Status == "running" {
+		if task.CameraID == cameraConfig.ID && task.ServerID == server.ID && task.Status == "running" {
 			taskID = id
 			break
 		}
 	}
 
 	if taskID == "" {
-		// No running task found, return empty detections
-		return []Detection{}
+		return
 	}
 
-	// Fetch results from /fall/result API
-	limit := 20 // Get up to 5 latest results
+	// Fetch multiple results
+	limit := 20
 	results, err := GetFallDetectionResults(server, taskID, &limit)
-	if err != nil {
-		slog.Warn(fmt.Sprintf("Failed to get fall detection results for task %s: %v", taskID, err))
-		return []Detection{}
+	if err != nil || len(results) == 0 {
+		if err != nil {
+			slog.Warn(fmt.Sprintf("failed to get fall detection results for task %s: %v", taskID, err))
+		}
+		return
 	}
 
-	// Convert results to Detection format
-	var detections []Detection
+	// Process each result independently on its own image
+	var modelResults = make(map[string]*ModelResult)
 	for _, result := range results {
-		// Extract detection information from tianwan results
-		// tianwan returns pixel coordinates that need to be used directly
-		// Note: tianwan returns confidence as percentage (0-100), normalize to (0-1)
+		// Decode the image from backend
+		var imageData []byte
+		if result.Image != "" {
+			decoded, err := base64.StdEncoding.DecodeString(result.Image)
+			if err != nil {
+				slog.Warn(fmt.Sprintf("failed to decode fall detection image: %v", err))
+				continue
+			}
+			imageData = decoded
+		}
+
+		// Convert to Detection format
 		confidence := result.Results.Score
 		if confidence > 1.0 {
-			// If confidence > 1, assume it's in percentage format, convert to decimal
 			confidence = confidence / 100.0
+		}
+
+		// Check threshold
+		if confidence < binding.Threshold {
+			continue
 		}
 
 		detection := Detection{
@@ -463,17 +457,28 @@ func getFallDetectionResults(server *InferenceServer, cameraID string) []Detecti
 			Y2:         int(result.Results.Location.Top + result.Results.Location.Height),
 		}
 
-		detections = append(detections, detection)
+		// Draw detection on the original image
+		drawnImage, err := DrawDetections(imageData, []Detection{detection}, cameraConfig.Name)
+		if err != nil {
+			slog.Warn(fmt.Sprintf("failed to draw fall detection: %v", err))
+			continue
+		}
+
+		// Create ModelResult for this detection to be saved
+		modelResults[server.ModelType] = &ModelResult{
+			ModelType:          server.ModelType,
+			ServerID:           binding.ServerID,
+			Detections:         []Detection{detection},
+			DisplayResultImage: drawnImage,
+			Error:              nil,
+		}
+
+		// Alert will be sent by saveResultsByModel -> sendDetectionAlerts
 	}
 
-	if len(detections) > 0 {
-		log.Printf("Got %d fall detection results for camera %s from task %s", len(detections), cameraID, taskID)
+	// Save results using the same mechanism as other models
+	if len(modelResults) > 0 {
+		manager.saveResultsByModel(cameraConfig.Name, modelResults)
 	}
-
-	return detections
 }
 
-// SendAlert is deprecated - use SendAlertIfConfigured instead
-func SendAlert(platformURL string, imageData []byte, model string, camera string, score float64, x1, y1, x2, y2 float64) error {
-	return SendAlertIfConfigured(imageData, model, camera, score, x1, y1, x2, y2)
-}
