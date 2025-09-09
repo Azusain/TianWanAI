@@ -128,6 +128,17 @@ class MultiThreadUpperBodyExtractor:
         
         if x2 <= x1 or y2 <= y1:
             return None
+        
+        # check aspect ratio to filter out abnormal detections
+        width_px = x2 - x1
+        height_px = y2 - y1
+        aspect_ratio = width_px / height_px
+        
+        # filter out extreme aspect ratios (too wide or too tall)
+        # normal human upper body should have reasonable proportions
+        if aspect_ratio > 3.0 or aspect_ratio < 0.3:
+            logger.debug(f"skipping extraction with abnormal aspect ratio: {aspect_ratio:.2f} (width={width_px}, height={height_px})")
+            return None
             
         # crop upper body region
         upper_body_region = img[y1:y2, x1:x2]
