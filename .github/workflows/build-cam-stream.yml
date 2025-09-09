@@ -2,8 +2,6 @@ name: Build Cam-Stream
 
 on:
   workflow_dispatch:
-  push:
-    branches: [build-backend]
 
 jobs:
   build:
@@ -41,7 +39,9 @@ jobs:
           context: ./cam-stream
           file: ./cam-stream/Dockerfile
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/cam-stream:${{ env.VERSION }}
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/cam-stream:${{ env.VERSION }}
+            ${{ secrets.DOCKER_USERNAME }}/cam-stream:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

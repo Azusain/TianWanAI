@@ -2,8 +2,6 @@ name: Build Tianwan
 
 on:
   workflow_dispatch:
-  push:
-    branches: [build-model]
 
 jobs:
   build:
@@ -56,7 +54,9 @@ jobs:
           context: .
           file: ./Dockerfile_Actions
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/tianwan:${{ env.VERSION }}
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/tianwan:${{ env.VERSION }}
+            ${{ secrets.DOCKER_USERNAME }}/tianwan:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
