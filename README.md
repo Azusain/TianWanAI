@@ -13,43 +13,32 @@ Computer vision inference service supporting multiple detection models.
 
 ### Docker Deployment
 
-#### Option 1: Use Base Image + Volume Mount (Recommended)
+#### Recommended: Volume Mount with Base Image
 
-Use the pre-built `azusaing/ultralytics` base image with your application code mounted:
+Use the pre-built `azusaing/ultralytics` base image and mount your source code:
 
 ```bash
 # GPU deployment
-docker run -d -p 8902:8080 --gpus '"device=1"' --cpus=16 \
+docker run -d -p 8901:8080 --gpus '"device=1"' --cpus=16 \
   -v $(pwd):/root \
   -e NPROC=6 -e MODEL="gesture" \
   azusaing/ultralytics:latest bash run.bash
 
 # CPU testing  
-docker run -d --rm -p 8902:8080 \
+docker run -d --rm -p 8901:8080 \
   -v $(pwd):/root \
   -e NPROC=6 -e MODEL="gesture" \
   azusaing/ultralytics:latest bash run.bash
 ```
 
-#### Option 2: Build Application Image
-
-```bash
-# Build application image
-docker build -f Dockerfile_App -t tianwan-app:latest .
-
-# Run application
-docker run -d -p 8902:8080 --gpus '"device=1"' --cpus=16 \
-  -e NPROC=6 -e MODEL="gesture" tianwan-app:latest
-```
-
-#### Option 3: Build Full Image (Legacy)
+#### Legacy: Build Full Image
 
 ```bash
 # Build with git operations and dependencies
 docker build -f Dockerfile_Actions -t tianwan-full:latest .
 
 # Run
-docker run -d -p 8902:8080 --gpus '"device=1"' --cpus=16 \
+docker run -d -p 8901:8080 --gpus '"device=1"' --cpus=16 \
   -e NPROC=6 -e MODEL="gesture" tianwan-full:latest
 ```
 
