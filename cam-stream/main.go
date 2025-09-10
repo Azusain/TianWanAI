@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 )
 
 const (
@@ -16,26 +17,50 @@ const (
 // Global config variable
 var globalConfig *Config
 
+// initializeFrameRate initializes frame rate configuration from environment variable
+func initializeFrameRate() {
+	// Read frame rate from environment variable, default to 25
+	frameRateStr := os.Getenv("FRAME_RATE")
+	if frameRateStr == "" {
+		globalFrameRate = 25 // default 25 FPS
+	} else {
+		if fps, err := strconv.Atoi(frameRateStr); err != nil {
+			AsyncWarn(fmt.Sprintf("invalid FRAME_RATE value '%s', using default 25 FPS", frameRateStr))
+			globalFrameRate = 25
+		} else if fps <= 0 || fps > 120 {
+			AsyncWarn(fmt.Sprintf("FRAME_RATE %d out of range (1-120), using default 25 FPS", fps))
+			globalFrameRate = 25
+		} else {
+			globalFrameRate = fps
+		}
+	}
+	
+	// Calculate frame interval
+	frameInterval = time.Duration(1000/globalFrameRate) * time.Millisecond
+	
+	AsyncInfo(fmt.Sprintf("frame rate limit: %d FPS (interval: %v)", globalFrameRate, frameInterval))
+}
+
 // autoStartRunningCameras starts all cameras that were marked as running and enabled
-func autoStartRunningCameras(rtspManager *FFmpegCmdRTSPManager) error {
+func autoStartRunningCameras(rtspManager *RTSPManager) error {
 	var errors []string
 	runningCount := 0
 
 	for _, camera := range dataStore.Cameras {
 		if camera.Enabled && camera.Running {
 			runningCount++
-			log.Printf("Auto-starting camera: %s (%s)", camera.Name, camera.ID)
+			AsyncInfo(fmt.Sprintf("auto-starting camera: %s (%s)", camera.Name, camera.ID))
 			if err := rtspManager.StartCamera(camera); err != nil {
-				errorMsg := fmt.Sprintf("Failed to restart camera %s (%s): %v", camera.Name, camera.ID, err)
-				log.Printf("Warning: %s", errorMsg)
+				errorMsg := fmt.Sprintf("failed to restart camera %s (%s): %v", camera.Name, camera.ID, err)
+				AsyncWarn(errorMsg)
 				errors = append(errors, errorMsg)
 			} else {
-				log.Printf("Successfully restarted camera stream: %s (%s)", camera.Name, camera.ID)
+				AsyncInfo(fmt.Sprintf("successfully restarted camera stream: %s (%s)", camera.Name, camera.ID))
 			}
 		}
 	}
 
-	log.Printf("Auto-start completed: %d cameras processed", runningCount)
+	AsyncInfo(fmt.Sprintf("auto-start completed: %d cameras processed", runningCount))
 
 	if len(errors) > 0 {
 		return fmt.Errorf("some cameras failed to start: %d/%d failed", len(errors), runningCount)
@@ -45,17 +70,26 @@ func autoStartRunningCameras(rtspManager *FFmpegCmdRTSPManager) error {
 }
 
 func main() {
-	log.Printf("Starting Multi-Camera Stream Platform (API Focus)")
+	// 设置 FFmpeg 日志级别，抑制解码警告
+	os.Setenv("OPENCV_FFMPEG_LOGLEVEL", "24") // AV_LOG_QUIET = 24
+	os.Setenv("AV_LOG_FORCE_NOCOLOR", "1")
+	os.Setenv("FFREPORT", "level=error") // FFmpeg 报告级别
+	
+	AsyncInfo("starting Multi-Camera Stream Platform (API Focus)")
+
+	// Initialize frame rate configuration from environment
+	initializeFrameRate()
 
 	// Load persistent data store
 	if err := loadDataStore(); err != nil {
-		log.Fatalf("Failed to load data store: %v", err)
+		AsyncInfo(fmt.Sprintf("failed to load data store: %v", err))
+		os.Exit(1)
 	}
 
 	// Load configuration
 	config, err := LoadConfig(ConfigFile)
 	if err != nil {
-		log.Printf("Warning: Failed to load config, using defaults")
+		AsyncWarn("failed to load config, using defaults")
 		globalConfig = DefaultConfig()
 	} else {
 		globalConfig = config
@@ -64,15 +98,15 @@ func main() {
 
 	// Create output directory
 	if err := os.MkdirAll(OutputDir, 0755); err != nil {
-		log.Printf("Warning: Failed to create output directory: %v", err)
+		AsyncWarn(fmt.Sprintf("failed to create output directory: %v", err))
 	}
 
-	// Create FFmpeg command RTSP manager (uses local ffmpeg to pull real video streams)
-	rtspManager := NewFFmpegCmdRTSPManager()
+	// Create RTSP manager using gortsplib (pure Go implementation)
+	rtspManager := NewRTSPManager()
 
 	// Auto-start cameras that were running before shutdown
 	if err := autoStartRunningCameras(rtspManager); err != nil {
-		log.Printf("Warning: Failed to auto-start some cameras: %v", err)
+		AsyncWarn(fmt.Sprintf("failed to auto-start some cameras: %v", err))
 	}
 
 	// Create and start web server with API support
@@ -86,21 +120,24 @@ func main() {
 	// Start web server
 	go func() {
 		if err := webServer.Start(); err != nil {
-			log.Printf("Web server error: %v", err)
+			AsyncInfo(fmt.Sprintf("web server error: %v", err))
 		}
 	}()
 
 	// Wait for exit signal
-	log.Printf("Multi-camera platform is running. Press Ctrl+C to stop.")
-	log.Printf("Camera Management: http://localhost:%d/cameras", webPort)
-	log.Printf("Image Viewer: http://localhost:%d", webPort)
-	log.Printf("API Debug: http://localhost:%d/api/debug", webPort)
+	AsyncInfo("multi-camera platform is running. Press Ctrl+C to stop.")
+	AsyncInfo(fmt.Sprintf("camera Management: http://localhost:%d/cameras", webPort))
+	AsyncInfo(fmt.Sprintf("image Viewer: http://localhost:%d", webPort))
+	AsyncInfo(fmt.Sprintf("API Debug: http://localhost:%d/api/debug", webPort))
 	<-sigChan
 
-	log.Printf("Received shutdown signal, stopping...")
+	AsyncInfo("received shutdown signal, stopping...")
 	
 	// Stop all cameras
 	rtspManager.StopAll()
 	
-	log.Printf("Multi-camera platform stopped")
+	// Close async logger
+	CloseGlobalAsyncLogger()
+	
+	AsyncInfo("multi-camera platform stopped")
 }

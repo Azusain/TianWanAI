@@ -2,13 +2,14 @@ module cam-stream
 
 go 1.23.0
 
-toolchain go1.24.1
+toolchain go1.23.4
 
 require (
 	github.com/fogleman/gg v1.3.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/pkg/errors v0.9.1
+	gocv.io/x/gocv v0.34.0
 )
 
 require (

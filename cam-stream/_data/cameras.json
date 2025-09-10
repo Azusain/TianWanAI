@@ -1,48 +1,41 @@
 {
-  "cameras": {
-    "cam_54": {
-      "id": "cam_54",
-      "name": "三号摄像头",
-      "rtsp_url": "rtsp://192.168.31.48:8554/test",
-      "inference_server_bindings": [
-        {
-          "server_id": "inf_28",
-          "threshold": 0
-        }
-      ],
-      "enabled": true,
-      "running": true,
-      "created_at": "2025-09-09T13:10:28.2481503+08:00",
-      "updated_at": "2025-09-09T13:10:28.2481503+08:00"
-    }
-  },
+  "cameras": {},
   "inference_servers": {
-    "inf_28": {
-      "id": "inf_28",
-      "name": "Safetybelt",
-      "url": "http://192.168.31.48:8903/predict",
-      "model_type": "predict",
+    "inf_1": {
+      "id": "inf_1",
+      "name": "Gesture",
+      "url": "http://192.168.31.48:8901/gesture",
+      "model_type": "gesture",
       "enabled": true,
-      "created_at": "2025-09-09T12:18:20.6671454+08:00",
-      "updated_at": "2025-09-09T12:18:20.6671454+08:00"
+      "created_at": "2025-09-10T10:32:19.831627856+08:00",
+      "updated_at": "2025-09-10T10:32:19.831627908+08:00"
     },
-    "inf_29": {
-      "id": "inf_29",
-      "name": "Helmet",
-      "url": "http://192.168.31.48:8902/predict",
-      "model_type": "predict",
+    "inf_2": {
+      "id": "inf_2",
+      "name": "Ponding",
+      "url": "http://192.168.31.48:8901/ponding",
+      "model_type": "ponding",
       "enabled": true,
-      "created_at": "2025-09-09T12:55:52.7527603+08:00",
-      "updated_at": "2025-09-09T12:55:52.7527603+08:00"
+      "created_at": "2025-09-10T12:48:24.108453139+08:00",
+      "updated_at": "2025-09-10T12:48:24.108453197+08:00"
+    },
+    "inf_3": {
+      "id": "inf_3",
+      "name": "Tshirt",
+      "url": "http://192.168.31.48:8901/tshirt",
+      "model_type": "tshirt",
+      "enabled": true,
+      "created_at": "2025-09-10T13:20:18.028521549+08:00",
+      "updated_at": "2025-09-10T13:20:18.028521609+08:00"
     }
   },
   "alert_server": {
     "url": "http://localhost:8081/alert",
     "enabled": false,
-    "updated_at": "2025-09-06T18:19:30.297474+08:00"
+    "updated_at": "2025-09-10T12:09:35.134295266+08:00"
   },
   "counters": {
-    "camera": 54,
-    "inference_server": 29
+    "camera": 4,
+    "inference_server": 3
   }
 }

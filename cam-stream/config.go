@@ -33,7 +33,7 @@ func LoadConfig(filename string) (*Config, error) {
 		if err := SaveConfig(config, filename); err != nil {
 			return nil, fmt.Errorf("failed to create default config: %v", err)
 		}
-		fmt.Printf("Created default config file: %s\n", filename)
+		AsyncInfo(fmt.Sprintf("created default config file: %s", filename))
 		return config, nil
 	}
 

@@ -3,6 +3,7 @@ output/
 
 # Go build artifacts
 *.tmp
+cam-stream
 
 # Test files
 test_pattern.mp4

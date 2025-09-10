@@ -18,6 +18,28 @@ import cv2
 
 # logger  
 from loguru import logger
+import sys
+
+# Configure async logging
+logger.remove()  # Remove default handler
+logger.add(
+    "logs/runtime_{time}.log",
+    rotation="2 GB",
+    retention="7 days",
+    level="INFO",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
+    enqueue=True,  # Enable async logging
+    backtrace=True,
+    diagnose=True
+)
+# Keep console output with proper colors
+logger.add(
+    sys.stderr,
+    colorize=True,
+    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}",
+    level="DEBUG",
+    enqueue=True
+)
 
 VERSION_API = '0.0.1'
 
@@ -276,4 +298,59 @@ class TshirtDetectionService():
                     
         return persons_results
 
+
+class PersonDetector:
+    def __init__(self):
+        self.model = None
+        self.device = (
+            torch.device('cuda') 
+            if torch.cuda.is_available() 
+            else torch.device('cpu')
+        )
+        self._load_model()
+    
+    def _load_model(self):
+        try:
+            model_path = "models/yolo11s.pt"
+            if not os.path.exists(model_path):
+                logger.error(f"person detection model not found: {model_path}")
+                raise FileNotFoundError(f"model file not found: {model_path}")
+                
+            logger.info(f"loading person detection model: {model_path}")
+            self.model = YOLO(model_path)
+            
+            # move model to appropriate device
+            self.model.to(self.device)
+            logger.info(f"person detection model loaded successfully on {self.device.type}")
+        except Exception as e:
+            logger.error(f"failed to load person detection model: {e}")
+            raise e
+    
+    def detect_persons(self, img, conf_threshold=0.5):
+        """detect persons in image, returns list of person bounding boxes"""
+        try:
+            # only detect person class (class 0 in COCO dataset)
+            results = self.model.predict(
+                img, 
+                conf=conf_threshold, 
+                classes=[0],  # only person class
+                verbose=False
+            )
+            persons = []
+            
+            if results and len(results) > 0:
+                boxes = results[0].boxes
+                if boxes is not None:
+                    for box in boxes:
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        conf = box.conf[0].cpu().numpy()
+                        persons.append({
+                            "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                            "confidence": float(conf)
+                        })
+            
+            return persons
+        except Exception as e:
+            logger.error(f"person detection error: {e}")
+            return []
 

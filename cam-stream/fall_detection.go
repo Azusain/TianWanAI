@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"time"
 )
@@ -91,7 +90,7 @@ func StartFallDetection(server *InferenceServer, camera *CameraConfig) (string, 
 		return "", fmt.Errorf("tianwan service error: %s", startResp.ErrMsg)
 	}
 
-	slog.Info("started fall detection for camera", "camera_name", camera.Name, "camera_id", camera.ID, "task_id", startResp.TaskID)
+	AsyncInfo(fmt.Sprintf("started fall detection for camera: camera_name=%s camera_id=%s task_id=%s", camera.Name, camera.ID, startResp.TaskID))
 	return startResp.TaskID, nil
 }
 
@@ -121,7 +120,7 @@ func StopFallDetection(server *InferenceServer, taskID string) error {
 		return fmt.Errorf("tianwan service returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	slog.Info("stopped fall detection", "task_id", taskID)
+	AsyncInfo(fmt.Sprintf("stopped fall detection: task_id=%s", taskID))
 	return nil
 }
 
@@ -170,7 +169,7 @@ func GetFallDetectionResults(server *InferenceServer, taskID string, limit *int)
 	}
 
 	if len(response.Results) > 0 {
-		slog.Info("got fall detection results", "count", len(response.Results), "task_id", taskID)
+	AsyncInfo(fmt.Sprintf("got fall detection results: count=%d task_id=%s", len(response.Results), taskID))
 	}
 
 	return response.Results, nil
