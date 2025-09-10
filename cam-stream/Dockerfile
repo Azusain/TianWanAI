@@ -67,7 +67,7 @@ COPY --from=opencv-builder /usr/local /usr/local
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libgtk-3-0 \
-    libtbb2 \
+    libtbb12 \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
@@ -99,7 +99,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # minimal runtime deps for OpenCV highgui/ffmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgtk-3-0 \
-    libtbb2 \
+    libtbb12 \
     libjpeg62-turbo \
     libpng16-16 \
     libtiff6 \
