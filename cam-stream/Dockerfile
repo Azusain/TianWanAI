@@ -43,7 +43,6 @@ RUN cmake -S opencv -B build \
     -D WITH_TBB=ON \
     -D WITH_IPP=OFF \
     -D WITH_OPENMP=ON \
-    -D BUILD_opencv_highgui=OFF \
     && cmake --build build -j"$(nproc)" \
     && cmake --install build \
     && ldconfig
