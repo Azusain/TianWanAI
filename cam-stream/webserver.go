@@ -595,6 +595,24 @@ func (ws *WebServer) handleAPIDebug(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// handleAPIPing returns basic liveness and GoCV/OpenCV build info
+func (ws *WebServer) handleAPIPing(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	info := map[string]interface{}{
+		"timestamp":      time.Now().Format(time.RFC3339),
+		"gocv_version":   gocv.Version(),
+		"opencv_version": gocv.OpenCVVersion(),
+	}
+
+	resp := APIResponse{
+		Success: true,
+		Message: "pong",
+		Data:    info,
+	}
+	json.NewEncoder(w).Encode(resp)
+}
+
 // Image management structures
 type ImageInfo struct {
 	Filename  string    `json:"filename"`
