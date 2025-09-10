@@ -34,9 +34,20 @@ docker run -d --rm -p 8901:8080 tianwan:latest
 - tshirt
 - fall
 
+### Environment Variables
+
+- `PERSON_CONFIDENCE_THRESHOLD`: Person classification confidence threshold for fall detection (default: 0.5)
+  - Controls the minimum confidence required to classify a detection as a person
+  - Higher values reduce false positives but may miss some valid detections
+  - Range: 0.0 - 1.0
+
 ### Notes
 
 ```bash
   # Dockerfile_Cuda_11_1 is not applicable to this repo, 
   # but it can be used for other projects.
+  
+  # Fall detection now includes person verification to reduce false positives
+  # Set PERSON_CONFIDENCE_THRESHOLD environment variable to adjust sensitivity
+  # Example: export PERSON_CONFIDENCE_THRESHOLD=0.7
 ```
