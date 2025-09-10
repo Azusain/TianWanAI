@@ -15,39 +15,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     unzip \
-    # image codecs
-    libjpeg-dev libpng-dev libtiff-dev \
-    # minimal FFmpeg for RTSP decoding only (no GStreamer)
+    # image codecs (minimal)
+    libjpeg-dev libpng-dev \
+    # minimal FFmpeg for RTSP decoding only
     libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
-    # highgui and gui backends
-    libgtk-3-dev \
-    # linear algebra / threading
-    libtbb-dev libopenblas-dev liblapacke-dev \
-    # misc (keep minimal to avoid non-free hiccups on Debian)
-    libv4l-dev \
-    python3-dev python3-numpy \
+    # threading only
+    libtbb-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/src
 
-# fetch opencv and contrib at specific version
-RUN git clone --depth 1 --branch ${OPENCV_VERSION} https://github.com/opencv/opencv.git \
- && git clone --depth 1 --branch ${OPENCV_VERSION} https://github.com/opencv/opencv_contrib.git
+# fetch opencv only (no contrib for minimal build)
+RUN git clone --depth 1 --branch ${OPENCV_VERSION} https://github.com/opencv/opencv.git
 
 # configure and build
 RUN cmake -S opencv -B build \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_INSTALL_PREFIX=/usr/local \
-    -D OPENCV_EXTRA_MODULES_PATH=/opt/src/opencv_contrib/modules \
     -D OPENCV_GENERATE_PKGCONFIG=ON \
     -D BUILD_EXAMPLES=OFF \
     -D BUILD_TESTS=OFF \
     -D BUILD_PERF_TESTS=OFF \
     -D WITH_FFMPEG=ON \
     -D WITH_GSTREAMER=OFF \
+    -D WITH_GTK=OFF \
+    -D WITH_QT=OFF \
     -D WITH_TBB=ON \
     -D WITH_IPP=OFF \
     -D WITH_OPENMP=ON \
+    -D BUILD_opencv_highgui=OFF \
     && cmake --build build -j"$(nproc)" \
     && cmake --install build \
     && ldconfig
@@ -62,13 +58,11 @@ FROM golang:1.23.4-bookworm AS go-builder
 # copy opencv runtime + headers into this stage
 COPY --from=opencv-builder /usr/local /usr/local
 
-# minimal system libs for cgo link checks (no GStreamer)
+# minimal system libs for cgo link checks (headless)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
-    libgtk-3-0 \
     libtbb12 \
     libjpeg62-turbo \
-    libtiff6 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CGO_ENABLED=1 \
@@ -93,19 +87,16 @@ FROM debian:bookworm-slim AS runtime
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# minimal runtime deps (only FFmpeg libs needed by OpenCV videoio)
+# ultra-minimal runtime deps (headless server)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgtk-3-0 \
     libtbb12 \
     libjpeg62-turbo \
     libpng16-16 \
-    libtiff6 \
     libavcodec59 \
     libavformat59 \
     libavutil57 \
     libswscale6 \
     ca-certificates \
-    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # copy opencv runtime from builder
