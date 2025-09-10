@@ -97,6 +97,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavutil57 \
     libswscale6 \
     ca-certificates \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # copy opencv runtime from builder
@@ -112,9 +113,10 @@ COPY --from=go-builder /app/assets /app/assets
 COPY --from=go-builder /app/camera_management.html /app/
 COPY --from=go-builder /app/image_viewer.html /app/
 
-# runtime env for FFmpeg logging noise suppression
+# runtime env for FFmpeg logging noise suppression and timezone
 ENV AV_LOG_LEVEL=error \
-    AV_LOG_FORCE_NOCOLOR=1
+    AV_LOG_FORCE_NOCOLOR=1 \
+    TZ=Asia/Shanghai
 
 # create writable dirs
 RUN mkdir -p /app/output /app/_data
