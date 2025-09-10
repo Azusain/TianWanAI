@@ -279,7 +279,7 @@
 
     async function populateServerSelect() {
       const select = document.getElementById('serverSelect');
-      select.innerHTML = '<option value="">所有服务器</option>';
+      select.innerHTML = '<option value="">请选择推理服务器</option>';
 
       try {
         console.log('开始扫描output目录...');
@@ -356,6 +356,18 @@
       });
     }
     async function loadImages() {
+      // 如果未选择服务器，则提示用户先选择
+      if (!currentServer) {
+        const grid = document.getElementById('imageGrid');
+        grid.innerHTML = `
+                <div class="empty-state">
+                    <h3>请选择推理服务器</h3>
+                </div>
+            `;
+        document.getElementById('stats').style.display = 'none';
+        document.getElementById('pagination').style.display = 'none';
+        return;
+      }
       showManualImageList();
     }
 
@@ -402,7 +414,7 @@
                 allImages.push({
                   filename: filename,
                   serverName: serverName,
-                  size: 150000 + Math.floor(Math.random() * 50000),
+                  size: 0, // will be updated below with real file size
                   created_at: displayTime
                 });
               }
@@ -438,6 +450,8 @@
         updateStats(data);
         renderImages();
         updatePagination();
+        // Asynchronously fetch real file sizes for current page images
+        fetchRealFileSizes(images);
       } else {
         // 关键：没有扫描到文件时，清空内存数据
         images = [];
@@ -459,13 +473,13 @@
         return;
       }
 
-      grid.innerHTML = images.map(img => `
-                <div class="image-card">
+      grid.innerHTML = images.map((img, index) => `
+                <div class="image-card" id="card-${index}">
                     <div class="image-container">
-                        <img src="output/${img.serverName}/${img.filename}" 
+                        <img data-src="output/${img.serverName}/${img.filename}" 
                              alt="${img.filename}"
                              onclick="openModal('output/${img.serverName}/${img.filename}')"
-                             onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=\\'padding:20px;text-align:center;color:#999\\'>图片不存在</div>'">
+                             onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=\"padding:20px;text-align:center;color:#999\">图片加载失败</div>'">
                     </div>
                     <div class="image-info">
                         <div class="image-filename">${img.filename}</div>
@@ -477,6 +491,9 @@
                     </div>
                 </div>
             `).join('');
+      
+      // Implement lazy loading to avoid loading all images at once
+      lazyLoadImages();
     }
 
     function showEmptyState() {
@@ -532,11 +549,48 @@
     }
 
     function formatFileSize(bytes) {
-      if (bytes === 0) return '0 B';
+      if (bytes === 0) return 'Loading...';
       const k = 1024;
       const sizes = ['B', 'KB', 'MB', 'GB'];
       const i = Math.floor(Math.log(bytes) / Math.log(k));
       return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // Fetch real file sizes using HEAD requests
+    async function fetchRealFileSizes(imageList) {
+      const promises = imageList.map(async (img) => {
+        try {
+          const response = await fetch(`output/${img.serverName}/${img.filename}`, {
+            method: 'HEAD'
+          });
+          if (response.ok) {
+            const contentLength = response.headers.get('Content-Length');
+            if (contentLength) {
+              img.size = parseInt(contentLength, 10);
+              // Update the displayed size in DOM
+              updateImageSize(img);
+            }
+          }
+        } catch (error) {
+          console.log(`Failed to get size for ${img.filename}:`, error.message);
+        }
+      });
+      
+      await Promise.all(promises);
+    }
+
+    // Update individual image size in DOM
+    function updateImageSize(img) {
+      const imageCards = document.querySelectorAll('.image-card');
+      imageCards.forEach(card => {
+        const filenameEl = card.querySelector('.image-filename');
+        if (filenameEl && filenameEl.textContent === img.filename) {
+          const sizeEl = card.querySelector('.image-details div:last-child');
+          if (sizeEl) {
+            sizeEl.textContent = `大小: ${formatFileSize(img.size)}`;
+          }
+        }
+      });
     }
   </script>
 </body>

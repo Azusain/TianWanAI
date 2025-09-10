@@ -16,18 +16,69 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// HTMLTemplates holds cached HTML content
+type HTMLTemplates struct {
+	index           []byte
+	cameraManagement []byte
+	imageViewer     []byte
+	alerts          []byte
+}
+
 // WebServer handles web interface
 type WebServer struct {
 	outputDir   string
 	port        int
 	rtspManager *RTSPManager
+	templates   *HTMLTemplates
+}
+
+// loadHTMLTemplates loads all HTML files into memory at startup
+func loadHTMLTemplates() (*HTMLTemplates, error) {
+	templates := &HTMLTemplates{}
+	
+	// Load index.html
+	if data, err := ioutil.ReadFile("index.html"); err != nil {
+		return nil, fmt.Errorf("failed to load index.html: %v", err)
+	} else {
+		templates.index = data
+	}
+	
+	// Load camera_management.html
+	if data, err := ioutil.ReadFile("camera_management.html"); err != nil {
+		return nil, fmt.Errorf("failed to load camera_management.html: %v", err)
+	} else {
+		templates.cameraManagement = data
+	}
+	
+	// Load image_viewer.html
+	if data, err := ioutil.ReadFile("image_viewer.html"); err != nil {
+		return nil, fmt.Errorf("failed to load image_viewer.html: %v", err)
+	} else {
+		templates.imageViewer = data
+	}
+	
+	// Load alerts.html
+	if data, err := ioutil.ReadFile("alerts.html"); err != nil {
+		return nil, fmt.Errorf("failed to load alerts.html: %v", err)
+	} else {
+		templates.alerts = data
+	}
+	
+	AsyncInfo("successfully loaded all HTML templates into memory")
+	return templates, nil
 }
 
 // NewWebServer creates a new web server
 func NewWebServer(outputDir string, port int) *WebServer {
+	templates, err := loadHTMLTemplates()
+	if err != nil {
+		AsyncWarn(fmt.Sprintf("failed to load HTML templates: %v", err))
+	}
+	
 	return &WebServer{
 		outputDir: outputDir,
 		port:      port,
+		templates: templates,
 	}
 }
 
@@ -76,6 +127,9 @@ func (ws *WebServer) Start() error {
 	api.HandleFunc("/images/{cameraId}", ws.handleAPIImages).Methods("GET", "OPTIONS")
 	api.HandleFunc("/images/{cameraId}/{filename}", ws.handleAPIImageFile).Methods("GET", "OPTIONS")
 
+	// Server-based image API routes
+	api.HandleFunc("/server-images", ws.handleAPIServerImages).Methods("GET", "OPTIONS")
+
 	// Web Routes
 	router.HandleFunc("/", ws.handleIndex).Methods("GET")
 	router.HandleFunc("/cameras", ws.handleCameraManagement).Methods("GET")
@@ -96,117 +150,20 @@ func (ws *WebServer) Start() error {
 
 // handleIndex serves the main page with links to different sections
 func (ws *WebServer) handleIndex(w http.ResponseWriter, r *http.Request) {
-	content := `
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cam-Stream 监控平台</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: #f8f9fa;
-            color: #333;
-            padding: 50px 20px;
-            margin: 0;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            text-align: center;
-        }
-        h1 {
-            font-size: 2rem;
-            margin-bottom: 10px;
-            color: #2c3e50;
-        }
-        .subtitle {
-            color: #666;
-            margin-bottom: 40px;
-            font-size: 1rem;
-        }
-        .nav-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 20px;
-            margin-top: 30px;
-        }
-        .nav-item {
-            background: white;
-            padding: 30px 20px;
-            border-radius: 8px;
-            text-decoration: none;
-            color: #333;
-            border: 1px solid #e0e0e0;
-            transition: all 0.2s;
-        }
-        .nav-item:hover {
-            border-color: #3498db;
-            box-shadow: 0 4px 12px rgba(52, 152, 219, 0.15);
-        }
-        .nav-icon {
-            font-size: 2rem;
-            margin-bottom: 15px;
-            display: block;
-        }
-        .nav-title {
-            font-weight: 600;
-            font-size: 1rem;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Cam-Stream 监控平台</h1>
-        <div class="subtitle">智能视频监控与AI检测系统</div>
-        
-        <div class="nav-grid">
-            <a href="/cameras" class="nav-item">
-                <span class="nav-icon">⚙️</span>
-                <div class="nav-title">摄像头管理</div>
-            </a>
-            <a href="/images" class="nav-item">
-                <span class="nav-icon">📷</span>
-                <div class="nav-title">图片查看器</div>
-            </a>
-            <a href="/alerts" class="nav-item">
-                <span class="nav-icon">🚨</span>
-                <div class="nav-title">告警配置</div>
-            </a>
-            <a href="/api/debug" class="nav-item">
-                <span class="nav-icon">🔧</span>
-                <div class="nav-title">系统调试</div>
-            </a>
-        </div>
-    </div>
-</body>
-</html>
-	`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(content))
+	w.Write(ws.templates.index)
 }
 
 // handleCameraManagement serves the camera management page
 func (ws *WebServer) handleCameraManagement(w http.ResponseWriter, r *http.Request) {
-	content, err := ioutil.ReadFile("camera_management.html")
-	if err != nil {
-		http.Error(w, "Could not load camera management interface: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(content)
+	w.Write(ws.templates.cameraManagement)
 }
 
 // handleImages serves the image viewer page
 func (ws *WebServer) handleImages(w http.ResponseWriter, r *http.Request) {
-	content, err := ioutil.ReadFile("image_viewer.html")
-	if err != nil {
-		http.Error(w, "Could not load image viewer: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(content)
+	w.Write(ws.templates.imageViewer)
 }
 
 // Data structures
@@ -1016,260 +973,8 @@ func (ws *WebServer) handleAPIAlertServer(w http.ResponseWriter, r *http.Request
 
 // handleAlerts serves the alert configuration page
 func (ws *WebServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
-	content := `
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>告警配置 - Cam-Stream 平台</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-            background-color: #f8f9fa;
-            color: #333;
-            margin: 0;
-            padding: 20px;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
-            padding: 20px 0;
-            border-bottom: 2px solid #e9ecef;
-        }
-        .header h1 {
-            margin: 0;
-            font-size: 2rem;
-            color: #2c3e50;
-        }
-        .nav-link {
-            text-decoration: none;
-            color: #6c757d;
-            padding: 8px 16px;
-            border-radius: 4px;
-            transition: background-color 0.2s;
-        }
-        .nav-link:hover {
-            background-color: #e9ecef;
-        }
-        .alert-config {
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-            padding: 30px;
-            margin-bottom: 30px;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #495057;
-        }
-        .form-group input[type="text"], .form-group input[type="url"] {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #e9ecef;
-            border-radius: 6px;
-            font-size: 14px;
-            transition: border-color 0.2s;
-            box-sizing: border-box;
-        }
-        .form-group input:focus {
-            outline: none;
-            border-color: #3498db;
-        }
-        .checkbox-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .checkbox-group input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-        }
-        .btn {
-            background-color: #3498db;
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background-color 0.2s;
-        }
-        .btn:hover {
-            background-color: #2980b9;
-        }
-        .btn:disabled {
-            background-color: #95a5a6;
-            cursor: not-allowed;
-        }
-        .status {
-            padding: 12px 16px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-            display: none;
-        }
-        .status.success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .status.error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .info-box {
-            background-color: #e7f3ff;
-            border: 1px solid #b8daff;
-            border-radius: 6px;
-            padding: 16px;
-            margin-bottom: 20px;
-        }
-        .info-box h3 {
-            margin: 0 0 10px 0;
-            color: #004085;
-        }
-        .info-box p {
-            margin: 5px 0;
-            color: #004085;
-        }
-        .loading {
-            display: none;
-            color: #6c757d;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>告警配置</h1>
-            <a href="/" class="nav-link">← 返回仪表板</a>
-        </div>
-
-        <div class="info-box">
-            <h3>全局告警服务器配置</h3>
-            <p>配置全局告警服务器，用于接收所有摄像头的检测告警。</p>
-            <p>启用后，检测告警将根据API规范发送到配置的URL地址。</p>
-        </div>
-
-        <div class="alert-config">
-            <div class="status" id="status"></div>
-            
-            <form id="alertForm">
-                <div class="form-group">
-                    <label for="alertUrl">告警平台URL：</label>
-                    <input type="url" id="alertUrl" placeholder="http://localhost:8080/alert" required>
-                </div>
-
-                <div class="form-group">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="alertEnabled">
-                        <label for="alertEnabled">启用告警系统</label>
-                    </div>
-                </div>
-
-                <button type="submit" class="btn" id="saveBtn">
-                    <span class="loading" id="loading">保存中...</span>
-                    <span id="saveText">保存配置</span>
-                </button>
-            </form>
-        </div>
-    </div>
-
-    <script>
-        const alertForm = document.getElementById('alertForm');
-        const statusDiv = document.getElementById('status');
-        const saveBtn = document.getElementById('saveBtn');
-        const loading = document.getElementById('loading');
-        const saveText = document.getElementById('saveText');
-
-        // 页面加载时获取当前配置
-        async function loadConfiguration() {
-            try {
-                const response = await fetch('/api/alert-server');
-                const result = await response.json();
-                
-                if (result.success) {
-                    const config = result.data;
-                    document.getElementById('alertUrl').value = config.url || '';
-                    document.getElementById('alertEnabled').checked = config.enabled || false;
-                }
-            } catch (error) {
-                showStatus('加载当前配置失败', 'error');
-            }
-        }
-
-        // 保存配置
-        alertForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const alertUrl = document.getElementById('alertUrl').value;
-            const alertEnabled = document.getElementById('alertEnabled').checked;
-
-            // 显示加载状态
-            saveBtn.disabled = true;
-            loading.style.display = 'inline';
-            saveText.style.display = 'none';
-
-            try {
-                const response = await fetch('/api/alert-server', {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        url: alertUrl,
-                        enabled: alertEnabled
-                    })
-                });
-
-                const result = await response.json();
-                
-                if (result.success) {
-                    showStatus('告警配置保存成功！', 'success');
-                } else {
-                    showStatus('保存配置失败：' + (result.error || result.message), 'error');
-                }
-            } catch (error) {
-                showStatus('网络错误：' + error.message, 'error');
-            } finally {
-                // 重置加载状态
-                saveBtn.disabled = false;
-                loading.style.display = 'none';
-                saveText.style.display = 'inline';
-            }
-        });
-
-        function showStatus(message, type) {
-            statusDiv.textContent = message;
-            statusDiv.className = 'status ' + type;
-            statusDiv.style.display = 'block';
-            
-            // 5秒后隐藏状态提示
-            setTimeout(() => {
-                statusDiv.style.display = 'none';
-            }, 5000);
-        }
-
-        // 页面加载时获取配置
-        loadConfiguration();
-    </script>
-</body>
-</html>
-	`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(content))
+	w.Write(ws.templates.alerts)
 }
 
 // Fall Detection Task Management Functions
