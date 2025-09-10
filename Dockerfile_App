@@ -1,0 +1,16 @@
+# Application Dockerfile using azusaing/ultralytics base image
+FROM azusaing/ultralytics:latest
+
+ENV WORKDIR=/root
+WORKDIR ${WORKDIR}
+
+# Copy application code
+COPY . ${WORKDIR}
+
+# Clean up unnecessary files
+RUN find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find . -name "*.pyc" -delete 2>/dev/null || true && \
+    find . -name "*.pyo" -delete 2>/dev/null || true
+
+# Default command
+CMD ["bash", "run.bash"]

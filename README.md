@@ -1,31 +1,56 @@
 ### TianWan
 
+Computer vision inference service supporting multiple detection models.
 
-#### Notes
+### Supported Models
 
-- GESTURE = "gesture"
-- PONDING = "ponding"
-- SMOKE = "smoke"
-- TSHIRT = "tshirt"
-- MOUSE = "mouse"
-- FALL = "fall"
+- **GESTURE** = "gesture" - Gesture detection
+- **PONDING** = "ponding" - Ponding/water accumulation detection  
+- **SMOKE** = "smoke" - Smoke detection
+- **TSHIRT** = "tshirt" - T-shirt detection
+- **MOUSE** = "mouse" - Mouse detection
+- **FALL** = "fall" - Fall detection
 
+### Docker Deployment
 
+#### Option 1: Use Base Image + Volume Mount (Recommended)
 
-### BUILD
+Use the pre-built `azusaing/ultralytics` base image with your application code mounted:
 
 ```bash
-  docker build -t service:latest .
+# GPU deployment
+docker run -d -p 8902:8080 --gpus '"device=1"' --cpus=16 \
+  -v $(pwd):/root \
+  -e NPROC=6 -e MODEL="gesture" \
+  azusaing/ultralytics:latest bash run.bash
+
+# CPU testing  
+docker run -d --rm -p 8902:8080 \
+  -v $(pwd):/root \
+  -e NPROC=6 -e MODEL="gesture" \
+  azusaing/ultralytics:latest bash run.bash
 ```
 
-### RUN
+#### Option 2: Build Application Image
 
 ```bash
-  # gpu 
-  docker run -d -p 8902:8080 --gpus '"device=1"' --cpus=16 -e NPROC=6 -e MODEL="gesture" azusaing/tianwan:1.0.0
-  
-  # test on cpu
-  docker run -d --rm -p 8902:8080 -e NPROC=6 -e MODEL="gesture" azusaing/tianwan:1.0.0
+# Build application image
+docker build -f Dockerfile_App -t tianwan-app:latest .
+
+# Run application
+docker run -d -p 8902:8080 --gpus '"device=1"' --cpus=16 \
+  -e NPROC=6 -e MODEL="gesture" tianwan-app:latest
+```
+
+#### Option 3: Build Full Image (Legacy)
+
+```bash
+# Build with git operations and dependencies
+docker build -f Dockerfile_Actions -t tianwan-full:latest .
+
+# Run
+docker run -d -p 8902:8080 --gpus '"device=1"' --cpus=16 \
+  -e NPROC=6 -e MODEL="gesture" tianwan-full:latest
 ```
 
 ### Tested Interface
