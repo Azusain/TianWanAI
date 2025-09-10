@@ -62,6 +62,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libtbb12 \
     libjpeg62-turbo \
+    libpng16-16 \
+    libavcodec59 \
+    libavformat59 \
+    libavutil57 \
+    libswscale6 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CGO_ENABLED=1 \
