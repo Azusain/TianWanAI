@@ -14,18 +14,20 @@ import (
 )
 
 var (
-	globalFrameRate int           // 目标帧率 (frames per second)
-	frameInterval   time.Duration // 帧间隔时间
+	globalFrameRate int
+	frameInterval   time.Duration
 )
 
-// RTSPManager 管理多个 RTSP 流
+const (
+	RetryTimeSecond uint = 3
+)
+
 type RTSPManager struct {
 	cameras   map[string]*CameraStream
 	mutex     sync.RWMutex
 	outputDir string
 }
 
-// CameraStream 表示单个摄像头流
 type CameraStream struct {
 	ID           string
 	URL          string
@@ -87,46 +89,38 @@ func (m *RTSPManager) captureFrames(stream *CameraStream) {
 		log.Printf("rtsp capture stopped for camera: %s", stream.ID)
 	}()
 
-	// 无限重连循环，固定3秒重连间隔
 	for {
 		select {
 		case <-stream.stopChannel:
 			AsyncInfo(fmt.Sprintf("stopping frame capture for camera: %s", stream.Name))
 			return
 		default:
-			// 尝试连接或重连
 			if err := m.connectAndCapture(stream); err != nil {
-				AsyncWarn(fmt.Sprintf("connection lost for camera %s: %v, retrying in 3s", stream.ID, err))
+				AsyncWarn(fmt.Sprintf("connection lost for camera %s: %v, retrying in %ds", stream.ID, err, RetryTimeSecond))
 
-				// 等待3秒重连，但要检查是否被停止
 				select {
 				case <-stream.stopChannel:
 					return
-				case <-time.After(3 * time.Second):
-					// 继续下一次重连尝试
+				case <-time.After(time.Duration(RetryTimeSecond) * time.Second):
 				}
 			}
 		}
 	}
 }
 
-// connectAndCapture 负责单次连接和帧捕获循环
 func (m *RTSPManager) connectAndCapture(stream *CameraStream) error {
-	// 先尝试TCP协议，失败后降级到UDP
 	baseURL := stream.URL
-
-	// 首先尝试TCP
+	// try TCP first.
 	tcpURL := baseURL + "?tcp=1"
 	AsyncInfo(fmt.Sprintf("trying TCP connection: %s", tcpURL))
 	videoCapture, err := gocv.OpenVideoCapture(tcpURL)
 	if err != nil || !videoCapture.IsOpened() {
-		// TCP失败，尝试UDP
+		// fall back to UDP.
 		if videoCapture != nil {
 			videoCapture.Close()
 		}
 		AsyncWarn(fmt.Sprintf("TCP connection failed for %s, falling back to UDP: %v", stream.Name, err))
 
-		// 尝试UDP
 		udpURL := baseURL + "?udp=1"
 		AsyncInfo(fmt.Sprintf("trying UDP connection: %s", udpURL))
 		videoCapture, err = gocv.OpenVideoCapture(udpURL)
@@ -144,20 +138,17 @@ func (m *RTSPManager) connectAndCapture(stream *CameraStream) error {
 	defer videoCapture.Close()
 	stream.videoCapture = videoCapture
 
-	// 设置缓冲区大小以减少延迟和丢帧
 	videoCapture.Set(gocv.VideoCaptureBufferSize, 1)
 
 	AsyncInfo(fmt.Sprintf("successfully connected to RTSP stream for camera: %s", stream.Name))
 
-	// 创建 Mat 用于读取帧
 	img := gocv.NewMat()
 	defer img.Close()
 
-	// 检测读取失败和编码失败
 	continuousReadFailures := 0
-	maxReadFailures := 15 // 连续15次读取失败才重连
+	maxReadFailures := 15
 	continuousEncodeFailures := 0
-	maxEncodeFailures := 5 // 连续5次编码失败就重连（说明读到坏帧）
+	maxEncodeFailures := 5
 
 	// 帧率控制
 	lastFrameTime := time.Now()

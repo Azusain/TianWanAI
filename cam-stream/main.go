@@ -22,7 +22,8 @@ func initializeFrameRate() {
 	// Read frame rate from environment variable, default to 25
 	frameRateStr := os.Getenv("FRAME_RATE")
 	if frameRateStr == "" {
-		globalFrameRate = 25 // default 25 FPS
+		// default 25 FPS
+		globalFrameRate = 25
 	} else {
 		if fps, err := strconv.Atoi(frameRateStr); err != nil {
 			AsyncWarn(fmt.Sprintf("invalid FRAME_RATE value '%s', using default 25 FPS", frameRateStr))
@@ -34,10 +35,10 @@ func initializeFrameRate() {
 			globalFrameRate = fps
 		}
 	}
-	
+
 	// Calculate frame interval
 	frameInterval = time.Duration(1000/globalFrameRate) * time.Millisecond
-	
+
 	AsyncInfo(fmt.Sprintf("frame rate limit: %d FPS (interval: %v)", globalFrameRate, frameInterval))
 }
 
@@ -74,7 +75,7 @@ func main() {
 	os.Setenv("OPENCV_FFMPEG_LOGLEVEL", "24") // AV_LOG_QUIET = 24
 	os.Setenv("AV_LOG_FORCE_NOCOLOR", "1")
 	os.Setenv("FFREPORT", "level=error") // FFmpeg 报告级别
-	
+
 	AsyncInfo("starting Multi-Camera Stream Platform (API Focus)")
 
 	// Initialize frame rate configuration from environment
@@ -132,12 +133,12 @@ func main() {
 	<-sigChan
 
 	AsyncInfo("received shutdown signal, stopping...")
-	
+
 	// Stop all cameras
 	rtspManager.StopAll()
-	
+
 	// Close async logger
 	CloseGlobalAsyncLogger()
-	
+
 	AsyncInfo("multi-camera platform stopped")
 }

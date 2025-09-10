@@ -124,7 +124,6 @@ COPY --from=go-builder /app/bin/cam-stream /app/cam-stream
 COPY --from=go-builder /app/assets /app/assets
 COPY --from=go-builder /app/camera_management.html /app/
 COPY --from=go-builder /app/image_viewer.html /app/
-COPY --from=go-builder /app/alerts.html /app/
 
 # runtime env for ffmpeg logging noise suppression used by the app
 ENV OPENCV_FFMPEG_LOGLEVEL=24 \
