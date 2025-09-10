@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.6
 
 # ---- opencv builder ----
-FROM ubuntu:22.04 AS opencv-builder
+FROM debian:bookworm AS opencv-builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG OPENCV_VERSION=4.8.0
@@ -24,8 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgtk-3-dev \
     # linear algebra / threading
     libtbb-dev libopenblas-dev liblapacke-dev \
-    # misc
-    libxvidcore-dev libx264-dev libv4l-dev \
+    # misc (keep minimal to avoid non-free hiccups on Debian)
+    libv4l-dev \
     python3-dev python3-numpy \
     && rm -rf /var/lib/apt/lists/*
 
@@ -69,6 +69,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgtk-3-0 \
     libtbb12 \
     ffmpeg \
+    libgstreamer1.0-0 \
+    libgstreamer-plugins-base1.0-0 \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-libav \
+    libjpeg62-turbo \
+    libtiff6 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CGO_ENABLED=1 \
@@ -101,6 +107,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpng16-16 \
     libtiff6 \
     ffmpeg \
+    libgstreamer1.0-0 \
+    libgstreamer-plugins-base1.0-0 \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-libav \
     ca-certificates \
     tzdata \
     && rm -rf /var/lib/apt/lists/*
