@@ -127,9 +127,6 @@ func (ws *WebServer) Start() error {
 	api.HandleFunc("/images/{cameraId}", ws.handleAPIImages).Methods("GET", "OPTIONS")
 	api.HandleFunc("/images/{cameraId}/{filename}", ws.handleAPIImageFile).Methods("GET", "OPTIONS")
 
-	// Server-based image API routes
-	api.HandleFunc("/server-images", ws.handleAPIServerImages).Methods("GET", "OPTIONS")
-
 	// Web Routes
 	router.HandleFunc("/", ws.handleIndex).Methods("GET")
 	router.HandleFunc("/cameras", ws.handleCameraManagement).Methods("GET")
