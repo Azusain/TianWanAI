@@ -13,7 +13,6 @@ import (
 	"gocv.io/x/gocv"
 )
 
-// 全局帧率限制配置
 var (
 	globalFrameRate int           // 目标帧率 (frames per second)
 	frameInterval   time.Duration // 帧间隔时间
@@ -28,21 +27,21 @@ type RTSPManager struct {
 
 // CameraStream 表示单个摄像头流
 type CameraStream struct {
-	ID          string
-	URL         string
-	Name        string
-	isRunning   bool
-	stopChannel chan struct{}
-	lastFrame   []byte
-	lastUpdate  time.Time
-	mutex       sync.RWMutex
+	ID           string
+	URL          string
+	Name         string
+	isRunning    bool
+	stopChannel  chan struct{}
+	lastFrame    []byte
+	lastUpdate   time.Time
+	mutex        sync.RWMutex
 	videoCapture *gocv.VideoCapture
 }
 
 func NewRTSPManager() *RTSPManager {
 	outputDir := "output"
 	os.MkdirAll(outputDir, 0755)
-	
+
 	return &RTSPManager{
 		cameras:   make(map[string]*CameraStream),
 		outputDir: outputDir,
@@ -69,7 +68,7 @@ func (m *RTSPManager) StartCamera(camera *CameraConfig) error {
 
 	go m.captureFrames(stream)
 	m.cameras[camera.ID] = stream
-	
+
 	return nil
 }
 
@@ -77,7 +76,7 @@ func (m *RTSPManager) captureFrames(stream *CameraStream) {
 	stream.mutex.Lock()
 	stream.isRunning = true
 	stream.mutex.Unlock()
-	
+
 	// 抑制 FFmpeg 底层日志输出
 	os.Setenv("AV_LOG_LEVEL", "error")
 
@@ -98,7 +97,7 @@ func (m *RTSPManager) captureFrames(stream *CameraStream) {
 			// 尝试连接或重连
 			if err := m.connectAndCapture(stream); err != nil {
 				AsyncWarn(fmt.Sprintf("connection lost for camera %s: %v, retrying in 3s", stream.ID, err))
-				
+
 				// 等待3秒重连，但要检查是否被停止
 				select {
 				case <-stream.stopChannel:
@@ -115,7 +114,7 @@ func (m *RTSPManager) captureFrames(stream *CameraStream) {
 func (m *RTSPManager) connectAndCapture(stream *CameraStream) error {
 	// 先尝试TCP协议，失败后降级到UDP
 	baseURL := stream.URL
-	
+
 	// 首先尝试TCP
 	tcpURL := baseURL + "?tcp=1"
 	AsyncInfo(fmt.Sprintf("trying TCP connection: %s", tcpURL))
@@ -126,7 +125,7 @@ func (m *RTSPManager) connectAndCapture(stream *CameraStream) error {
 			videoCapture.Close()
 		}
 		AsyncWarn(fmt.Sprintf("TCP connection failed for %s, falling back to UDP: %v", stream.Name, err))
-		
+
 		// 尝试UDP
 		udpURL := baseURL + "?udp=1"
 		AsyncInfo(fmt.Sprintf("trying UDP connection: %s", udpURL))
@@ -141,10 +140,10 @@ func (m *RTSPManager) connectAndCapture(stream *CameraStream) error {
 	} else {
 		AsyncInfo(fmt.Sprintf("successfully connected via TCP for camera: %s", stream.Name))
 	}
-	
+
 	defer videoCapture.Close()
 	stream.videoCapture = videoCapture
-	
+
 	// 设置缓冲区大小以减少延迟和丢帧
 	videoCapture.Set(gocv.VideoCaptureBufferSize, 1)
 
@@ -208,10 +207,10 @@ func (m *RTSPManager) connectAndCapture(stream *CameraStream) error {
 			frameData := jpegBytes.GetBytes()
 			frameDataCopy := make([]byte, len(frameData))
 			copy(frameDataCopy, frameData)
-			
+
 			// 清理 JPEG 数据
 			jpegBytes.Close()
-			
+
 			// 处理帧数据
 			m.processFrame(stream, frameDataCopy)
 		}
@@ -236,7 +235,7 @@ func (m *RTSPManager) processFrame(stream *CameraStream, frameData []byte) {
 	stream.mutex.Unlock()
 
 	// 如果配置了推理服务器，实时处理推理
-		if cameraConfig != nil && len(cameraConfig.InferenceServerBindings) > 0 {
+	if cameraConfig != nil && len(cameraConfig.InferenceServerBindings) > 0 {
 		modelResults, err := ProcessFrameWithMultipleInference(frameData, cameraConfig, m)
 		if err != nil {
 			AsyncWarn(fmt.Sprintf("inference failed for camera %s: %v", stream.ID, err))
@@ -262,7 +261,7 @@ func (m *RTSPManager) StopCamera(cameraID string) error {
 
 	close(stream.stopChannel)
 	delete(m.cameras, cameraID)
-	
+
 	return nil
 }
 
