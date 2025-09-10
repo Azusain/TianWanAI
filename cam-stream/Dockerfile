@@ -79,16 +79,13 @@ WORKDIR /app
 COPY go.mod go.sum ./
 
 # ensure modules are cached
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+RUN go mod download
 
 # copy the rest of the source
 COPY . .
 
 # build
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go build -o /app/bin/cam-stream ./
+RUN go build -o /app/bin/cam-stream ./
 
 
 # ---- runtime ----
