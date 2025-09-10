@@ -17,9 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     # image codecs
     libjpeg-dev libpng-dev libtiff-dev \
-    # video/ffmpeg/gstreamer
-    ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
-    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+    # minimal FFmpeg for RTSP decoding only (no GStreamer)
+    libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
     # highgui and gui backends
     libgtk-3-dev \
     # linear algebra / threading
@@ -45,9 +44,9 @@ RUN cmake -S opencv -B build \
     -D BUILD_TESTS=OFF \
     -D BUILD_PERF_TESTS=OFF \
     -D WITH_FFMPEG=ON \
-    -D WITH_GSTREAMER=ON \
+    -D WITH_GSTREAMER=OFF \
     -D WITH_TBB=ON \
-    -D WITH_IPP=ON \
+    -D WITH_IPP=OFF \
     -D WITH_OPENMP=ON \
     && cmake --build build -j"$(nproc)" \
     && cmake --install build \
@@ -63,16 +62,11 @@ FROM golang:1.23.4-bookworm AS go-builder
 # copy opencv runtime + headers into this stage
 COPY --from=opencv-builder /usr/local /usr/local
 
-# required system libs for cgo link checks
+# minimal system libs for cgo link checks (no GStreamer)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libgtk-3-0 \
     libtbb12 \
-    ffmpeg \
-    libgstreamer1.0-0 \
-    libgstreamer-plugins-base1.0-0 \
-    gstreamer1.0-plugins-base \
-    gstreamer1.0-libav \
     libjpeg62-turbo \
     libtiff6 \
     && rm -rf /var/lib/apt/lists/*
@@ -99,18 +93,17 @@ FROM debian:bookworm-slim AS runtime
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# minimal runtime deps for OpenCV highgui/ffmpeg
+# minimal runtime deps (only FFmpeg libs needed by OpenCV videoio)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgtk-3-0 \
     libtbb12 \
     libjpeg62-turbo \
     libpng16-16 \
     libtiff6 \
-    ffmpeg \
-    libgstreamer1.0-0 \
-    libgstreamer-plugins-base1.0-0 \
-    gstreamer1.0-plugins-base \
-    gstreamer1.0-libav \
+    libavcodec59 \
+    libavformat59 \
+    libavutil57 \
+    libswscale6 \
     ca-certificates \
     tzdata \
     && rm -rf /var/lib/apt/lists/*
@@ -128,10 +121,9 @@ COPY --from=go-builder /app/assets /app/assets
 COPY --from=go-builder /app/camera_management.html /app/
 COPY --from=go-builder /app/image_viewer.html /app/
 
-# runtime env for ffmpeg logging noise suppression used by the app
-ENV OPENCV_FFMPEG_LOGLEVEL=24 \
-    AV_LOG_FORCE_NOCOLOR=1 \
-    FFREPORT=level=error
+# runtime env for FFmpeg logging noise suppression
+ENV AV_LOG_LEVEL=error \
+    AV_LOG_FORCE_NOCOLOR=1
 
 # create writable dirs
 RUN mkdir -p /app/output /app/_data
