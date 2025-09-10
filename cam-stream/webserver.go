@@ -6,13 +6,13 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"gocv.io/x/gocv"
 	"github.com/gorilla/mux"
 )
 
@@ -35,30 +35,31 @@ type WebServer struct {
 // loadHTMLTemplates loads all HTML files into memory at startup
 func loadHTMLTemplates() (*HTMLTemplates, error) {
 	templates := &HTMLTemplates{}
-	
+
+	templatesDir := "templates"
 	// Load index.html
-	if data, err := ioutil.ReadFile("index.html"); err != nil {
+	if data, err := ioutil.ReadFile(filepath.Join(templatesDir, "index.html")); err != nil {
 		return nil, fmt.Errorf("failed to load index.html: %v", err)
 	} else {
 		templates.index = data
 	}
 	
 	// Load camera_management.html
-	if data, err := ioutil.ReadFile("camera_management.html"); err != nil {
+	if data, err := ioutil.ReadFile(filepath.Join(templatesDir, "camera_management.html")); err != nil {
 		return nil, fmt.Errorf("failed to load camera_management.html: %v", err)
 	} else {
 		templates.cameraManagement = data
 	}
 	
 	// Load image_viewer.html
-	if data, err := ioutil.ReadFile("image_viewer.html"); err != nil {
+	if data, err := ioutil.ReadFile(filepath.Join(templatesDir, "image_viewer.html")); err != nil {
 		return nil, fmt.Errorf("failed to load image_viewer.html: %v", err)
 	} else {
 		templates.imageViewer = data
 	}
 	
 	// Load alerts.html
-	if data, err := ioutil.ReadFile("alerts.html"); err != nil {
+	if data, err := ioutil.ReadFile(filepath.Join(templatesDir, "alerts.html")); err != nil {
 		return nil, fmt.Errorf("failed to load alerts.html: %v", err)
 	} else {
 		templates.alerts = data
@@ -73,6 +74,8 @@ func NewWebServer(outputDir string, port int) *WebServer {
 	templates, err := loadHTMLTemplates()
 	if err != nil {
 		AsyncWarn(fmt.Sprintf("failed to load HTML templates: %v", err))
+		// ensure non-nil to avoid nil dereference; actual fix is to include templates in runtime image
+		templates = &HTMLTemplates{}
 	}
 	
 	return &WebServer{
@@ -123,9 +126,9 @@ func (ws *WebServer) Start() error {
 	api.HandleFunc("/debug", ws.handleAPIDebug).Methods("GET", "OPTIONS")
 	api.HandleFunc("/ping", ws.handleAPIPing).Methods("GET", "OPTIONS")
 
-	// Image management API routes
-	api.HandleFunc("/images/{cameraId}", ws.handleAPIImages).Methods("GET", "OPTIONS")
-	api.HandleFunc("/images/{cameraId}/{filename}", ws.handleAPIImageFile).Methods("GET", "OPTIONS")
+	// Image servers API routes (by inference server ID)
+	api.HandleFunc("/image-servers", ws.handleAPIImageServers).Methods("GET", "OPTIONS")
+	api.HandleFunc("/server-images/{serverId}", ws.handleAPIServerImages).Methods("GET", "OPTIONS")
 
 	// Web Routes
 	router.HandleFunc("/", ws.handleIndex).Methods("GET")
@@ -549,14 +552,38 @@ func (ws *WebServer) handleAPIDebug(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleAPIPing returns basic liveness and GoCV/OpenCV build info
+// handleAPIPing returns basic liveness and FFmpeg version info
 func (ws *WebServer) handleAPIPing(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	// get FFmpeg version
+	ffmpegVersion := "unknown"
+	if cmd := exec.Command("ffmpeg", "-version"); cmd != nil {
+		if output, err := cmd.Output(); err == nil {
+			// extract first line which contains version info
+			lines := strings.Split(string(output), "\n")
+			if len(lines) > 0 {
+				ffmpegVersion = strings.TrimSpace(lines[0])
+			}
+		}
+	}
+
+	// get ffprobe version
+	ffprobeVersion := "unknown"
+	if cmd := exec.Command("ffprobe", "-version"); cmd != nil {
+		if output, err := cmd.Output(); err == nil {
+			// extract first line which contains version info
+			lines := strings.Split(string(output), "\n")
+			if len(lines) > 0 {
+				ffprobeVersion = strings.TrimSpace(lines[0])
+			}
+		}
+	}
+
 	info := map[string]interface{}{
-		"timestamp":      time.Now().Format(time.RFC3339),
-		"gocv_version":   gocv.Version(),
-		"opencv_version": gocv.OpenCVVersion(),
+		"timestamp":       time.Now().Format(time.RFC3339),
+		"ffmpeg_version":  ffmpegVersion,
+		"ffprobe_version": ffprobeVersion,
 	}
 
 	resp := APIResponse{
@@ -581,133 +608,12 @@ type ImageListResponse struct {
 	CurrentPage int         `json:"current_page"`
 }
 
-// handleAPIImages returns paginated list of images for a specific camera
-func (ws *WebServer) handleAPIImages(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	vars := mux.Vars(r)
-	cameraId := vars["cameraId"]
-
-	// Check if camera exists
-	if _, exists := dataStore.Cameras[cameraId]; !exists {
-		response := APIResponse{
-			Success: false,
-			Message: "Camera not found",
-		}
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
-	// Parse query parameters for pagination
-	pageStr := r.URL.Query().Get("page")
-	limitStr := r.URL.Query().Get("limit")
-
-	page := 1
-	limit := 24 // Default page size
-
-	if pageStr != "" {
-		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
-			page = p
-		}
-	}
-
-	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
-			limit = l
-		}
-	}
-
-	// Get images from camera directory
-	cameraDir := filepath.Join(ws.outputDir, cameraId)
-	images, err := getImagesFromDirectory(cameraDir)
-	if err != nil {
-		response := APIResponse{
-			Success: false,
-			Message: "Failed to read camera images",
-			Error:   err.Error(),
-		}
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
-	// Sort images by creation time (newest first)
-	sort.Slice(images, func(i, j int) bool {
-		return images[i].CreatedAt.After(images[j].CreatedAt)
-	})
-
-	// Calculate pagination
-	totalCount := len(images)
-	totalPages := (totalCount + limit - 1) / limit
-	if totalPages == 0 {
-		totalPages = 1
-	}
-
-	// Get page slice
-	start := (page - 1) * limit
-	end := start + limit
-	if start >= totalCount {
-		images = []ImageInfo{}
-	} else {
-		if end > totalCount {
-			end = totalCount
-		}
-		images = images[start:end]
-	}
-
-	responseData := ImageListResponse{
-		Images:      images,
-		TotalCount:  totalCount,
-		TotalPages:  totalPages,
-		CurrentPage: page,
-	}
-
-	response := APIResponse{
-		Success: true,
-		Message: "Images retrieved successfully",
-		Data:    responseData,
-	}
-
-	json.NewEncoder(w).Encode(response)
+// ImageServer represents a server folder with optional friendly name
+type ImageServer struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
-// handleAPIImageFile serves individual image files
-func (ws *WebServer) handleAPIImageFile(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	cameraId := vars["cameraId"]
-	filename := vars["filename"]
-
-	// Check if camera exists
-	if _, exists := dataStore.Cameras[cameraId]; !exists {
-		http.Error(w, "Camera not found", http.StatusNotFound)
-		return
-	}
-
-	// Validate filename (security check)
-	if strings.Contains(filename, "..") || strings.Contains(filename, "/") || strings.Contains(filename, "\\") {
-		http.Error(w, "Invalid filename", http.StatusBadRequest)
-		return
-	}
-
-	// Construct file path
-	filePath := filepath.Join(ws.outputDir, cameraId, filename)
-
-	// Check if file exists
-	if !fileExists(filePath) {
-		http.Error(w, "Image not found", http.StatusNotFound)
-		return
-	}
-
-	// Set appropriate headers
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate") // No cache for real-time monitoring
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "0")
-
-	// Serve the file
-	http.ServeFile(w, r, filePath)
-}
 
 // getImagesFromDirectory reads all JPEG images from a directory and returns their info
 func getImagesFromDirectory(dir string) ([]ImageInfo, error) {
@@ -750,6 +656,81 @@ func getImagesFromDirectory(dir string) ([]ImageInfo, error) {
 func fileExists(filename string) bool {
 	_, err := os.Stat(filename)
 	return !os.IsNotExist(err)
+}
+
+// handleAPIImageServers lists server folders under the output directory
+func (ws *WebServer) handleAPIImageServers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// read directories in outputDir
+	entries, err := ioutil.ReadDir(ws.outputDir)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{Success: false, Message: "failed to read output directory", Error: err.Error()})
+		return
+	}
+
+	var servers []ImageServer
+	for _, e := range entries {
+		if e.IsDir() {
+			id := e.Name()
+			name := id
+			// map to friendly name if available
+			if s, ok := dataStore.InferenceServers[id]; ok && s != nil && s.Name != "" {
+				name = s.Name
+			}
+			servers = append(servers, ImageServer{ID: id, Name: name})
+		}
+	}
+
+	// sort by name for stable ordering
+	sort.Slice(servers, func(i, j int) bool { return servers[i].Name < servers[j].Name })
+
+	json.NewEncoder(w).Encode(APIResponse{Success: true, Message: "image servers retrieved successfully", Data: servers})
+}
+
+// handleAPIServerImages returns paginated images for a given serverId directory
+func (ws *WebServer) handleAPIServerImages(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	serverId := vars["serverId"]
+
+	// parse pagination
+	page := 1
+	limit := 24
+	if p := r.URL.Query().Get("page"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 { page = v }
+	}
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 100 { limit = v }
+	}
+
+	dir := filepath.Join(ws.outputDir, serverId)
+	images, err := getImagesFromDirectory(dir)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{Success: false, Message: "failed to read server images", Error: err.Error()})
+		return
+	}
+
+	// sort newest first by created_at (ModTime)
+	sort.Slice(images, func(i, j int) bool { return images[i].CreatedAt.After(images[j].CreatedAt) })
+
+	totalCount := len(images)
+	totalPages := (totalCount + limit - 1) / limit
+	if totalPages == 0 { totalPages = 1 }
+
+	start := (page - 1) * limit
+	end := start + limit
+	if start >= totalCount {
+		images = []ImageInfo{}
+	} else {
+		if end > totalCount { end = totalCount }
+		images = images[start:end]
+	}
+
+	json.NewEncoder(w).Encode(APIResponse{Success: true, Message: "images retrieved successfully", Data: ImageListResponse{Images: images, TotalCount: totalCount, TotalPages: totalPages, CurrentPage: page}})
 }
 
 // Inference Server API Handlers

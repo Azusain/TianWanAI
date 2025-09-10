@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"log"
 	"os"
 	"sync"
 	"time"
-
-	"gocv.io/x/gocv"
 )
 
 var (
@@ -23,21 +22,21 @@ const (
 )
 
 type RTSPManager struct {
-	cameras   map[string]*CameraStream
-	mutex     sync.RWMutex
-	outputDir string
+	cameras     map[string]*CameraStream
+	mutex       sync.RWMutex
+	outputDir   string
+	proxyMgr    *FFmpegProxyManager
 }
 
 type CameraStream struct {
-	ID           string
-	URL          string
-	Name         string
-	isRunning    bool
-	stopChannel  chan struct{}
-	lastFrame    []byte
-	lastUpdate   time.Time
-	mutex        sync.RWMutex
-	videoCapture *gocv.VideoCapture
+	ID          string
+	URL         string
+	Name        string
+	isRunning   bool
+	stopChannel chan struct{}
+	lastFrame   []byte
+	lastUpdate  time.Time
+	mutex       sync.RWMutex
 }
 
 func NewRTSPManager() *RTSPManager {
@@ -47,6 +46,7 @@ func NewRTSPManager() *RTSPManager {
 	return &RTSPManager{
 		cameras:   make(map[string]*CameraStream),
 		outputDir: outputDir,
+		proxyMgr:  NewFFmpegProxyManager(DefaultFFmpegProxyConfig()),
 	}
 }
 
@@ -58,7 +58,7 @@ func (m *RTSPManager) StartCamera(camera *CameraConfig) error {
 		return fmt.Errorf("camera %s is already running", camera.ID)
 	}
 
-	AsyncInfo(fmt.Sprintf("starting RTSP stream for camera: %s", camera.Name))
+	AsyncInfo(fmt.Sprintf("starting FFmpeg proxy for camera: %s", camera.Name))
 
 	stream := &CameraStream{
 		ID:          camera.ID,
@@ -68,25 +68,26 @@ func (m *RTSPManager) StartCamera(camera *CameraConfig) error {
 		lastUpdate:  time.Now(),
 	}
 
-	go m.captureFrames(stream)
+	go m.captureFramesWithProxy(stream)
 	m.cameras[camera.ID] = stream
 
 	return nil
 }
 
-func (m *RTSPManager) captureFrames(stream *CameraStream) {
+
+// captureFramesWithProxy captures frames using FFmpeg proxy
+func (m *RTSPManager) captureFramesWithProxy(stream *CameraStream) {
 	stream.mutex.Lock()
 	stream.isRunning = true
 	stream.mutex.Unlock()
-
-	// 抑制 FFmpeg 底层日志输出
-	os.Setenv("AV_LOG_LEVEL", "error")
 
 	defer func() {
 		stream.mutex.Lock()
 		stream.isRunning = false
 		stream.mutex.Unlock()
-		log.Printf("rtsp capture stopped for camera: %s", stream.ID)
+		// Stop the proxy for this camera
+		m.proxyMgr.StopProxy(stream.ID)
+		log.Printf("ffmpeg proxy stopped for camera: %s", stream.ID)
 	}()
 
 	for {
@@ -95,8 +96,8 @@ func (m *RTSPManager) captureFrames(stream *CameraStream) {
 			AsyncInfo(fmt.Sprintf("stopping frame capture for camera: %s", stream.Name))
 			return
 		default:
-			if err := m.connectAndCapture(stream); err != nil {
-				AsyncWarn(fmt.Sprintf("connection lost for camera %s: %v, retrying in %ds", stream.ID, err, RetryTimeSecond))
+			if err := m.connectAndCaptureWithProxy(stream); err != nil {
+				AsyncWarn(fmt.Sprintf("proxy connection lost for camera %s: %v, retrying in %ds", stream.ID, err, RetryTimeSecond))
 
 				select {
 				case <-stream.stopChannel:
@@ -108,49 +109,19 @@ func (m *RTSPManager) captureFrames(stream *CameraStream) {
 	}
 }
 
-func (m *RTSPManager) connectAndCapture(stream *CameraStream) error {
-	baseURL := stream.URL
-	// try TCP first.
-	tcpURL := baseURL + "?tcp=1"
-	AsyncInfo(fmt.Sprintf("trying TCP connection: %s", tcpURL))
-	videoCapture, err := gocv.OpenVideoCapture(tcpURL)
-	if err != nil || !videoCapture.IsOpened() {
-		// fall back to UDP.
-		if videoCapture != nil {
-			videoCapture.Close()
-		}
-		AsyncWarn(fmt.Sprintf("TCP connection failed for %s, falling back to UDP: %v", stream.Name, err))
+// connectAndCaptureWithProxy connects to FFmpeg proxy and captures frames
+func (m *RTSPManager) connectAndCaptureWithProxy(stream *CameraStream) error {
+	AsyncInfo(fmt.Sprintf("starting FFmpeg proxy for camera: %s", stream.Name))
 
-		udpURL := baseURL + "?udp=1"
-		AsyncInfo(fmt.Sprintf("trying UDP connection: %s", udpURL))
-		videoCapture, err = gocv.OpenVideoCapture(udpURL)
-		if err != nil {
-			return fmt.Errorf("failed to open RTSP stream with both TCP and UDP: %v", err)
-		}
-		if !videoCapture.IsOpened() {
-			return fmt.Errorf("failed to open video capture with both TCP and UDP")
-		}
-		AsyncInfo(fmt.Sprintf("successfully connected via UDP for camera: %s", stream.Name))
-	} else {
-		AsyncInfo(fmt.Sprintf("successfully connected via TCP for camera: %s", stream.Name))
+	// Start FFmpeg proxy for this camera
+	proxy, err := m.proxyMgr.StartProxy(stream.ID, stream.URL)
+	if err != nil {
+		return fmt.Errorf("failed to start FFmpeg proxy for camera %s: %v", stream.ID, err)
 	}
 
-	defer videoCapture.Close()
-	stream.videoCapture = videoCapture
+	AsyncInfo(fmt.Sprintf("successfully started FFmpeg proxy for camera: %s", stream.Name))
 
-	videoCapture.Set(gocv.VideoCaptureBufferSize, 1)
-
-	AsyncInfo(fmt.Sprintf("successfully connected to RTSP stream for camera: %s", stream.Name))
-
-	img := gocv.NewMat()
-	defer img.Close()
-
-	continuousReadFailures := 0
-	maxReadFailures := 15
-	continuousEncodeFailures := 0
-	maxEncodeFailures := 5
-
-	// 帧率控制
+	// Frame rate control
 	lastFrameTime := time.Now()
 
 	for {
@@ -159,59 +130,61 @@ func (m *RTSPManager) connectAndCapture(stream *CameraStream) error {
 			AsyncInfo(fmt.Sprintf("stopping frame capture for camera: %s", stream.Name))
 			return nil
 		default:
-			// 读取帧
-			if !videoCapture.Read(&img) || img.Empty() {
-				continuousReadFailures++
-				if continuousReadFailures >= maxReadFailures {
-					return fmt.Errorf("too many continuous read failures (%d), reconnecting", continuousReadFailures)
-				}
-				time.Sleep(50 * time.Millisecond)
-				continue
-			}
-
-			// 读取成功，重置读取失败计数
-			continuousReadFailures = 0
-
-			// 将 Mat 转换为 JPEG 字节数组
-			jpegBytes, err := gocv.IMEncode(gocv.JPEGFileExt, img)
+			// Get frame from proxy with timeout
+			rawFrame, err := proxy.GetFrameTimeout(5 * time.Second)
 			if err != nil {
-				continuousEncodeFailures++
-				if continuousEncodeFailures >= maxEncodeFailures {
-					return fmt.Errorf("too many continuous encode failures (%d), likely corrupted frames, reconnecting", continuousEncodeFailures)
-				}
-				AsyncDebug(fmt.Sprintf("frame encode failed for camera %s (failure %d/%d): %v", stream.ID, continuousEncodeFailures, maxEncodeFailures, err))
-				continue
+				return fmt.Errorf("failed to get frame from proxy: %v", err)
 			}
 
-			// 编码成功，重置编码失败计数
-			continuousEncodeFailures = 0
-
-			// 帧率控制：检查是否应该处理这一帧
+			// Frame rate control: check if we should process this frame
 			currentTime := time.Now()
 			if currentTime.Sub(lastFrameTime) < frameInterval {
-				// 跳过这一帧，继续读取下一帧
+				// Skip this frame, continue to next
 				continue
 			}
 			lastFrameTime = currentTime
 
-			// 获取字节数据并创建副本
-			frameData := jpegBytes.GetBytes()
-			frameDataCopy := make([]byte, len(frameData))
-			copy(frameDataCopy, frameData)
+			// Convert raw frame to JPEG for compatibility with existing code
+			jpegData, err := m.rawFrameToJPEG(rawFrame)
+			if err != nil {
+				AsyncWarn(fmt.Sprintf("failed to convert frame to JPEG for camera %s: %v", stream.ID, err))
+				continue
+			}
 
-			// 清理 JPEG 数据
-			jpegBytes.Close()
-
-			// 处理帧数据
-			m.processFrame(stream, frameDataCopy)
+			// Process frame data
+			m.processFrame(stream, jpegData)
 		}
 	}
 }
 
-func (m *RTSPManager) imageToJPEG(img image.Image) ([]byte, error) {
+// rawFrameToJPEG converts raw RGB24 frame to JPEG bytes
+func (m *RTSPManager) rawFrameToJPEG(frame *RawFrame) ([]byte, error) {
+	// Create RGBA image from raw RGB24 data
+	img := image.NewRGBA(image.Rect(0, 0, frame.Width, frame.Height))
+
+	dataIndex := 0
+	for y := 0; y < frame.Height; y++ {
+		for x := 0; x < frame.Width; x++ {
+			if dataIndex+2 >= len(frame.Data) {
+				return nil, fmt.Errorf("insufficient frame data: expected %d bytes, got %d", frame.Width*frame.Height*3, len(frame.Data))
+			}
+
+			r := frame.Data[dataIndex]
+			g := frame.Data[dataIndex+1]
+			b := frame.Data[dataIndex+2]
+
+			img.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
+			dataIndex += 3
+		}
+	}
+
+	// Encode to JPEG
 	var buf bytes.Buffer
-	err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90})
-	return buf.Bytes(), err
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		return nil, fmt.Errorf("failed to encode JPEG: %v", err)
+	}
+
+	return buf.Bytes(), nil
 }
 
 func (m *RTSPManager) processFrame(stream *CameraStream, frameData []byte) {
@@ -260,11 +233,17 @@ func (m *RTSPManager) StopAll() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
+	// Close all stop channels to signal capture goroutines to exit
+	// The goroutines will handle stopping their individual FFmpeg proxies in defer
 	for _, stream := range m.cameras {
 		if stream.isRunning {
 			close(stream.stopChannel)
 		}
 	}
+
+	// Also stop all proxies directly as a safety measure
+	m.proxyMgr.StopAll()
+
 	m.cameras = make(map[string]*CameraStream)
 }
 

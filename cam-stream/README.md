@@ -39,6 +39,14 @@ cam-stream/
 └── run.ps1               # Run script
 ```
 
+## Environment Variables
+
+- `FRAME_RATE`: Frame rate limit for video processing (default: 25)
+  - Controls the maximum frames per second for camera streams
+  - Valid range: 1-120 FPS
+  - Higher values provide smoother video but consume more resources
+  - Example: `export FRAME_RATE=30`
+
 ## Development
 
 The project uses Go modules with clean package structure. All API endpoints include proper CORS headers for frontend integration.

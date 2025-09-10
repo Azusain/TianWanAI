@@ -28,6 +28,7 @@ g_pose_service = None
 g_tshirt_service = None
 g_tshirt_classifier = None
 g_person_detector = None
+g_person_classifier = None
 
 # return image and errno.
 def validate_img_format():
@@ -58,7 +59,7 @@ def validate_img_format():
 def initialize_models():
     """Initialize all models at startup (except Fall which has special handling)"""
     global g_gesture_service, g_ponding_service, g_mouse_service, g_cigar_service
-    global g_smoke_service, g_pose_service, g_tshirt_service, g_tshirt_classifier, g_person_detector
+    global g_smoke_service, g_pose_service, g_tshirt_service, g_tshirt_classifier, g_person_detector, g_person_classifier
     
     logger.info("starting model initialization...")
     
@@ -93,6 +94,15 @@ def initialize_models():
         
         logger.info("loading tshirt classification model...")
         g_tshirt_classifier = YoloClassificationService("models/tshirt_cls/weights/tshirt_cls_v2.pt")
+        
+        # initialize person detection model for fall detection
+        logger.info("loading person detection model for fall verification...")
+        g_person_classifier = YoloDetectionService("models/yolo11n.pt", 640)
+        
+        # set global variables for ResultHandler (using detection model instead of classification)
+        ResultHandler.g_person_classifier = g_person_classifier
+        ResultHandler.g_person_class_index = 0  # person class is index 0 in COCO dataset
+        logger.info("person detection model loaded for fall verification (COCO class 0: person)")
         
         logger.success("all models initialized successfully!")
         
