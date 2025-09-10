@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # linear algebra / threading
     libtbb-dev libopenblas-dev liblapacke-dev \
     # misc
-    libdc1394-22-dev libxvidcore-dev libx264-dev libv4l-dev \
+    libxvidcore-dev libx264-dev libv4l-dev \
     python3-dev python3-numpy \
     && rm -rf /var/lib/apt/lists/*
 
