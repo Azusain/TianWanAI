@@ -118,6 +118,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # copy opencv runtime from builder
 COPY --from=opencv-builder /usr/local /usr/local
 
+# update library cache so opencv libs are found
+RUN ldconfig
+
 # copy app binary and static assets
 WORKDIR /app
 COPY --from=go-builder /app/bin/cam-stream /app/cam-stream
@@ -134,6 +137,6 @@ ENV OPENCV_FFMPEG_LOGLEVEL=24 \
 RUN mkdir -p /app/output /app/_data
 VOLUME ["/app/output", "/app/_data"]
 
-EXPOSE 3000
+EXPOSE 8080
 
 ENTRYPOINT ["/app/cam-stream"]

@@ -20,7 +20,7 @@ func DefaultConfig() *Config {
 		FrameRate:    30, // 30 frames per second for fall detection
 		OutputWidth:  1920,
 		OutputHeight: 1080,
-		WebPort:      3000, // web interface port
+		WebPort:      8080, // web interface port
 	}
 }
 
