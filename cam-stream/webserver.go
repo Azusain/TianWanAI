@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"gocv.io/x/gocv"
 	"github.com/gorilla/mux"
 )
 
@@ -21,7 +20,7 @@ import (
 type WebServer struct {
 	outputDir   string
 	port        int
-	rtspManager *FFmpegCmdRTSPManager
+	rtspManager *RTSPManager
 }
 
 // NewWebServer creates a new web server
@@ -33,7 +32,7 @@ func NewWebServer(outputDir string, port int) *WebServer {
 }
 
 // SetRTSPManager sets the RTSP manager for camera operations
-func (ws *WebServer) SetRTSPManager(manager *FFmpegCmdRTSPManager) {
+func (ws *WebServer) SetRTSPManager(manager *RTSPManager) {
 	ws.rtspManager = manager
 }
 
@@ -71,6 +70,7 @@ func (ws *WebServer) Start() error {
 
 	api.HandleFunc("/status", ws.handleAPIStatus).Methods("GET", "OPTIONS")
 	api.HandleFunc("/debug", ws.handleAPIDebug).Methods("GET", "OPTIONS")
+	api.HandleFunc("/ping", ws.handleAPIPing).Methods("GET", "OPTIONS")
 
 	// Image management API routes
 	api.HandleFunc("/images/{cameraId}", ws.handleAPIImages).Methods("GET", "OPTIONS")
@@ -88,8 +88,8 @@ func (ws *WebServer) Start() error {
 	// Static file server for HTML files - MUST be LAST as it's a catch-all
 	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./")))
 
-	log.Printf("Starting web server on port %d", ws.port)
-	log.Printf("Access web interface at: http://localhost:%d", ws.port)
+	AsyncInfo(fmt.Sprintf("starting web server on port %d", ws.port))
+	AsyncInfo(fmt.Sprintf("access web interface at: http://localhost:%d", ws.port))
 
 	return http.ListenAndServe(fmt.Sprintf(":%d", ws.port), router)
 }
@@ -296,7 +296,7 @@ func loadDataStore() error {
 	data, err := ioutil.ReadFile(DataFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("Data file not found, starting with empty store")
+			AsyncInfo("data file not found, starting with empty store")
 			return nil
 		}
 		return fmt.Errorf("failed to read data file: %v", err)
@@ -313,17 +313,17 @@ func loadDataStore() error {
 		dataStore.InferenceServers = make(map[string]*InferenceServer)
 	}
 
-	log.Printf("Loaded %d cameras and %d inference servers from storage", len(dataStore.Cameras), len(dataStore.InferenceServers))
+	AsyncInfo(fmt.Sprintf("loaded %d cameras and %d inference servers from storage", len(dataStore.Cameras), len(dataStore.InferenceServers)))
 
 	// Log alert server configuration status
 	if dataStore.AlertServer != nil {
 		if dataStore.AlertServer.Enabled {
-			log.Printf("Alert server configured and enabled: %s", dataStore.AlertServer.URL)
+			AsyncInfo(fmt.Sprintf("alert server configured and enabled: %s", dataStore.AlertServer.URL))
 		} else {
-			log.Printf("Alert server configured but disabled: %s", dataStore.AlertServer.URL)
+			AsyncInfo(fmt.Sprintf("alert server configured but disabled: %s", dataStore.AlertServer.URL))
 		}
 	} else {
-		log.Printf("Alert server not configured - alerts disabled")
+		AsyncInfo("alert server not configured - alerts disabled")
 	}
 
 	return nil
@@ -343,7 +343,7 @@ func saveDataStore() error {
 		return fmt.Errorf("failed to write data file: %v", err)
 	}
 
-	log.Printf("Saved data store with %d cameras and %d inference servers", len(dataStore.Cameras), len(dataStore.InferenceServers))
+	AsyncInfo(fmt.Sprintf("saved data store with %d cameras and %d inference servers", len(dataStore.Cameras), len(dataStore.InferenceServers)))
 	return nil
 }
 
@@ -411,13 +411,13 @@ func (ws *WebServer) handleAPICameras(w http.ResponseWriter, r *http.Request) {
 		dataStore.Cameras[newCamera.ID] = &newCamera
 
 		if err := saveDataStore(); err != nil {
-			log.Printf("Warning: Failed to save data store: %v", err)
+			AsyncWarn(fmt.Sprintf("failed to save data store: %v", err))
 		}
 
 		// Actually start the RTSP stream processing
 		if ws.rtspManager != nil {
 			if err := ws.rtspManager.StartCamera(&newCamera); err != nil {
-				log.Printf("Warning: Failed to start RTSP stream for camera %s: %v", newCamera.ID, err)
+				AsyncWarn(fmt.Sprintf("failed to start RTSP stream for camera %s: %v", newCamera.ID, err))
 				// Don't fail the API call, just log the warning
 			}
 		}
@@ -430,7 +430,7 @@ func (ws *WebServer) handleAPICameras(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		log.Printf("Created camera: %s (%s)", newCamera.ID, newCamera.Name)
+		AsyncInfo(fmt.Sprintf("created camera: %s (%s)", newCamera.ID, newCamera.Name))
 
 		response := APIResponse{
 			Success: true,
@@ -489,10 +489,10 @@ func (ws *WebServer) handleAPICameraByID(w http.ResponseWriter, r *http.Request)
 		dataStore.Cameras[id] = &updatedCamera
 
 		if err := saveDataStore(); err != nil {
-			log.Printf("Warning: Failed to save data store: %v", err)
+			AsyncWarn(fmt.Sprintf("failed to save data store: %v", err))
 		}
 
-		log.Printf("Updated camera: %s", id)
+		AsyncInfo(fmt.Sprintf("updated camera: %s", id))
 
 		response := APIResponse{
 			Success: true,
@@ -505,7 +505,7 @@ func (ws *WebServer) handleAPICameraByID(w http.ResponseWriter, r *http.Request)
 		// Stop RTSP stream first
 		if ws.rtspManager != nil {
 			if err := ws.rtspManager.StopCamera(id); err != nil {
-				log.Printf("Warning: Failed to stop RTSP stream for camera %s: %v", id, err)
+				AsyncWarn(fmt.Sprintf("failed to stop RTSP stream for camera %s: %v", id, err))
 			}
 		}
 
@@ -520,10 +520,10 @@ func (ws *WebServer) handleAPICameraByID(w http.ResponseWriter, r *http.Request)
 		delete(dataStore.Cameras, id)
 
 		if err := saveDataStore(); err != nil {
-			log.Printf("Warning: Failed to save data store: %v", err)
+			AsyncWarn(fmt.Sprintf("failed to save data store: %v", err))
 		}
 
-		log.Printf("Deleted camera: %s", id)
+		AsyncInfo(fmt.Sprintf("deleted camera: %s", id))
 
 		response := APIResponse{
 			Success: true,
@@ -837,10 +837,10 @@ func (ws *WebServer) handleAPIInferenceServers(w http.ResponseWriter, r *http.Re
 		dataStore.InferenceServers[newServer.ID] = &newServer
 
 		if err := saveDataStore(); err != nil {
-			slog.Warn(fmt.Sprintf("Warning: Failed to save data store: %v", err))
+			AsyncWarn(fmt.Sprintf("failed to save data store: %v", err))
 		}
 
-		slog.Info(fmt.Sprintf("Created inference server: %s (%s)", newServer.ID, newServer.Name))
+		AsyncInfo(fmt.Sprintf("created inference server: %s (%s)", newServer.ID, newServer.Name))
 
 		response := APIResponse{
 			Success: true,
@@ -899,10 +899,10 @@ func (ws *WebServer) handleAPIInferenceServerByID(w http.ResponseWriter, r *http
 		dataStore.InferenceServers[id] = &updatedServer
 
 		if err := saveDataStore(); err != nil {
-			log.Printf("Warning: Failed to save data store: %v", err)
+			AsyncWarn(fmt.Sprintf("failed to save data store: %v", err))
 		}
 
-		log.Printf("Updated inference server: %s", id)
+		AsyncInfo(fmt.Sprintf("updated inference server: %s", id))
 
 		response := APIResponse{
 			Success: true,
@@ -925,10 +925,10 @@ func (ws *WebServer) handleAPIInferenceServerByID(w http.ResponseWriter, r *http
 		delete(dataStore.InferenceServers, id)
 
 		if err := saveDataStore(); err != nil {
-			log.Printf("Warning: Failed to save data store: %v", err)
+			AsyncWarn(fmt.Sprintf("failed to save data store: %v", err))
 		}
 
-		log.Printf("Deleted inference server: %s", id)
+		AsyncInfo(fmt.Sprintf("deleted inference server: %s", id))
 
 		response := APIResponse{
 			Success: true,
@@ -982,10 +982,10 @@ func (ws *WebServer) handleAPIAlertServer(w http.ResponseWriter, r *http.Request
 		dataStore.AlertServer = &updatedConfig
 
 		if err := saveDataStore(); err != nil {
-			log.Printf("Warning: Failed to save data store: %v", err)
+			AsyncWarn(fmt.Sprintf("failed to save data store: %v", err))
 		}
 
-		log.Printf("Updated alert server configuration: URL=%s, Enabled=%t", updatedConfig.URL, updatedConfig.Enabled)
+		AsyncInfo(fmt.Sprintf("updated alert server configuration: URL=%s, Enabled=%t", updatedConfig.URL, updatedConfig.Enabled))
 
 		response := APIResponse{
 			Success: true,
@@ -1261,7 +1261,7 @@ func (ws *WebServer) startFallDetectionTask(camera *CameraConfig, server *Infere
 	// Check if there's already a running task for this camera-server combination
 	for _, task := range fallDetectionTasks {
 		if task.CameraID == camera.ID && task.ServerID == server.ID && task.Status == "running" {
-			log.Printf("fall detection task already running for camera %s with server %s (task: %s)", camera.ID, server.ID, task.TaskID)
+			AsyncInfo(fmt.Sprintf("fall detection task already running for camera %s with server %s (task: %s)", camera.ID, server.ID, task.TaskID))
 			return
 		}
 	}
@@ -1269,7 +1269,7 @@ func (ws *WebServer) startFallDetectionTask(camera *CameraConfig, server *Infere
 	// Start the fall detection task
 	taskID, err := StartFallDetection(server, camera)
 	if err != nil {
-		log.Printf("failed to start fall detection task for camera %s with server %s: %v", camera.ID, server.ID, err)
+		AsyncWarn(fmt.Sprintf("failed to start fall detection task for camera %s with server %s: %v", camera.ID, server.ID, err))
 		// Create error task state
 		fallDetectionTasks["error_"+camera.ID+"_"+server.ID] = &FallDetectionTaskState{
 			TaskID:    "",
@@ -1293,7 +1293,7 @@ func (ws *WebServer) startFallDetectionTask(camera *CameraConfig, server *Infere
 		UpdatedAt: time.Now(),
 	}
 
-	log.Printf("started fall detection task %s for camera %s with server %s", taskID, camera.ID, server.ID)
+	AsyncInfo(fmt.Sprintf("started fall detection task %s for camera %s with server %s", taskID, camera.ID, server.ID))
 }
 
 // stopFallDetectionTasksForCamera stops all fall detection tasks for a specific camera-server combination
@@ -1308,13 +1308,13 @@ func (ws *WebServer) stopFallDetectionTasksForCamera(cameraID, serverID string) 
 	}
 
 	if len(tasksToStop) == 0 {
-		log.Printf("no running fall detection tasks found for camera %s with server %s", cameraID, serverID)
+			AsyncInfo(fmt.Sprintf("no running fall detection tasks found for camera %s with server %s", cameraID, serverID))
 		return
 	}
 
 	server, serverExists := dataStore.InferenceServers[serverID]
 	if !serverExists {
-		log.Printf("inference server %s not found when stopping fall detection tasks", serverID)
+		AsyncWarn(fmt.Sprintf("inference server %s not found when stopping fall detection tasks", serverID))
 		return
 	}
 
@@ -1322,9 +1322,9 @@ func (ws *WebServer) stopFallDetectionTasksForCamera(cameraID, serverID string) 
 	for _, taskID := range tasksToStop {
 		task := fallDetectionTasks[taskID]
 		err := StopFallDetection(server, taskID)
-		if err != nil {
-			log.Printf("failed to stop fall detection task %s: %v", taskID, err)
-			// Update task state to error
+			if err != nil {
+				AsyncWarn(fmt.Sprintf("failed to stop fall detection task %s: %v", taskID, err))
+				// Update task state to error
 			task.Status = "error"
 			task.ErrorMsg = err.Error()
 			task.UpdatedAt = time.Now()
@@ -1332,7 +1332,7 @@ func (ws *WebServer) stopFallDetectionTasksForCamera(cameraID, serverID string) 
 			// Update task state to stopped
 			task.Status = "stopped"
 			task.UpdatedAt = time.Now()
-			log.Printf("stopped fall detection task %s for camera %s with server %s", taskID, cameraID, serverID)
+				AsyncInfo(fmt.Sprintf("stopped fall detection task %s for camera %s with server %s", taskID, cameraID, serverID))
 		}
 	}
 }

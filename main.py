@@ -12,8 +12,9 @@ import base64
 import numpy as np
 import cv2
 from uuid import uuid4 as uuid4
-from api import ServiceStatus, YoloClassificationService, YoloDetectionService, TshirtDetectionService
+from api import ServiceStatus, YoloClassificationService, YoloDetectionService, TshirtDetectionService, PersonDetector
 from loguru import logger
+# loguru configuration is handled in api.py
 import threading
 from flask import Flask, request, jsonify
 
@@ -26,6 +27,7 @@ g_smoke_service = None
 g_pose_service = None
 g_tshirt_service = None
 g_tshirt_classifier = None
+g_person_detector = None
 
 # return image and errno.
 def validate_img_format():
@@ -56,7 +58,7 @@ def validate_img_format():
 def initialize_models():
     """Initialize all models at startup (except Fall which has special handling)"""
     global g_gesture_service, g_ponding_service, g_mouse_service, g_cigar_service
-    global g_smoke_service, g_pose_service, g_tshirt_service, g_tshirt_classifier
+    global g_smoke_service, g_pose_service, g_tshirt_service, g_tshirt_classifier, g_person_detector
     
     logger.info("starting model initialization...")
     
@@ -81,6 +83,10 @@ def initialize_models():
         logger.info("loading pose detection model...")
         g_pose_service = YoloDetectionService("models/yolo11m-pose.pt", 640)
         
+        # Initialize person detection model for gesture service
+        logger.info("loading person detection model...")
+        g_person_detector = PersonDetector()
+        
         # Initialize tshirt service and classifier
         logger.info("loading tshirt service...")
         g_tshirt_service = TshirtDetectionService()
@@ -103,14 +109,8 @@ def initialize_models():
 #   - fall
 #   - cigar
 def app():
-    # runtime initiaization
-    # TODO: differed by model.
-    log_path = f"logs/" + "runtime_{time}.log"
-    logger.add(
-        log_path,
-        rotation="2 GB", 
-        retention="7 days"
-    )
+    # runtime initialization
+    # Async logging is already configured in api.py
     
     app = Flask(__name__)
 
@@ -124,14 +124,110 @@ def app():
     def GestureDetect():
         img, errno = validate_img_format()
         if img is None:
-            return g_gesture_service.Response(errno=errno)
-        # inference.
-        score, xyxyn, _ = g_gesture_service.Predict(img)
-        return g_gesture_service.Response(
-            errno=errno,
-            score=score,
-            xyxyn=xyxyn
-        )
+            return {
+                "log_id": uuid4(),
+                "errno": errno,
+                "err_msg": ServiceStatus.stringify(errno),
+                "api_version": "0.0.1",
+                "model_version": "0.0.1",
+                "results": []
+            }
+        
+        persons = g_person_detector.detect_persons(img, conf_threshold=0.3)
+        logger.info(f"detected {len(persons)} persons")
+        
+        if not persons:
+            return {
+                "log_id": uuid4(),
+                "errno": ServiceStatus.NO_OBJECT_DETECTED.value,
+                "err_msg": ServiceStatus.stringify(ServiceStatus.NO_OBJECT_DETECTED.value),
+                "api_version": "0.0.1",
+                "model_version": "0.0.1",
+                "results": []
+            }
+        
+        # step 2: detect gestures in each person region
+        gesture_results = []
+        img_height, img_width = img.shape[:2]
+        
+        for person_idx, person in enumerate(persons):
+            person_bbox = person["bbox"]
+            person_conf = person["confidence"]
+            logger.info(f"processing person {person_idx}: bbox={person_bbox}, conf={person_conf:.3f}")
+            
+            # crop person region from image with padding (like 9.3 project)
+            x1, y1, x2, y2 = person_bbox
+            # add padding (10% of bbox size)
+            padding_x = int((x2 - x1) * 0.1)
+            padding_y = int((y2 - y1) * 0.1)
+            crop_x1 = max(0, x1 - padding_x)
+            crop_y1 = max(0, y1 - padding_y)
+            crop_x2 = min(img_width, x2 + padding_x)
+            crop_y2 = min(img_height, y2 + padding_y)
+            
+            # crop the person region
+            person_crop = img[crop_y1:crop_y2, crop_x1:crop_x2]
+            logger.info(f"cropped person {person_idx} region: ({crop_x1},{crop_y1}) to ({crop_x2},{crop_y2})")
+            
+            if person_crop.size == 0:
+                logger.warning(f"empty crop for person {person_idx}, skipping")
+                continue
+            
+            # detect gestures in the cropped person region
+            gesture_score, gesture_xyxyn, _ = g_gesture_service.Predict(person_crop)
+            
+            if gesture_score is not None and gesture_xyxyn is not None:
+                # convert relative coordinates back to original image coordinates
+                if hasattr(gesture_xyxyn, 'cpu'):
+                    gesture_xyxyn = gesture_xyxyn.cpu()
+                if len(gesture_xyxyn) > 0:
+                    # get first detection (best score)
+                    rel_coords = gesture_xyxyn[0].tolist()
+                    
+                    # convert from relative coordinates in person region to absolute coordinates in original image
+                    crop_width = crop_x2 - crop_x1
+                    crop_height = crop_y2 - crop_y1
+                    gesture_x1 = crop_x1 + rel_coords[0] * crop_width
+                    gesture_y1 = crop_y1 + rel_coords[1] * crop_height
+                    gesture_x2 = crop_x1 + rel_coords[2] * crop_width
+                    gesture_y2 = crop_y1 + rel_coords[3] * crop_height
+                    
+                    # calculate gesture normalized coordinates
+                    gesture_left_n = gesture_x1 / img_width
+                    gesture_top_n = gesture_y1 / img_height
+                    gesture_width_n = (gesture_x2 - gesture_x1) / img_width
+                    gesture_height_n = (gesture_y2 - gesture_y1) / img_height
+                    
+                    gesture_results.append({
+                        "score": float(gesture_score) if not isinstance(gesture_score, list) else float(gesture_score[0]),
+                        "location": {
+                            "left": gesture_left_n,
+                            "top": gesture_top_n,
+                            "width": gesture_width_n,
+                            "height": gesture_height_n
+                        }
+                    })
+                    
+                    logger.info(f"gesture detected in person {person_idx} with score {gesture_score}")
+                else:
+                    logger.debug(f"no gesture detected in person {person_idx}")
+        
+        # determine response status
+        if len(gesture_results) > 0:
+            errno = ServiceStatus.SUCCESS.value
+            logger.success(f"detected {len(gesture_results)} gesture(s) from {len(persons)} person(s)")
+        else:
+            errno = ServiceStatus.NO_OBJECT_DETECTED.value
+            logger.debug(f"no gestures detected from {len(persons)} person(s)")
+            
+        return {
+            "log_id": uuid4(),
+            "errno": errno,
+            "err_msg": ServiceStatus.stringify(errno),
+            "api_version": "0.0.1",
+            "model_version": "0.0.1",
+            "results": gesture_results
+        }
     
     @app.route('/ponding', methods=['POST'])
     def PondingDetect():

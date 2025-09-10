@@ -1,3 +1,36 @@
+# exclude runtime data dirs (will be created by app if missing)
+output/
+_data/
+
+# exclude development files
+.git/
+.gitignore
+*.log
+*.tmp
+
+# exclude IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# exclude test files if any
+*_test.go
+test/
+
+# exclude documentation
+README.md
+docs/
+
+# exclude Windows-specific files
+Thumbs.db
+Desktop.ini
+
+# exclude backup files
+*.bak
+*.orig
+
 # Git
 .git
 .gitignore
