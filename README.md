@@ -13,31 +13,16 @@ Computer vision inference service supporting multiple detection models.
 
 ### Docker Deployment
 
-#### Recommended: Volume Mount with Base Image
-
-Use the pre-built `azusaing/ultralytics` base image and mount your source code:
-
-```bash
-# GPU deployment
-docker run -d -p 8901:8080 --gpus '"device=1"' --cpus=16 \
-  -v $(pwd):/root \
-  azusaing/ultralytics:latest
-
-# CPU testing  
-docker run -d --rm -p 8901:8080 \
-  -v $(pwd):/root \
-  azusaing/ultralytics:latest
-```
-
-#### Legacy: Build Full Image
-
 ```bash
 # Build with git operations and dependencies
 docker build -f Dockerfile_Actions -t tianwan:latest .
 
-# Run
+# GPU deployment
 docker run -d -p 8901:8080 --gpus '"device=1"' --cpus=16 \
   tianwan:latest
+
+# CPU testing
+docker run -d --rm -p 8901:8080 tianwan:latest
 ```
 
 ### Tested Interface
