@@ -58,5 +58,5 @@ COPY --from=python-builder ${WORKDIR}/venv ${WORKDIR}/venv
 # Create symlink for python if needed
 RUN ln -sf /usr/bin/python3.11 /usr/bin/python3 || true
 
-# Default command - can be overridden when mounting application code
-CMD ["bash"]
+# Default command - automatically runs the application when source is mounted
+CMD ["bash", "run.bash"]

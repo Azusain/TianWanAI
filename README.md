@@ -21,25 +21,23 @@ Use the pre-built `azusaing/ultralytics` base image and mount your source code:
 # GPU deployment
 docker run -d -p 8901:8080 --gpus '"device=1"' --cpus=16 \
   -v $(pwd):/root \
-  -e NPROC=6 -e MODEL="gesture" \
-  azusaing/ultralytics:latest bash run.bash
+  azusaing/ultralytics:latest
 
 # CPU testing  
 docker run -d --rm -p 8901:8080 \
   -v $(pwd):/root \
-  -e NPROC=6 -e MODEL="gesture" \
-  azusaing/ultralytics:latest bash run.bash
+  azusaing/ultralytics:latest
 ```
 
 #### Legacy: Build Full Image
 
 ```bash
 # Build with git operations and dependencies
-docker build -f Dockerfile_Actions -t tianwan-full:latest .
+docker build -f Dockerfile_Actions -t tianwan:latest .
 
 # Run
 docker run -d -p 8901:8080 --gpus '"device=1"' --cpus=16 \
-  -e NPROC=6 -e MODEL="gesture" tianwan-full:latest
+  tianwan:latest
 ```
 
 ### Tested Interface
