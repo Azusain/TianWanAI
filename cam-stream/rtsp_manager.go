@@ -22,10 +22,10 @@ const (
 )
 
 type RTSPManager struct {
-	cameras     map[string]*CameraStream
-	mutex       sync.RWMutex
-	outputDir   string
-	proxyMgr    *FFmpegProxyManager
+	cameras   map[string]*CameraStream
+	mutex     sync.RWMutex
+	outputDir string
+	proxyMgr  *FFmpegProxyManager
 }
 
 type CameraStream struct {
@@ -73,7 +73,6 @@ func (m *RTSPManager) StartCamera(camera *CameraConfig) error {
 
 	return nil
 }
-
 
 // captureFramesWithProxy captures frames using FFmpeg proxy
 func (m *RTSPManager) captureFramesWithProxy(stream *CameraStream) {
@@ -156,7 +155,6 @@ func (m *RTSPManager) connectAndCaptureWithProxy(stream *CameraStream) error {
 		}
 	}
 }
-
 
 // rawFrameToJPEG converts raw RGB24 frame to JPEG bytes
 func (m *RTSPManager) rawFrameToJPEG(frame *RawFrame) ([]byte, error) {
@@ -288,26 +286,23 @@ func (m *RTSPManager) saveResultsByModel(cameraName string, modelResults map[str
 		if len(result.Detections) == 0 {
 			continue // 跳过没有检测结果的模型
 		}
-		
+
 		// For fall detection, ensure each ModelResult contains exactly one detection
 		if modelType == "fall" && len(result.Detections) != 1 {
 			AsyncWarn(fmt.Sprintf("fall detection ModelResult should contain exactly one detection, got %d detections, skipping", len(result.Detections)))
 			continue
 		}
 
-		// 创建以服务器ID命名的目录
 		serverDir := fmt.Sprintf("%s/%s", m.outputDir, result.ServerID)
 		if err := os.MkdirAll(serverDir, 0755); err != nil {
 			AsyncWarn(fmt.Sprintf("failed to create directory for server %s: %v", result.ServerID, err))
 			continue
 		}
 
-		// 生成时间戳文件名
 		timestamp := time.Now().Format("20060102_150405")
 		filename := fmt.Sprintf("%s_%s_detection.jpg", timestamp, modelType)
 		filePath := fmt.Sprintf("%s/%s", serverDir, filename)
 
-		// 保存带有检测结果的图像
 		if err := os.WriteFile(filePath, result.DisplayResultImage, 0644); err != nil {
 			AsyncWarn(fmt.Sprintf("failed to save detection image for model %s: %v", modelType, err))
 			continue
@@ -332,14 +327,12 @@ func (m *RTSPManager) saveResultsByModel(cameraName string, modelResults map[str
 			}
 		}
 
-		// 发送检测告警（如果配置了）
 		sendDetectionAlerts(result.DisplayResultImage, result.Detections, cameraName, modelType)
 	}
 }
 
-// sendDetectionAlerts 发送检测告警到管理平台
 func sendDetectionAlerts(imageData []byte, detections []Detection, cameraName, modelType string) {
-	// 获取实际图像尺寸
+	// get the real size of the image.
 	img, err := jpeg.DecodeConfig(bytes.NewReader(imageData))
 	if err != nil {
 		AsyncWarn(fmt.Sprintf("failed to decode image config for alerts: %v", err))
@@ -347,13 +340,12 @@ func sendDetectionAlerts(imageData []byte, detections []Detection, cameraName, m
 	}
 
 	for _, detection := range detections {
-		// 将像素坐标转换为归一化坐标（0-1范围）使用实际图像尺寸
+		// normalization.
 		x1 := float64(detection.X1) / float64(img.Width)
 		y1 := float64(detection.Y1) / float64(img.Height)
 		x2 := float64(detection.X2) / float64(img.Width)
 		y2 := float64(detection.Y2) / float64(img.Height)
 
-		// 发送告警
 		if err := SendAlertIfConfigured(imageData, modelType, cameraName, detection.Confidence, x1, y1, x2, y2); err != nil {
 			AsyncWarn(fmt.Sprintf("failed to send alert for detection %s: %v", detection.Class, err))
 		} else {
