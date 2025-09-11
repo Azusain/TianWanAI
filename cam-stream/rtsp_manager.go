@@ -59,7 +59,7 @@ func (m *RTSPManager) StartCamera(camera *CameraConfig) error {
 		return fmt.Errorf("camera %s is already running", camera.ID)
 	}
 
-	AsyncInfo(fmt.Sprintf("starting FFmpeg proxy for camera: %s", camera.Name))
+	Info(fmt.Sprintf("starting FFmpeg proxy for camera: %s", camera.Name))
 
 	stream := &CameraStream{
 		ID:          camera.ID,
@@ -93,11 +93,11 @@ func (m *RTSPManager) captureFramesWithProxy(stream *CameraStream) {
 	for {
 		select {
 		case <-stream.stopChannel:
-			AsyncInfo(fmt.Sprintf("stopping frame capture for camera: %s", stream.Name))
+			Info(fmt.Sprintf("stopping frame capture for camera: %s", stream.Name))
 			return
 		default:
 			if err := m.connectAndCaptureWithProxy(stream); err != nil {
-				AsyncWarn(fmt.Sprintf("proxy connection lost for camera %s: %v, retrying in %ds", stream.ID, err, RetryTimeSecond))
+				Warn(fmt.Sprintf("proxy connection lost for camera %s: %v, retrying in %ds", stream.ID, err, RetryTimeSecond))
 
 				select {
 				case <-stream.stopChannel:
@@ -111,7 +111,7 @@ func (m *RTSPManager) captureFramesWithProxy(stream *CameraStream) {
 
 // connectAndCaptureWithProxy connects to FFmpeg proxy and captures frames
 func (m *RTSPManager) connectAndCaptureWithProxy(stream *CameraStream) error {
-	AsyncInfo(fmt.Sprintf("starting FFmpeg proxy for camera: %s", stream.Name))
+	Info(fmt.Sprintf("starting FFmpeg proxy for camera: %s", stream.Name))
 
 	// Start FFmpeg proxy for this camera
 	proxy, err := m.proxyMgr.StartProxy(stream.ID, stream.URL)
@@ -119,7 +119,7 @@ func (m *RTSPManager) connectAndCaptureWithProxy(stream *CameraStream) error {
 		return fmt.Errorf("failed to start FFmpeg proxy for camera %s: %v", stream.ID, err)
 	}
 
-	AsyncInfo(fmt.Sprintf("successfully started FFmpeg proxy for camera: %s", stream.Name))
+	Info(fmt.Sprintf("successfully started FFmpeg proxy for camera: %s", stream.Name))
 
 	// Frame rate control
 	lastFrameTime := time.Now()
@@ -127,7 +127,7 @@ func (m *RTSPManager) connectAndCaptureWithProxy(stream *CameraStream) error {
 	for {
 		select {
 		case <-stream.stopChannel:
-			AsyncInfo(fmt.Sprintf("stopping frame capture for camera: %s", stream.Name))
+			Info(fmt.Sprintf("stopping frame capture for camera: %s", stream.Name))
 			return nil
 		default:
 			// Get frame from proxy with timeout
@@ -147,7 +147,7 @@ func (m *RTSPManager) connectAndCaptureWithProxy(stream *CameraStream) error {
 			// Convert raw frame to JPEG for compatibility with existing code
 			jpegData, err := m.rawFrameToJPEG(rawFrame)
 			if err != nil {
-				AsyncWarn(fmt.Sprintf("failed to convert frame to JPEG for camera %s: %v", stream.ID, err))
+				Warn(fmt.Sprintf("failed to convert frame to JPEG for camera %s: %v", stream.ID, err))
 				continue
 			}
 
@@ -188,23 +188,19 @@ func (m *RTSPManager) rawFrameToJPEG(frame *RawFrame) ([]byte, error) {
 }
 
 func (m *RTSPManager) processFrame(stream *CameraStream, frameData []byte) {
-	// 线程安全地获取摄像头配置
 	cameraConfig := getCameraConfig(stream.ID)
 
-	// 更新流的最新帧
 	stream.mutex.Lock()
 	stream.lastFrame = make([]byte, len(frameData))
 	copy(stream.lastFrame, frameData)
 	stream.lastUpdate = time.Now()
 	stream.mutex.Unlock()
 
-	// 如果配置了推理服务器，实时处理推理
 	if cameraConfig != nil && len(cameraConfig.InferenceServerBindings) > 0 {
 		modelResults, err := ProcessFrameWithMultipleInference(frameData, cameraConfig, m)
 		if err != nil {
-			AsyncWarn(fmt.Sprintf("inference failed for camera %s: %v", stream.ID, err))
+			Warn(fmt.Sprintf("inference failed for camera %s: %v", stream.ID, err))
 		} else if modelResults != nil {
-			// 异步保存结果，避免阻塞主流程
 			go m.saveResultsByModel(stream.Name, modelResults)
 		}
 	}
@@ -259,62 +255,41 @@ func (m *RTSPManager) GetCameraStatus(cameraID string) (bool, time.Time) {
 	return false, time.Time{}
 }
 
-func (m *RTSPManager) GetLatestFrame(cameraID string) ([]byte, time.Time, error) {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	stream, exists := m.cameras[cameraID]
-	if !exists {
-		return nil, time.Time{}, fmt.Errorf("camera %s not found", cameraID)
-	}
-
-	stream.mutex.RLock()
-	defer stream.mutex.RUnlock()
-
-	if stream.lastFrame == nil {
-		return nil, time.Time{}, fmt.Errorf("no frame available for camera %s", cameraID)
-	}
-
-	frameCopy := make([]byte, len(stream.lastFrame))
-	copy(frameCopy, stream.lastFrame)
-	return frameCopy, stream.lastUpdate, nil
-}
-
-// saveResultsByModel 保存检测结果到文件系统
 func (m *RTSPManager) saveResultsByModel(cameraName string, modelResults map[string]*ModelResult) {
-	// 保存有检测结果的图片到按服务器名称组织的目录中
 	for modelType, result := range modelResults {
 		if len(result.Detections) == 0 {
-			continue // 跳过没有检测结果的模型
+			continue
 		}
 
 		// For fall detection, ensure each ModelResult contains exactly one detection
 		if modelType == "fall" && len(result.Detections) != 1 {
-			AsyncWarn(fmt.Sprintf("fall detection ModelResult should contain exactly one detection, got %d detections, skipping", len(result.Detections)))
+			Warn(fmt.Sprintf("fall detection ModelResult should contain exactly one detection, got %d detections, skipping", len(result.Detections)))
 			continue
 		}
 
-		serverDir := fmt.Sprintf("%s/%s", m.outputDir, result.ServerID)
-		if err := os.MkdirAll(serverDir, 0755); err != nil {
-			AsyncWarn(fmt.Sprintf("failed to create directory for server %s: %v", result.ServerID, err))
-			continue
-		}
-
+		// Generate filename and paths first
 		timestamp := time.Now().Format("20060102_150405")
 		filename := fmt.Sprintf("%s_%s_detection.jpg", timestamp, modelType)
-		filePath := fmt.Sprintf("%s/%s", serverDir, filename)
 
-		if err := os.WriteFile(filePath, result.DisplayResultImage, 0644); err != nil {
-			AsyncWarn(fmt.Sprintf("failed to save detection image for model %s: %v", modelType, err))
-			continue
-		}
+		// Perform IO operations asynchronously to avoid blocking
+		go func(result *ModelResult, filename, modelType, cameraName string) {
+			serverDir := fmt.Sprintf("%s/%s", m.outputDir, result.ServerID)
+			if err := os.MkdirAll(serverDir, 0755); err != nil {
+				Warn(fmt.Sprintf("failed to create directory for server %s: %v", result.ServerID, err))
+				return
+			}
+			filePath := fmt.Sprintf("%s/%s", serverDir, filename)
+			if err := os.WriteFile(filePath, result.DisplayResultImage, 0644); err != nil {
+				Warn(fmt.Sprintf("failed to save detection image for model %s: %v", modelType, err))
+				return
+			}
+			Info(fmt.Sprintf("saved detection image for camera %s, model %s to %s (detections: %d)",
+				cameraName, modelType, filePath, len(result.Detections)))
+			// if env DEBUG=1.
+			m.saveDebugData(result, filename, modelType)
+		}(result, filename, modelType, cameraName)
 
-		AsyncInfo(fmt.Sprintf("saved detection image for camera %s, model %s to %s (detections: %d)", cameraName, modelType, filePath, len(result.Detections)))
-
-		// Save original image and YOLO labels in DEBUG mode
-		m.saveDebugData(result, filename, modelType)
-
-		sendDetectionAlerts(result.DisplayResultImage, result.Detections, cameraName, modelType)
+		go sendDetectionAlerts(result.DisplayResultImage, result.Detections, cameraName, modelType)
 	}
 }
 
@@ -323,23 +298,23 @@ func (m *RTSPManager) saveDebugData(result *ModelResult, filename, modelType str
 	if !globalDebugMode || result.OriginalImage == nil {
 		return
 	}
-	
+
 	// Create debug server directory
 	debugServerDir := fmt.Sprintf("%s/%s", DebugDir, result.ServerID)
 	if err := os.MkdirAll(debugServerDir, 0755); err != nil {
-		AsyncWarn(fmt.Sprintf("failed to create debug directory for server %s: %v", result.ServerID, err))
+		Warn(fmt.Sprintf("failed to create debug directory for server %s: %v", result.ServerID, err))
 		return
 	}
-	
+
 	// Save original image
 	debugFilePath := fmt.Sprintf("%s/%s", debugServerDir, filename)
 	if err := os.WriteFile(debugFilePath, result.OriginalImage, 0644); err != nil {
-		AsyncWarn(fmt.Sprintf("failed to save debug original image: %v", err))
+		Warn(fmt.Sprintf("failed to save debug original image: %v", err))
 		return
 	}
-	
-	AsyncInfo(fmt.Sprintf("saved debug original image to %s", debugFilePath))
-	
+
+	Info(fmt.Sprintf("saved debug original image to %s", debugFilePath))
+
 	// Save YOLO format labels if there are detections
 	if len(result.Detections) > 0 {
 		m.saveYoloLabels(result, debugServerDir, filename, modelType)
@@ -351,14 +326,14 @@ func (m *RTSPManager) saveYoloLabels(result *ModelResult, debugDir, filename, mo
 	// Get image dimensions for normalization
 	imgCfg, err := jpeg.DecodeConfig(bytes.NewReader(result.OriginalImage))
 	if err != nil {
-		AsyncWarn(fmt.Sprintf("failed to decode image config for yolo label: %v", err))
+		Warn(fmt.Sprintf("failed to decode image config for yolo label: %v", err))
 		return
 	}
-	
+
 	w := float64(imgCfg.Width)
 	h := float64(imgCfg.Height)
 	classIdx := getClassIndexFromModelType(modelType)
-	
+
 	// Build YOLO format lines
 	lines := make([]string, 0, len(result.Detections))
 	for _, det := range result.Detections {
@@ -367,25 +342,41 @@ func (m *RTSPManager) saveYoloLabels(result *ModelResult, debugDir, filename, mo
 		cy := (float64(det.Y1) + float64(det.Y2)) / 2.0 / h
 		bw := (float64(det.X2) - float64(det.X1)) / w
 		bh := (float64(det.Y2) - float64(det.Y1)) / h
-		
+
 		// Clamp values between 0 and 1
-		if cx < 0 { cx = 0 } else if cx > 1 { cx = 1 }
-		if cy < 0 { cy = 0 } else if cy > 1 { cy = 1 }
-		if bw < 0 { bw = 0 } else if bw > 1 { bw = 1 }
-		if bh < 0 { bh = 0 } else if bh > 1 { bh = 1 }
-		
+		if cx < 0 {
+			cx = 0
+		} else if cx > 1 {
+			cx = 1
+		}
+		if cy < 0 {
+			cy = 0
+		} else if cy > 1 {
+			cy = 1
+		}
+		if bw < 0 {
+			bw = 0
+		} else if bw > 1 {
+			bw = 1
+		}
+		if bh < 0 {
+			bh = 0
+		} else if bh > 1 {
+			bh = 1
+		}
+
 		lines = append(lines, fmt.Sprintf("%d %.6f %.6f %.6f %.6f", classIdx, cx, cy, bw, bh))
 	}
-	
+
 	// Save label file
 	baseName := strings.TrimSuffix(filename, ".jpg")
 	labelPath := fmt.Sprintf("%s/%s.txt", debugDir, baseName)
 	labelContent := strings.Join(lines, "\n")
-	
+
 	if err := os.WriteFile(labelPath, []byte(labelContent), 0644); err != nil {
-		AsyncWarn(fmt.Sprintf("failed to save yolo label: %v", err))
+		Warn(fmt.Sprintf("failed to save yolo label: %v", err))
 	} else {
-		AsyncInfo(fmt.Sprintf("saved yolo label to %s", labelPath))
+		Info(fmt.Sprintf("saved yolo label to %s", labelPath))
 	}
 }
 
@@ -393,7 +384,7 @@ func sendDetectionAlerts(imageData []byte, detections []Detection, cameraName, m
 	// get the real size of the image.
 	img, err := jpeg.DecodeConfig(bytes.NewReader(imageData))
 	if err != nil {
-		AsyncWarn(fmt.Sprintf("failed to decode image config for alerts: %v", err))
+		Warn(fmt.Sprintf("failed to decode image config for alerts: %v", err))
 		return
 	}
 
@@ -405,9 +396,9 @@ func sendDetectionAlerts(imageData []byte, detections []Detection, cameraName, m
 		y2 := float64(detection.Y2) / float64(img.Height)
 
 		if err := SendAlertIfConfigured(imageData, modelType, cameraName, detection.Confidence, x1, y1, x2, y2); err != nil {
-			AsyncWarn(fmt.Sprintf("failed to send alert for detection %s: %v", detection.Class, err))
+			Warn(fmt.Sprintf("failed to send alert for detection %s: %v", detection.Class, err))
 		} else {
-			AsyncInfo(fmt.Sprintf("sent alert for detection %s (confidence: %.3f) from camera %s", detection.Class, detection.Confidence, cameraName))
+			Info(fmt.Sprintf("sent alert for detection %s (confidence: %.3f) from camera %s", detection.Class, detection.Confidence, cameraName))
 		}
 	}
 }

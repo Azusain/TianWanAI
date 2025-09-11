@@ -48,7 +48,7 @@ func NewAsyncLogger(bufferSize int) *AsyncLogger {
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})
-	
+
 	logger := slog.New(handler)
 
 	asyncLogger := &AsyncLogger{
@@ -69,7 +69,7 @@ func NewAsyncLogger(bufferSize int) *AsyncLogger {
 func (al *AsyncLogger) worker() {
 	defer al.wg.Done()
 
-	batch := make([]LogEntry, 0, 100) // batch size for efficiency
+	batch := make([]LogEntry, 0, 100)                // batch size for efficiency
 	ticker := time.NewTicker(100 * time.Millisecond) // flush every 100ms
 	defer ticker.Stop()
 
@@ -82,7 +82,7 @@ func (al *AsyncLogger) worker() {
 				return
 			}
 			batch = append(batch, entry)
-			
+
 			// Flush batch if it gets too large
 			if len(batch) >= 100 {
 				al.flushBatch(batch)
@@ -119,7 +119,7 @@ func (al *AsyncLogger) flushBatch(entries []LogEntry) {
 // writeLogEntry writes a single log entry to the underlying logger
 func (al *AsyncLogger) writeLogEntry(entry LogEntry) {
 	ctx := context.Background()
-	
+
 	// Convert fields to slog attributes
 	attrs := make([]slog.Attr, 0, len(entry.Fields))
 	for key, value := range entry.Fields {
@@ -227,19 +227,19 @@ func GetGlobalAsyncLogger() *AsyncLogger {
 }
 
 // Package-level convenience functions that use the global async logger
-func AsyncDebug(msg string, fields ...map[string]interface{}) {
+func Debug(msg string, fields ...map[string]interface{}) {
 	GetGlobalAsyncLogger().Debug(msg, fields...)
 }
 
-func AsyncInfo(msg string, fields ...map[string]interface{}) {
+func Info(msg string, fields ...map[string]interface{}) {
 	GetGlobalAsyncLogger().Info(msg, fields...)
 }
 
-func AsyncWarn(msg string, fields ...map[string]interface{}) {
+func Warn(msg string, fields ...map[string]interface{}) {
 	GetGlobalAsyncLogger().Warn(msg, fields...)
 }
 
-func AsyncError(msg string, fields ...map[string]interface{}) {
+func Error(msg string, fields ...map[string]interface{}) {
 	GetGlobalAsyncLogger().Error(msg, fields...)
 }
 

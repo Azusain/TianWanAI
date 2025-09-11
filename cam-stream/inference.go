@@ -155,7 +155,7 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 	imgReader := bytes.NewReader(imageData)
 	img, err := jpeg.DecodeConfig(imgReader)
 	if err != nil {
-	AsyncWarn(fmt.Sprintf("failed to decode image config, using defaults: %v", err))
+		Warn(fmt.Sprintf("failed to decode image config, using defaults: %v", err))
 		img.Width = 1920
 		img.Height = 1080
 	}
@@ -172,11 +172,11 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 
 		// TODO: this is really weird.
 		if modelType == "smoke" && *className == "fire" {
-	AsyncWarn("filter out the class `fire` from the smokexfire inference server.")
+			Warn("filter out the class `fire` from the smokexfire inference server.")
 			continue
 		}
 		if modelType == "fire" && *className == "smoke" {
-	AsyncWarn("filter out the class `smoke` from the smokexfire inference server.")
+			Warn("filter out the class `smoke` from the smokexfire inference server.")
 			continue
 		}
 
@@ -188,7 +188,7 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 			// TODO: better algorithm.
 			// confidence = math.Exp(math.Log(*result.DetScore) + math.Log(*result.ClsScore))
 			confidence = *result.ClsScore
-			AsyncInfo(fmt.Sprintf("det: %f , cls: %f", *result.DetScore, *result.ClsScore))
+			Info(fmt.Sprintf("det: %f , cls: %f", *result.DetScore, *result.ClsScore))
 		} else if validRegularScore {
 			confidence = result.Score
 		} else {
@@ -219,7 +219,7 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 
 		// Skip invalid boxes
 		if x2 <= x1 || y2 <= y1 {
-			AsyncWarn(fmt.Sprintf("skipping invalid box coordinates: (%d,%d,%d,%d)", x1, y1, x2, y2))
+			Warn(fmt.Sprintf("skipping invalid box coordinates: (%d,%d,%d,%d)", x1, y1, x2, y2))
 			continue
 		}
 
@@ -239,7 +239,6 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 	return detections, nil
 }
 
-
 // ModelResult represents detection results for a specific model
 type ModelResult struct {
 	ModelType          string      `json:"model_type"`
@@ -253,7 +252,7 @@ type ModelResult struct {
 // ProcessFrameWithMultipleInference processes a frame with multiple inference servers concurrently
 func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraConfig, manager *RTSPManager) (map[string]*ModelResult, error) {
 	results := make(map[string]*ModelResult)
-	
+
 	// Prepare channel for collecting results
 	type inferenceResult struct {
 		modelType string
@@ -266,11 +265,11 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 	for _, binding := range cameraConfig.InferenceServerBindings {
 		server, exists := dataStore.InferenceServers[binding.ServerID]
 		if !exists {
-	AsyncWarn(fmt.Sprintf("inference server %s not found for camera %s", binding.ServerID, cameraConfig.ID))
+			Warn(fmt.Sprintf("inference server %s not found for camera %s", binding.ServerID, cameraConfig.ID))
 			continue
 		}
 		if !server.Enabled {
-	AsyncWarn(fmt.Sprintf("skipping disabled inference server %s", server.Name))
+			Warn(fmt.Sprintf("skipping disabled inference server %s", server.Name))
 			continue
 		}
 
@@ -289,23 +288,23 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 			// Create frame data copy for this goroutine
 			frameDataCopy := make([]byte, len(frameData))
 			copy(frameDataCopy, frameData)
-			
+
 			// Process inference
 			detections := processInferenceServer(frameDataCopy, s, &b, cameraConfig.ID)
-			
+
 			// Draw detections on image copy
 			displayedImage, err := DrawDetections(frameDataCopy, detections, cameraConfig.Name)
 			if err != nil {
-	AsyncWarn(fmt.Sprintf("failed to draw results for model %q: %v", s.ModelType, err))
+				Warn(fmt.Sprintf("failed to draw results for model %q: %v", s.ModelType, err))
 			}
-			
+
 			// Store original image copy for DEBUG mode
 			var originalImageCopy []byte
 			if globalDebugMode {
 				originalImageCopy = make([]byte, len(frameDataCopy))
 				copy(originalImageCopy, frameDataCopy)
 			}
-			
+
 			modelResult := &ModelResult{
 				ModelType:          s.ModelType,
 				ServerID:           b.ServerID,
@@ -314,12 +313,13 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 				OriginalImage:      originalImageCopy,
 				Error:              nil,
 			}
-			
+
 			resultChan <- inferenceResult{modelType: s.ModelType, result: modelResult}
 		}(server, binding)
 	}
 
 	// Collect all results
+	// TODO: Stupid sync.
 	for i := 0; i < goroutineCount; i++ {
 		result := <-resultChan
 		if result.result != nil {
@@ -334,7 +334,7 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 func processInferenceServer(frameData []byte, server *InferenceServer, binding *InferenceServerBinding, cameraID string) []Detection {
 	client, err := NewInferenceClient(server.URL)
 	if err != nil {
-	AsyncWarn(fmt.Sprintf("failed to create client for server %s: %v", server.Name, err))
+		Warn(fmt.Sprintf("failed to create client for server %s: %v", server.Name, err))
 		return []Detection{}
 	}
 
@@ -348,7 +348,7 @@ func processInferenceServer(frameData []byte, server *InferenceServer, binding *
 	} else {
 		detections, err = client.DetectObjects(frameData, server.ModelType)
 		if err != nil {
-	AsyncWarn(fmt.Sprintf("inference failed for server %s: %v", server.Name, err))
+			Warn(fmt.Sprintf("inference failed for server %s: %v", server.Name, err))
 			return detections
 		}
 	}
@@ -387,22 +387,22 @@ func getClassIndexFromModelType(modelType string) int {
 	classMap := map[string]int{
 		"other":   0,
 		"gesture": 1,
-		"ponding": 2, 
+		"ponding": 2,
 		"mouse":   3,
 		"tshirt":  4,
 		"cigar":   5,
 		// additional model types in the project
-		"fall":    0, // fallback to 'other' category
-		"smoke":   0, // fallback to 'other' category
-		"fire":    0, // fallback to 'other' category
-		"helmet":  0, // fallback to 'other' category
+		"fall":       0, // fallback to 'other' category
+		"smoke":      0, // fallback to 'other' category
+		"fire":       0, // fallback to 'other' category
+		"helmet":     0, // fallback to 'other' category
 		"safetybelt": 0, // fallback to 'other' category
 	}
-	
+
 	if classIndex, exists := classMap[modelType]; exists {
 		return classIndex
 	}
-	
+
 	// default to 'other' category if model type not found
 	return 0
 }
@@ -456,7 +456,7 @@ func SendAlertIfConfigured(imageData []byte, modelType, cameraName string, score
 		return fmt.Errorf("platform returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	AsyncInfo(fmt.Sprintf("alert sent successfully to platform for camera %s (model: %s, score: %.3f)",
+	Info(fmt.Sprintf("alert sent successfully to platform for camera %s (model: %s, score: %.3f)",
 		cameraName, modelType, score))
 
 	return nil
@@ -482,7 +482,7 @@ func processFallDetectionResults(server *InferenceServer, cameraConfig *CameraCo
 	results, err := GetFallDetectionResults(server, taskID, &limit)
 	if err != nil || len(results) == 0 {
 		if err != nil {
-	AsyncWarn(fmt.Sprintf("failed to get fall detection results for task %s: %v", taskID, err))
+			Warn(fmt.Sprintf("failed to get fall detection results for task %s: %v", taskID, err))
 		}
 		return
 	}
@@ -495,7 +495,7 @@ func processFallDetectionResults(server *InferenceServer, cameraConfig *CameraCo
 		if result.Image != "" {
 			decoded, err := base64.StdEncoding.DecodeString(result.Image)
 			if err != nil {
-	AsyncWarn(fmt.Sprintf("failed to decode fall detection image: %v", err))
+				Warn(fmt.Sprintf("failed to decode fall detection image: %v", err))
 				continue
 			}
 			imageData = decoded
@@ -524,7 +524,7 @@ func processFallDetectionResults(server *InferenceServer, cameraConfig *CameraCo
 		// Draw detection on the original image
 		drawnImage, err := DrawDetections(imageData, []Detection{detection}, cameraConfig.Name)
 		if err != nil {
-	AsyncWarn(fmt.Sprintf("failed to draw fall detection: %v", err))
+			Warn(fmt.Sprintf("failed to draw fall detection: %v", err))
 			continue
 		}
 
@@ -538,7 +538,7 @@ func processFallDetectionResults(server *InferenceServer, cameraConfig *CameraCo
 		// Create ModelResult for this SINGLE detection
 		// For fall detection, each ModelResult should contain exactly ONE detection
 		singleModelResult := map[string]*ModelResult{
-			server.ModelType: &ModelResult{
+			server.ModelType: {
 				ModelType:          server.ModelType,
 				ServerID:           binding.ServerID,
 				Detections:         []Detection{detection}, // Exactly one detection
@@ -551,8 +551,7 @@ func processFallDetectionResults(server *InferenceServer, cameraConfig *CameraCo
 		// Save this single fall detection result immediately (async)
 		// This ensures each fall detection is saved as a separate image/result
 		go manager.saveResultsByModel(cameraConfig.Name, singleModelResult)
-		
+
 		// Alert will be sent by saveResultsByModel -> sendDetectionAlerts
 	}
 }
-

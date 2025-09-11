@@ -33,7 +33,7 @@ type FallDetectionResultRequest struct {
 
 // FallDetectionResultItem represents a single fall detection result from tianwan API
 type FallDetectionResultItem struct {
-	Image   string                   `json:"image"`   // Base64 encoded image
+	Image   string                  `json:"image"`   // Base64 encoded image
 	Results FallDetectionResultData `json:"results"` // Detection results
 }
 
@@ -90,7 +90,7 @@ func StartFallDetection(server *InferenceServer, camera *CameraConfig) (string, 
 		return "", fmt.Errorf("tianwan service error: %s", startResp.ErrMsg)
 	}
 
-	AsyncInfo(fmt.Sprintf("started fall detection for camera: camera_name=%s camera_id=%s task_id=%s", camera.Name, camera.ID, startResp.TaskID))
+	Info(fmt.Sprintf("started fall detection for camera: camera_name=%s camera_id=%s task_id=%s", camera.Name, camera.ID, startResp.TaskID))
 	return startResp.TaskID, nil
 }
 
@@ -120,7 +120,7 @@ func StopFallDetection(server *InferenceServer, taskID string) error {
 		return fmt.Errorf("tianwan service returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	AsyncInfo(fmt.Sprintf("stopped fall detection: task_id=%s", taskID))
+	Info(fmt.Sprintf("stopped fall detection: task_id=%s", taskID))
 	return nil
 }
 
@@ -169,7 +169,7 @@ func GetFallDetectionResults(server *InferenceServer, taskID string, limit *int)
 	}
 
 	if len(response.Results) > 0 {
-	AsyncInfo(fmt.Sprintf("got fall detection results: count=%d task_id=%s", len(response.Results), taskID))
+		Info(fmt.Sprintf("got fall detection results: count=%d task_id=%s", len(response.Results), taskID))
 	}
 
 	return response.Results, nil
