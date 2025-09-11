@@ -12,10 +12,14 @@ import (
 const (
 	ConfigFile = "configs/config.json"
 	OutputDir  = "output"
+	DebugDir   = "debug"
 )
 
 // Global config variable
 var globalConfig *Config
+
+// Global DEBUG mode flag
+var globalDebugMode bool
 
 // initializeFrameRate initializes frame rate configuration from environment variable
 func initializeFrameRate() {
@@ -40,6 +44,20 @@ func initializeFrameRate() {
 	frameInterval = time.Duration(1000/globalFrameRate) * time.Millisecond
 
 	AsyncInfo(fmt.Sprintf("frame rate limit: %d FPS (interval: %v)", globalFrameRate, frameInterval))
+}
+
+// initializeDebugMode initializes DEBUG mode from environment variable
+func initializeDebugMode() {
+	debugStr := os.Getenv("DEBUG")
+	globalDebugMode = debugStr != "" && debugStr != "0" && debugStr != "false"
+	
+	if globalDebugMode {
+		AsyncInfo("🐛 DEBUG MODE ENABLED - Original images will be saved to debug directory")
+		// Create debug directory
+		if err := os.MkdirAll(DebugDir, 0755); err != nil {
+			AsyncWarn(fmt.Sprintf("failed to create debug directory: %v", err))
+		}
+	}
 }
 
 // autoStartRunningCameras starts all cameras that were marked as running and enabled
@@ -79,6 +97,9 @@ func main() {
 
 	// Initialize frame rate configuration from environment
 	initializeFrameRate()
+
+	// Initialize DEBUG mode from environment
+	initializeDebugMode()
 
 	// Load persistent data store
 	if err := loadDataStore(); err != nil {

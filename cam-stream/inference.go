@@ -246,6 +246,7 @@ type ModelResult struct {
 	ServerID           string      `json:"server_id"`
 	Detections         []Detection `json:"detections"`
 	DisplayResultImage []byte      `json:"display_image"`
+	OriginalImage      []byte      `json:"-"` // Original image without detection boxes (for DEBUG mode)
 	Error              error       `json:"-"`
 }
 
@@ -298,11 +299,19 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 	AsyncWarn(fmt.Sprintf("failed to draw results for model %q: %v", s.ModelType, err))
 			}
 			
+			// Store original image copy for DEBUG mode
+			var originalImageCopy []byte
+			if globalDebugMode {
+				originalImageCopy = make([]byte, len(frameDataCopy))
+				copy(originalImageCopy, frameDataCopy)
+			}
+			
 			modelResult := &ModelResult{
 				ModelType:          s.ModelType,
 				ServerID:           b.ServerID,
 				Detections:         detections,
 				DisplayResultImage: displayedImage,
+				OriginalImage:      originalImageCopy,
 				Error:              nil,
 			}
 			
@@ -491,12 +500,20 @@ func processFallDetectionResults(server *InferenceServer, cameraConfig *CameraCo
 			continue
 		}
 
+		// Store original image copy for DEBUG mode
+		var originalImageCopy []byte
+		if globalDebugMode {
+			originalImageCopy = make([]byte, len(imageData))
+			copy(originalImageCopy, imageData)
+		}
+
 		// Create ModelResult for this detection to be saved
 		modelResults[server.ModelType] = &ModelResult{
 			ModelType:          server.ModelType,
 			ServerID:           binding.ServerID,
 			Detections:         []Detection{detection},
 			DisplayResultImage: drawnImage,
+			OriginalImage:      originalImageCopy,
 			Error:              nil,
 		}
 
