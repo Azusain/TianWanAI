@@ -288,6 +288,12 @@ func (m *RTSPManager) saveResultsByModel(cameraName string, modelResults map[str
 		if len(result.Detections) == 0 {
 			continue // 跳过没有检测结果的模型
 		}
+		
+		// For fall detection, ensure each ModelResult contains exactly one detection
+		if modelType == "fall" && len(result.Detections) != 1 {
+			AsyncWarn(fmt.Sprintf("fall detection ModelResult should contain exactly one detection, got %d detections, skipping", len(result.Detections)))
+			continue
+		}
 
 		// 创建以服务器ID命名的目录
 		serverDir := fmt.Sprintf("%s/%s", m.outputDir, result.ServerID)
@@ -321,7 +327,7 @@ func (m *RTSPManager) saveResultsByModel(cameraName string, modelResults map[str
 				if err := os.WriteFile(debugFilePath, result.OriginalImage, 0644); err != nil {
 					AsyncWarn(fmt.Sprintf("failed to save debug original image: %v", err))
 				} else {
-					AsyncInfo(fmt.Sprintf("🐛 saved DEBUG original image to %s", debugFilePath))
+					AsyncInfo(fmt.Sprintf("saved DEBUG original image to %s", debugFilePath))
 				}
 			}
 		}

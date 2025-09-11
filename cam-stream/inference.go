@@ -459,8 +459,8 @@ func processFallDetectionResults(server *InferenceServer, cameraConfig *CameraCo
 		return
 	}
 
-	// Process each result independently on its own image
-	var modelResults = make(map[string]*ModelResult)
+	// Process each fall detection result independently and save immediately
+	// This prevents multiple fall detection results from being overwritten
 	for _, result := range results {
 		// Decode the image from backend
 		var imageData []byte
@@ -507,22 +507,24 @@ func processFallDetectionResults(server *InferenceServer, cameraConfig *CameraCo
 			copy(originalImageCopy, imageData)
 		}
 
-		// Create ModelResult for this detection to be saved
-		modelResults[server.ModelType] = &ModelResult{
-			ModelType:          server.ModelType,
-			ServerID:           binding.ServerID,
-			Detections:         []Detection{detection},
-			DisplayResultImage: drawnImage,
-			OriginalImage:      originalImageCopy,
-			Error:              nil,
+		// Create ModelResult for this SINGLE detection
+		// For fall detection, each ModelResult should contain exactly ONE detection
+		singleModelResult := map[string]*ModelResult{
+			server.ModelType: &ModelResult{
+				ModelType:          server.ModelType,
+				ServerID:           binding.ServerID,
+				Detections:         []Detection{detection}, // Exactly one detection
+				DisplayResultImage: drawnImage,
+				OriginalImage:      originalImageCopy,
+				Error:              nil,
+			},
 		}
 
+		// Save this single fall detection result immediately (async)
+		// This ensures each fall detection is saved as a separate image/result
+		go manager.saveResultsByModel(cameraConfig.Name, singleModelResult)
+		
 		// Alert will be sent by saveResultsByModel -> sendDetectionAlerts
-	}
-
-	// Save results using the same mechanism as other models (async)
-	if len(modelResults) > 0 {
-		go manager.saveResultsByModel(cameraConfig.Name, modelResults)
 	}
 }
 
