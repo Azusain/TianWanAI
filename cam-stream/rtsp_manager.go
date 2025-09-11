@@ -8,6 +8,7 @@ import (
 	"image/jpeg"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -310,24 +311,81 @@ func (m *RTSPManager) saveResultsByModel(cameraName string, modelResults map[str
 
 		AsyncInfo(fmt.Sprintf("saved detection image for camera %s, model %s to %s (detections: %d)", cameraName, modelType, filePath, len(result.Detections)))
 
-		// Save original image to debug directory if DEBUG mode is enabled
-		if globalDebugMode && result.OriginalImage != nil {
-			// Create debug server directory
-			debugServerDir := fmt.Sprintf("%s/%s", DebugDir, result.ServerID)
-			if err := os.MkdirAll(debugServerDir, 0755); err != nil {
-				AsyncWarn(fmt.Sprintf("failed to create debug directory for server %s: %v", result.ServerID, err))
-			} else {
-				// Save original image with same filename as detection image
-				debugFilePath := fmt.Sprintf("%s/%s", debugServerDir, filename)
-				if err := os.WriteFile(debugFilePath, result.OriginalImage, 0644); err != nil {
-					AsyncWarn(fmt.Sprintf("failed to save debug original image: %v", err))
-				} else {
-					AsyncInfo(fmt.Sprintf("saved DEBUG original image to %s", debugFilePath))
-				}
-			}
-		}
+		// Save original image and YOLO labels in DEBUG mode
+		m.saveDebugData(result, filename, modelType)
 
 		sendDetectionAlerts(result.DisplayResultImage, result.Detections, cameraName, modelType)
+	}
+}
+
+// saveDebugData saves original image and YOLO labels for DEBUG mode
+func (m *RTSPManager) saveDebugData(result *ModelResult, filename, modelType string) {
+	if !globalDebugMode || result.OriginalImage == nil {
+		return
+	}
+	
+	// Create debug server directory
+	debugServerDir := fmt.Sprintf("%s/%s", DebugDir, result.ServerID)
+	if err := os.MkdirAll(debugServerDir, 0755); err != nil {
+		AsyncWarn(fmt.Sprintf("failed to create debug directory for server %s: %v", result.ServerID, err))
+		return
+	}
+	
+	// Save original image
+	debugFilePath := fmt.Sprintf("%s/%s", debugServerDir, filename)
+	if err := os.WriteFile(debugFilePath, result.OriginalImage, 0644); err != nil {
+		AsyncWarn(fmt.Sprintf("failed to save debug original image: %v", err))
+		return
+	}
+	
+	AsyncInfo(fmt.Sprintf("saved debug original image to %s", debugFilePath))
+	
+	// Save YOLO format labels if there are detections
+	if len(result.Detections) > 0 {
+		m.saveYoloLabels(result, debugServerDir, filename, modelType)
+	}
+}
+
+// saveYoloLabels saves YOLO format label file
+func (m *RTSPManager) saveYoloLabels(result *ModelResult, debugDir, filename, modelType string) {
+	// Get image dimensions for normalization
+	imgCfg, err := jpeg.DecodeConfig(bytes.NewReader(result.OriginalImage))
+	if err != nil {
+		AsyncWarn(fmt.Sprintf("failed to decode image config for yolo label: %v", err))
+		return
+	}
+	
+	w := float64(imgCfg.Width)
+	h := float64(imgCfg.Height)
+	classIdx := getClassIndexFromModelType(modelType)
+	
+	// Build YOLO format lines
+	lines := make([]string, 0, len(result.Detections))
+	for _, det := range result.Detections {
+		// Convert pixel coordinates to normalized YOLO format
+		cx := (float64(det.X1) + float64(det.X2)) / 2.0 / w
+		cy := (float64(det.Y1) + float64(det.Y2)) / 2.0 / h
+		bw := (float64(det.X2) - float64(det.X1)) / w
+		bh := (float64(det.Y2) - float64(det.Y1)) / h
+		
+		// Clamp values between 0 and 1
+		if cx < 0 { cx = 0 } else if cx > 1 { cx = 1 }
+		if cy < 0 { cy = 0 } else if cy > 1 { cy = 1 }
+		if bw < 0 { bw = 0 } else if bw > 1 { bw = 1 }
+		if bh < 0 { bh = 0 } else if bh > 1 { bh = 1 }
+		
+		lines = append(lines, fmt.Sprintf("%d %.6f %.6f %.6f %.6f", classIdx, cx, cy, bw, bh))
+	}
+	
+	// Save label file
+	baseName := strings.TrimSuffix(filename, ".jpg")
+	labelPath := fmt.Sprintf("%s/%s.txt", debugDir, baseName)
+	labelContent := strings.Join(lines, "\n")
+	
+	if err := os.WriteFile(labelPath, []byte(labelContent), 0644); err != nil {
+		AsyncWarn(fmt.Sprintf("failed to save yolo label: %v", err))
+	} else {
+		AsyncInfo(fmt.Sprintf("saved yolo label to %s", labelPath))
 	}
 }
 
