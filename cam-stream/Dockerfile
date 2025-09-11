@@ -1,29 +1,15 @@
 # syntax=docker/dockerfile:1.6
 
-# ---- cpp builder (stream detector) ----
-FROM alpine:3.18 AS cpp-builder
+# ---- Go builder with CGO enabled for FFmpeg integration ----
+
+
+FROM golang:1.23-alpine AS go-builder
 
 RUN apk add --no-cache \
+    git \
     build-base \
-    cmake \
     pkgconfig \
     ffmpeg-dev
-
-# set up workdir and copy C++ source
-WORKDIR /app
-COPY stream_detector/ ./stream_detector/
-
-# build stream_detector
-WORKDIR /app/stream_detector
-RUN mkdir -p build && cd build \
-    && cmake .. \
-    && make
-
-
-# ---- go builder (pure golang, no opencv) ----
-FROM golang:1.23.4-alpine AS go-builder
-
-RUN apk add --no-cache git
 
 # set up workdir and copy module
 WORKDIR /app
@@ -35,8 +21,8 @@ RUN go mod download
 # copy the rest of the source
 COPY . .
 
-# build static binary (disable CGO since we don't need opencv)
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /app/bin/cam-stream ./
+# build binary with CGO enabled for FFmpeg integration
+RUN CGO_ENABLED=1 GOOS=linux go build -o /app/bin/cam-stream ./
 
 
 # ---- runtime ----
@@ -54,9 +40,7 @@ COPY --from=go-builder /app/bin/cam-stream /app/cam-stream
 COPY --from=go-builder /app/assets /app/assets
 # copy HTML templates directory
 COPY --from=go-builder /app/templates /app/templates
-# copy compiled C++ stream detector
-RUN mkdir -p /app/stream_detector/build
-COPY --from=cpp-builder /app/stream_detector/build/stream_detector /app/stream_detector/build/stream_detector
+# no need to copy separate stream detector as it's now built into the Go binary
 
 # runtime env for FFmpeg logging noise suppression and timezone
 ENV AV_LOG_LEVEL=error \

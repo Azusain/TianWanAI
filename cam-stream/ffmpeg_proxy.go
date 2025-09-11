@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -81,44 +79,13 @@ func (fsp *FFmpegStreamProxy) detectResolution() error {
 	fsp.frameHeight = height
 	fsp.bytesPerFrame = width * height * 3 // RGB24
 
-	AsyncInfo(fmt.Sprintf("detected resolution: %dx%d", width, height))
+	Info(fmt.Sprintf("detected resolution: %dx%d", width, height))
 	return nil
 }
 
-// detectResolutionWithCpp calls the C++ stream detector utility
+// detectResolutionWithCpp calls the CGO stream detector function
 func (fsp *FFmpegStreamProxy) detectResolutionWithCpp() (int, int, error) {
-	// Path to the compiled C++ detector
-	// TODO: remove this hard coding string.
-	detectorPath := "./stream_detector/build/stream_detector"
-
-	// Call the detector with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, detectorPath, fsp.originalRTSP)
-	output, err := cmd.Output()
-	if err != nil {
-		return 0, 0, fmt.Errorf("detector command failed: %v", err)
-	}
-
-	// Parse output: "WIDTH HEIGHT"
-	parts := strings.Fields(strings.TrimSpace(string(output)))
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("invalid detector output format: got %q", string(output))
-	}
-
-	width, err1 := strconv.Atoi(parts[0])
-	height, err2 := strconv.Atoi(parts[1])
-
-	if err1 != nil || err2 != nil {
-		return 0, 0, fmt.Errorf("failed to parse resolution: width=%q height=%q", parts[0], parts[1])
-	}
-
-	if width <= 0 || height <= 0 {
-		return 0, 0, fmt.Errorf("invalid resolution: %dx%d", width, height)
-	}
-
-	return width, height, nil
+	return detectStreamResolutionCGO(fsp.originalRTSP)
 }
 
 // Start starts the FFmpeg proxy process
@@ -250,21 +217,6 @@ func (fsp *FFmpegStreamProxy) monitorErrors() {
 		default:
 			// Drop error if channel is full
 		}
-	}
-}
-
-// GetFrame gets the next raw frame (blocking)
-func (fsp *FFmpegStreamProxy) GetFrame() (*RawFrame, error) {
-	select {
-	case frame, ok := <-fsp.frameChan:
-		if !ok {
-			return nil, fmt.Errorf("frame channel closed")
-		}
-		return frame, nil
-	case err := <-fsp.errorChan:
-		return nil, err
-	case <-fsp.ctx.Done():
-		return nil, fmt.Errorf("proxy stopped")
 	}
 }
 

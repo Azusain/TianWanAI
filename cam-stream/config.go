@@ -8,10 +8,10 @@ import (
 
 // Config application configuration structure
 type Config struct {
-	FrameRate    int `json:"frame_rate"`     // frames per second for sampling
+	FrameRate    int `json:"frame_rate"`    // frames per second for sampling
 	OutputWidth  int `json:"output_width"`  // output image width
 	OutputHeight int `json:"output_height"` // output image height
-	WebPort      int `json:"web_port"`       // web interface port
+	WebPort      int `json:"web_port"`      // web interface port
 }
 
 // DefaultConfig returns default configuration
@@ -33,7 +33,7 @@ func LoadConfig(filename string) (*Config, error) {
 		if err := SaveConfig(config, filename); err != nil {
 			return nil, fmt.Errorf("failed to create default config: %v", err)
 		}
-		AsyncInfo(fmt.Sprintf("created default config file: %s", filename))
+		Info(fmt.Sprintf("created default config file: %s", filename))
 		return config, nil
 	}
 
