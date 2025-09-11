@@ -1,5 +1,31 @@
 # syntax=docker/dockerfile:1.6
 
+# ---- cpp builder (stream detector) ----
+FROM debian:bookworm-slim AS cpp-builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# install build dependencies for C++
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    pkg-config \
+    libavformat-dev \
+    libavcodec-dev \
+    libavutil-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# set up workdir and copy C++ source
+WORKDIR /app
+COPY stream_detector/ ./stream_detector/
+
+# build stream_detector
+WORKDIR /app/stream_detector
+RUN mkdir -p build && cd build \
+    && cmake .. \
+    && make
+
+
 # ---- go builder (pure golang, no opencv) ----
 FROM golang:1.23.4-bookworm AS go-builder
 
@@ -22,7 +48,7 @@ FROM debian:bookworm-slim AS runtime
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# minimal runtime deps - only FFmpeg tools for proxy streaming
+# minimal runtime deps - FFmpeg tools and C++ runtime libraries
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     ca-certificates \
@@ -35,6 +61,9 @@ COPY --from=go-builder /app/bin/cam-stream /app/cam-stream
 COPY --from=go-builder /app/assets /app/assets
 # copy HTML templates directory
 COPY --from=go-builder /app/templates /app/templates
+# copy compiled C++ stream detector
+RUN mkdir -p /app/stream_detector/build
+COPY --from=cpp-builder /app/stream_detector/build/stream_detector /app/stream_detector/build/stream_detector
 
 # runtime env for FFmpeg logging noise suppression and timezone
 ENV AV_LOG_LEVEL=error \

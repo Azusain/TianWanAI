@@ -1,48 +1,54 @@
 {
   "cameras": {
-    "cam_6": {
-      "id": "cam_6",
-      "name": "一号摄像头",
+    "cam_10": {
+      "id": "cam_10",
+      "name": "二号摄像头",
       "rtsp_url": "rtsp://192.168.31.48:8554/test",
       "inference_server_bindings": [
         {
-          "server_id": "inf_5",
+          "server_id": "inf_7",
           "threshold": 0
         }
       ],
       "enabled": true,
       "running": true,
-      "created_at": "2025-09-11T01:49:19.720390392+08:00",
-      "updated_at": "2025-09-11T01:51:11.93238967+08:00"
+      "created_at": "2025-09-11T11:10:09.409858485+08:00",
+      "updated_at": "2025-09-11T11:10:09.409858546+08:00"
+    },
+    "cam_9": {
+      "id": "cam_9",
+      "name": "一号摄像头",
+      "rtsp_url": "rtsp://192.168.31.48:8554/test",
+      "inference_server_bindings": [
+        {
+          "server_id": "inf_7",
+          "threshold": 0
+        }
+      ],
+      "enabled": true,
+      "running": true,
+      "created_at": "2025-09-11T11:04:57.775775734+08:00",
+      "updated_at": "2025-09-11T11:04:57.7757758+08:00"
     }
   },
   "inference_servers": {
-    "inf_2": {
-      "id": "inf_2",
-      "name": "Ponding",
-      "url": "http://192.168.31.48:8901/ponding",
-      "model_type": "ponding",
-      "enabled": true,
-      "created_at": "2025-09-10T12:48:24.108453139+08:00",
-      "updated_at": "2025-09-10T12:48:24.108453197+08:00"
-    },
-    "inf_4": {
-      "id": "inf_4",
+    "inf_6": {
+      "id": "inf_6",
       "name": "Gesture",
+      "url": "http://192.168.31.48:8901/gesture",
+      "model_type": "gesture",
+      "enabled": true,
+      "created_at": "2025-09-11T03:30:44.576573786+08:00",
+      "updated_at": "2025-09-11T03:30:44.576573866+08:00"
+    },
+    "inf_7": {
+      "id": "inf_7",
+      "name": "Gestur2",
       "url": "http://192.168.31.48:6006/gesture",
       "model_type": "gesture",
       "enabled": true,
-      "created_at": "2025-09-11T01:36:48.50783663+08:00",
-      "updated_at": "2025-09-11T01:36:48.507836691+08:00"
-    },
-    "inf_5": {
-      "id": "inf_5",
-      "name": "Tshirt",
-      "url": "http://192.168.31.48:6006/tshirt",
-      "model_type": "tshirt",
-      "enabled": true,
-      "created_at": "2025-09-11T01:49:03.314338893+08:00",
-      "updated_at": "2025-09-11T01:49:03.314338949+08:00"
+      "created_at": "2025-09-11T11:04:44.482295483+08:00",
+      "updated_at": "2025-09-11T11:04:44.482295574+08:00"
     }
   },
   "alert_server": {
@@ -51,7 +57,7 @@
     "updated_at": "2025-09-10T12:09:35.134295266+08:00"
   },
   "counters": {
-    "camera": 6,
-    "inference_server": 5
+    "camera": 10,
+    "inference_server": 7
   }
 }
