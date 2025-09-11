@@ -379,7 +379,35 @@ type AlertRequest struct {
 }
 
 // SendAlertIfConfigured sends detection alert to management platform using global configuration
-func SendAlertIfConfigured(imageData []byte, model string, cameraName string, score float64, x1, y1, x2, y2 float64) error {
+// getClassIndexFromModelType maps modelType to YOLO class index
+// This function is used to generate YOLO format labels in DEBUG mode
+func getClassIndexFromModelType(modelType string) int {
+	// class index mapping for YOLO dataset labels
+	// based on the user's requirement: other, gesture, ponding, mouse, tshirt, cigar
+	classMap := map[string]int{
+		"other":   0,
+		"gesture": 1,
+		"ponding": 2, 
+		"mouse":   3,
+		"tshirt":  4,
+		"cigar":   5,
+		// additional model types in the project
+		"fall":    0, // fallback to 'other' category
+		"smoke":   0, // fallback to 'other' category
+		"fire":    0, // fallback to 'other' category
+		"helmet":  0, // fallback to 'other' category
+		"safetybelt": 0, // fallback to 'other' category
+	}
+	
+	if classIndex, exists := classMap[modelType]; exists {
+		return classIndex
+	}
+	
+	// default to 'other' category if model type not found
+	return 0
+}
+
+func SendAlertIfConfigured(imageData []byte, modelType, cameraName string, score, x1, y1, x2, y2 float64) error {
 	// Check if alert system is enabled and configured globally
 	if dataStore.AlertServer == nil || !dataStore.AlertServer.Enabled || dataStore.AlertServer.URL == "" {
 		return nil // Alert system not enabled or not configured, silently skip
@@ -392,7 +420,7 @@ func SendAlertIfConfigured(imageData []byte, model string, cameraName string, sc
 	alertReq := AlertRequest{
 		Image:     encodedImage,
 		RequestID: uuid.New().String(),
-		Model:     model,
+		Model:     modelType,
 		CameraKKS: cameraName, // Use camera name directly as KKS encoding
 		Score:     score,
 		X1:        x1,
@@ -429,7 +457,7 @@ func SendAlertIfConfigured(imageData []byte, model string, cameraName string, sc
 	}
 
 	AsyncInfo(fmt.Sprintf("alert sent successfully to platform for camera %s (model: %s, score: %.3f)",
-		cameraName, model, score))
+		cameraName, modelType, score))
 
 	return nil
 }
