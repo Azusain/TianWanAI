@@ -48,6 +48,7 @@
 /Dockerfile_App filter=lfs diff=lfs merge=lfs -text
 /Dockerfile_Ultralytics filter=lfs diff=lfs merge=lfs -text
 *.cpp filter=lfs diff=lfs merge=lfs -text
+*.debian filter=lfs diff=lfs merge=lfs -text
 *.py !text !filter !merge !diff
 *.go !text !filter !merge !diff
 *.md !text !filter !merge !diff

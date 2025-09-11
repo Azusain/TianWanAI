@@ -309,6 +309,23 @@ func (m *RTSPManager) saveResultsByModel(cameraName string, modelResults map[str
 
 		AsyncInfo(fmt.Sprintf("saved detection image for camera %s, model %s to %s (detections: %d)", cameraName, modelType, filePath, len(result.Detections)))
 
+		// Save original image to debug directory if DEBUG mode is enabled
+		if globalDebugMode && result.OriginalImage != nil {
+			// Create debug server directory
+			debugServerDir := fmt.Sprintf("%s/%s", DebugDir, result.ServerID)
+			if err := os.MkdirAll(debugServerDir, 0755); err != nil {
+				AsyncWarn(fmt.Sprintf("failed to create debug directory for server %s: %v", result.ServerID, err))
+			} else {
+				// Save original image with same filename as detection image
+				debugFilePath := fmt.Sprintf("%s/%s", debugServerDir, filename)
+				if err := os.WriteFile(debugFilePath, result.OriginalImage, 0644); err != nil {
+					AsyncWarn(fmt.Sprintf("failed to save debug original image: %v", err))
+				} else {
+					AsyncInfo(fmt.Sprintf("🐛 saved DEBUG original image to %s", debugFilePath))
+				}
+			}
+		}
+
 		// 发送检测告警（如果配置了）
 		sendDetectionAlerts(result.DisplayResultImage, result.Detections, cameraName, modelType)
 	}

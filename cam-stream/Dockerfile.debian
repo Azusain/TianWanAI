@@ -1,13 +1,20 @@
 # syntax=docker/dockerfile:1.6
 
 # ---- cpp builder (stream detector) ----
-FROM alpine:3.18 AS cpp-builder
+FROM debian:bookworm-slim AS cpp-builder
 
-RUN apk add --no-cache \
-    build-base \
+ARG DEBIAN_FRONTEND=noninteractive
+
+# install build dependencies for C++
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     cmake \
-    pkgconfig \
-    ffmpeg-dev
+    pkg-config \
+    libavformat-dev \
+    libavcodec-dev \
+    libavutil-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # set up workdir and copy C++ source
 WORKDIR /app
@@ -21,9 +28,7 @@ RUN mkdir -p build && cd build \
 
 
 # ---- go builder (pure golang, no opencv) ----
-FROM golang:1.23.4-alpine AS go-builder
-
-RUN apk add --no-cache git
+FROM golang:1.23.4-bookworm AS go-builder
 
 # set up workdir and copy module
 WORKDIR /app
@@ -40,13 +45,20 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /app/bin/cam-stre
 
 
 # ---- runtime ----
-FROM alpine:3.18 AS runtime
+FROM debian:bookworm-slim AS runtime
+
+ARG DEBIAN_FRONTEND=noninteractive
 
 # minimal runtime deps - FFmpeg tools and C++ runtime libraries
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     ca-certificates \
-    tzdata
+    tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get autoremove -y \
+    && apt-get autoclean \
+    && find /var/cache -type f -delete \
+    && find /var/log -type f -delete
 
 # copy app binary and static assets
 WORKDIR /app
