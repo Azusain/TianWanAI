@@ -71,10 +71,9 @@ func autoStartRunningCameras(rtspManager *RTSPManager) error {
 }
 
 func main() {
-	// 设置 FFmpeg 日志级别，抑制解码警告
-	os.Setenv("OPENCV_FFMPEG_LOGLEVEL", "24") // AV_LOG_QUIET = 24
+	// AV_LOG_QUIET = 24
+	os.Setenv("OPENCV_FFMPEG_LOGLEVEL", "24")
 	os.Setenv("AV_LOG_FORCE_NOCOLOR", "1")
-	os.Setenv("FFREPORT", "level=error") // FFmpeg 报告级别
 
 	AsyncInfo("starting Multi-Camera Stream Platform (API Focus)")
 

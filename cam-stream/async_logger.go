@@ -31,9 +31,11 @@ type LogEntry struct {
 type AsyncLogger struct {
 	logChan    chan LogEntry
 	done       chan struct{}
-	wg         sync.WaitGroup
 	logger     *slog.Logger
+	wg         sync.WaitGroup
 	bufferSize int
+	closed     bool
+	mu         sync.RWMutex
 }
 
 // NewAsyncLogger creates a new async logger with specified buffer size
@@ -138,6 +140,14 @@ func (al *AsyncLogger) writeLogEntry(entry LogEntry) {
 
 // log is the internal method to queue a log entry
 func (al *AsyncLogger) log(level LogLevel, msg string, fields map[string]interface{}) {
+	// check if logger is closed
+	al.mu.RLock()
+	if al.closed {
+		al.mu.RUnlock()
+		return // silently drop logs after closure
+	}
+	al.mu.RUnlock()
+
 	entry := LogEntry{
 		Level:     level,
 		Message:   msg,
@@ -147,9 +157,9 @@ func (al *AsyncLogger) log(level LogLevel, msg string, fields map[string]interfa
 
 	select {
 	case al.logChan <- entry:
-		// Successfully queued
+		// successfully queued
 	default:
-		// Channel is full, drop the log entry (or could implement overflow handling)
+		// channel is full, drop the log entry
 		fmt.Fprintf(os.Stderr, "async logger buffer full, dropping log: %s\n", msg)
 	}
 }
@@ -192,6 +202,14 @@ func (al *AsyncLogger) Error(msg string, fields ...map[string]interface{}) {
 
 // Close gracefully shuts down the async logger
 func (al *AsyncLogger) Close() {
+	al.mu.Lock()
+	if al.closed {
+		al.mu.Unlock()
+		return // already closed
+	}
+	al.closed = true
+	al.mu.Unlock()
+
 	close(al.done)
 	al.wg.Wait()
 }

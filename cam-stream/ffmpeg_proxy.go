@@ -56,13 +56,13 @@ func DefaultFFmpegProxyConfig() *FFmpegProxyConfig {
 // NewFFmpegStreamProxy creates a new FFmpeg stream proxy that auto-detects resolution
 func NewFFmpegStreamProxy(rtspURL string) *FFmpegStreamProxy {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &FFmpegStreamProxy{
-		originalRTSP:  rtspURL,
-		ctx:           ctx,
-		cancel:        cancel,
-		frameChan:     make(chan *RawFrame, 5), // buffer 5 frames
-		errorChan:     make(chan error, 5),
+		originalRTSP: rtspURL,
+		ctx:          ctx,
+		cancel:       cancel,
+		frameChan:    make(chan *RawFrame, 5), // buffer 5 frames
+		errorChan:    make(chan error, 5),
 		// Resolution will be detected from first frame
 		frameWidth:    0,
 		frameHeight:   0,
@@ -70,46 +70,55 @@ func NewFFmpegStreamProxy(rtspURL string) *FFmpegStreamProxy {
 	}
 }
 
-// detectResolution uses ffprobe to detect stream resolution
+// detectResolution uses C++ stream detector to get actual resolution
 func (fsp *FFmpegStreamProxy) detectResolution() error {
-	// Use ffprobe to get video stream info
-	args := []string{
-		"-v", "quiet",
-		"-select_streams", "v:0",
-		"-show_entries", "stream=width,height",
-		"-of", "csv=s=x:p=0",
-		fsp.originalRTSP,
-	}
-
-	cmd := exec.CommandContext(fsp.ctx, "ffprobe", args...)
-	output, err := cmd.Output()
+	width, height, err := fsp.detectResolutionWithCpp()
 	if err != nil {
-		return fmt.Errorf("ffprobe failed: %v", err)
+		return fmt.Errorf("failed to detect stream resolution: %v", err)
 	}
 
-	// Parse output (format: "widthxheight")
-	resolution := strings.TrimSpace(string(output))
-	parts := strings.Split(resolution, "x")
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid resolution format: %s", resolution)
-	}
-
-	width, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return fmt.Errorf("invalid width: %s", parts[0])
-	}
-
-	height, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return fmt.Errorf("invalid height: %s", parts[1])
-	}
-
-	// Set resolution and calculate bytes per frame for RGB24
 	fsp.frameWidth = width
 	fsp.frameHeight = height
-	fsp.bytesPerFrame = width * height * 3
+	fsp.bytesPerFrame = width * height * 3 // RGB24
 
+	AsyncInfo(fmt.Sprintf("detected resolution: %dx%d", width, height))
 	return nil
+}
+
+// detectResolutionWithCpp calls the C++ stream detector utility
+func (fsp *FFmpegStreamProxy) detectResolutionWithCpp() (int, int, error) {
+	// Path to the compiled C++ detector
+	// TODO: remove this hard coding string.
+	detectorPath := "./stream_detector/build/stream_detector"
+
+	// Call the detector with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, detectorPath, fsp.originalRTSP)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, 0, fmt.Errorf("detector command failed: %v", err)
+	}
+
+	// Parse output: "WIDTH HEIGHT"
+	parts := strings.Fields(strings.TrimSpace(string(output)))
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid detector output format: got %q", string(output))
+	}
+
+	width, err1 := strconv.Atoi(parts[0])
+	height, err2 := strconv.Atoi(parts[1])
+
+	if err1 != nil || err2 != nil {
+		return 0, 0, fmt.Errorf("failed to parse resolution: width=%q height=%q", parts[0], parts[1])
+	}
+
+	if width <= 0 || height <= 0 {
+		return 0, 0, fmt.Errorf("invalid resolution: %dx%d", width, height)
+	}
+
+	return width, height, nil
 }
 
 // Start starts the FFmpeg proxy process
@@ -121,14 +130,14 @@ func (fsp *FFmpegStreamProxy) Start() error {
 		return fmt.Errorf("ffmpeg proxy already running")
 	}
 
-	// First detect stream resolution using ffprobe
+	// First detect stream resolution using ffmpeg
 	if err := fsp.detectResolution(); err != nil {
 		return fmt.Errorf("failed to detect resolution: %v", err)
 	}
 
 	// Build ffmpeg command args for raw frame output
 	args := fsp.buildFFmpegArgs()
-	
+
 	fsp.cmd = exec.CommandContext(fsp.ctx, "ffmpeg", args...)
 
 	// Get stdout and stderr pipes
@@ -163,21 +172,15 @@ func (fsp *FFmpegStreamProxy) Start() error {
 // buildFFmpegArgs builds ffmpeg command arguments for raw frame output
 func (fsp *FFmpegStreamProxy) buildFFmpegArgs() []string {
 	args := []string{
-		"-loglevel", "error",                                    // only show error logs
-		"-rtsp_transport", "tcp",                                // force TCP transport
-		"-buffer_size", "1000000",                               // set buffer size
-		"-max_delay", "1000000",                                 // max delay 1 second
-		"-timeout", "10000000",                                  // connection timeout 10 seconds
-		"-reconnect", "1",                                       // enable auto reconnect
-		"-reconnect_at_eof", "1",                                // reconnect at EOF
-		"-reconnect_streamed", "1",                              // streamed reconnect
-		"-reconnect_delay_max", "3",                             // max reconnect delay 3 seconds
-		"-i", fsp.originalRTSP,                                  // input RTSP URL
-		"-f", "rawvideo",                                        // output raw video
-		"-pix_fmt", "rgb24",                                     // RGB24 pixel format
-		"-s", fmt.Sprintf("%dx%d", fsp.frameWidth, fsp.frameHeight), // detected resolution
-		"-r", "10",                                              // frame rate
-		"-",                                                     // output to stdout
+		"-v", "error", // minimal logging
+		"-rtsp_transport", "tcp", // force TCP transport
+		"-timeout", "10000000", // socket timeout in microseconds
+		"-i", fsp.originalRTSP, // input RTSP URL
+		"-f", "rawvideo", // output raw video
+		"-pix_fmt", "rgb24", // RGB24 pixel format
+		"-s", fmt.Sprintf("%dx%d", fsp.frameWidth, fsp.frameHeight), // use detected resolution
+		"-r", "10", // frame rate
+		"-", // output to stdout
 	}
 
 	return args
@@ -193,7 +196,7 @@ func (fsp *FFmpegStreamProxy) readFrames() {
 	}()
 
 	buffer := make([]byte, fsp.bytesPerFrame)
-	
+
 	for {
 		select {
 		case <-fsp.ctx.Done():
@@ -208,23 +211,23 @@ func (fsp *FFmpegStreamProxy) readFrames() {
 				fsp.errorChan <- fmt.Errorf("failed to read frame from ffmpeg: %v", err)
 				return
 			}
-			
+
 			if n != fsp.bytesPerFrame {
 				fsp.errorChan <- fmt.Errorf("incomplete frame read: got %d bytes, expected %d", n, fsp.bytesPerFrame)
 				continue
 			}
-			
+
 			// Create frame copy
 			frameData := make([]byte, fsp.bytesPerFrame)
 			copy(frameData, buffer)
-			
+
 			frame := &RawFrame{
 				Data:      frameData,
 				Width:     fsp.frameWidth,
 				Height:    fsp.frameHeight,
 				Timestamp: time.Now(),
 			}
-			
+
 			select {
 			case fsp.frameChan <- frame:
 			case <-fsp.ctx.Done():

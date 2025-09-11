@@ -63,6 +63,8 @@ tests/
 *.so
 *.dylib
 cam-stream-backend
+stream_detector/build/
+stream_detector/*.o
 
 # Image files (if not needed)
 *.jpg

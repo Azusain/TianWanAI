@@ -157,6 +157,7 @@ func (m *RTSPManager) connectAndCaptureWithProxy(stream *CameraStream) error {
 	}
 }
 
+
 // rawFrameToJPEG converts raw RGB24 frame to JPEG bytes
 func (m *RTSPManager) rawFrameToJPEG(frame *RawFrame) ([]byte, error) {
 	// Create RGBA image from raw RGB24 data

@@ -233,7 +233,7 @@
 
   <div class="controls">
     <div class="form-group">
-      <label>选择推理服务器:</label>
+      <label>选择推理服务器</label>
       <select id="serverSelect" class="form-control">
         <option value="">所有服务器</option>
       </select>
@@ -385,7 +385,7 @@
                         <img src="/output/${img.serverName}/${img.filename}" 
                              alt="${img.filename}"
                              onclick="openModal('/output/${img.serverName}/${img.filename}')"
-                             onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=\"padding:20px;text-align:center;color:#999\">图片加载失败</div>'">
+                             onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=\\'padding:20px;text-align:center;color:#999\\'>图片不存在</div>'">
                     </div>
                     <div class="image-info">
                         <div class="image-filename">${img.filename}</div>
@@ -452,7 +452,7 @@
     }
 
     function formatFileSize(bytes) {
-      if (bytes === 0) return 'Loading...';
+      if (bytes === 0) return '0 B';
       const k = 1024;
       const sizes = ['B', 'KB', 'MB', 'GB'];
       const i = Math.floor(Math.log(bytes) / Math.log(k));
