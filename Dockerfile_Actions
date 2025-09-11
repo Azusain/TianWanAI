@@ -31,28 +31,23 @@ RUN . venv/bin/activate && \
     find venv/lib -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true && \
     find venv/lib -name "test" -type d -exec rm -rf {} + 2>/dev/null || true
 
-# Stage 2: Git LFS operations
+# Stage 2: Git operations
 FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04 AS git-stage
 
 ENV WORKDIR=/root
 WORKDIR ${WORKDIR}
 
-# Install git and git-lfs
+# Install git
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        curl \
-        ca-certificates \
-        git && \
-    curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash && \
-    apt-get install -y --no-install-recommends git-lfs && \
+        git \
+        ca-certificates && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    git lfs install
+    rm -rf /var/lib/apt/lists/*
 
-# Copy source code and perform git operations
+# Copy source code and initialize submodules
 COPY . ${WORKDIR}
 RUN rm -rf .git/hooks && \
-    git lfs pull && \
     git submodule update --init --recursive && \
     # Remove git directories to save space
     find . -name ".git" -type d -exec rm -rf {} + 2>/dev/null || true && \
