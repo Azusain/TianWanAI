@@ -34,6 +34,10 @@ RUN apk add --no-cache \
     ca-certificates \
     tzdata
 
+# set timezone for Alpine Linux
+RUN cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo "Asia/Shanghai" > /etc/timezone
+
 # copy app binary and static assets
 WORKDIR /app
 COPY --from=go-builder /app/bin/cam-stream /app/cam-stream
