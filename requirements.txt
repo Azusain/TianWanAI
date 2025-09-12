@@ -6,6 +6,7 @@ loguru
 gunicorn
 transformers
 numpy
+av
 
 # Fall detection dependencies
 scipy
