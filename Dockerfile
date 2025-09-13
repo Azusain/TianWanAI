@@ -37,11 +37,14 @@ FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04 AS git-stage
 ENV WORKDIR=/root
 WORKDIR ${WORKDIR}
 
-# Install git
+# Install git and tools for downloading models
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         git \
-        ca-certificates && \
+        ca-certificates \
+        python3 \
+        python3-pip && \
+    pip3 install --no-cache-dir gdown && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -49,6 +52,13 @@ RUN apt-get update && \
 COPY . ${WORKDIR}
 RUN rm -rf .git/hooks && \
     git submodule update --init --recursive && \
+    # Download large model files from Google Drive
+    if [ -f "__Fall/download_large_models.sh" ]; then \
+        chmod +x __Fall/download_large_models.sh && \
+        cd __Fall && \
+        ./download_large_models.sh && \
+        cd .. ; \
+    fi && \
     # Remove git directories to save space
     find . -name ".git" -type d -exec rm -rf {} + 2>/dev/null || true && \
     # Clean up unnecessary files
