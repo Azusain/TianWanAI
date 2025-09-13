@@ -395,23 +395,105 @@ class DatasetManager:
         
         viz_dir.mkdir(exist_ok=True)
         
-        # generate visualizations (placeholder - actual implementation would use cv2 or matplotlib)
+        # generate visualizations with bounding boxes
         output_files = []
         class_names = self.load_class_names()
+        
+        # colors for different classes (BGR format)
+        colors = [
+            (255, 0, 0),    # blue
+            (0, 255, 0),    # green
+            (0, 0, 255),    # red
+            (255, 255, 0),  # cyan
+            (255, 0, 255),  # magenta
+            (0, 255, 255),  # yellow
+            (128, 0, 255),  # purple
+            (255, 128, 0),  # orange
+            (0, 128, 255),  # light blue
+            (128, 255, 0),  # lime
+        ]
+        
+        try:
+            import cv2
+        except ImportError:
+            logger.warning("opencv not available, creating copies without bounding boxes")
+            # fallback to simple copy
+            for i, (img_file, annotations) in enumerate(samples, 1):
+                output_file = viz_dir / f"sample_{i:02d}.png"
+                shutil.copy2(img_file, output_file)
+                output_files.append(str(output_file))
+            return output_files
         
         for i, (img_file, annotations) in enumerate(samples, 1):
             output_file = viz_dir / f"sample_{i:02d}.png"
             
-            # copy original image as placeholder
-            # in real implementation, would draw bounding boxes with cv2
-            shutil.copy2(img_file, output_file)
-            
-            output_files.append(str(output_file))
-            
-            # log annotation info
-            logger.info(f"sample {i}: {img_file.name} with {len(annotations)} annotations")
-            for ann in annotations:
-                class_name = class_names.get(ann.class_id, f"class_{ann.class_id}")
-                logger.info(f"  - {class_name}: ({ann.center_x:.3f}, {ann.center_y:.3f}) {ann.width:.3f}x{ann.height:.3f}")
+            try:
+                # load image
+                image = cv2.imread(str(img_file))
+                if image is None:
+                    logger.warning(f"failed to load image: {img_file}")
+                    continue
+                
+                height, width = image.shape[:2]
+                
+                # draw bounding boxes
+                for ann in annotations:
+                    # convert yolo coordinates to pixel coordinates
+                    center_x_px = int(ann.center_x * width)
+                    center_y_px = int(ann.center_y * height)
+                    box_width_px = int(ann.width * width)
+                    box_height_px = int(ann.height * height)
+                    
+                    # calculate corner coordinates
+                    x1 = center_x_px - box_width_px // 2
+                    y1 = center_y_px - box_height_px // 2
+                    x2 = center_x_px + box_width_px // 2
+                    y2 = center_y_px + box_height_px // 2
+                    
+                    # get color for this class
+                    color = colors[ann.class_id % len(colors)]
+                    
+                    # draw rectangle
+                    cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
+                    
+                    # draw class name
+                    class_name = class_names.get(ann.class_id, f"class_{ann.class_id}")
+                    label_text = f"{class_name} ({ann.class_id})"
+                    
+                    # calculate text size for background
+                    font_scale = 0.6
+                    font_thickness = 1
+                    (text_width, text_height), baseline = cv2.getTextSize(
+                        label_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness
+                    )
+                    
+                    # draw background rectangle for text
+                    text_y = max(y1 - 5, text_height + 5)
+                    cv2.rectangle(
+                        image, 
+                        (x1, text_y - text_height - baseline), 
+                        (x1 + text_width, text_y + baseline),
+                        color, -1
+                    )
+                    
+                    # draw text
+                    cv2.putText(
+                        image, label_text, (x1, text_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness
+                    )
+                
+                # save image
+                cv2.imwrite(str(output_file), image)
+                output_files.append(str(output_file))
+                
+                # log annotation info
+                logger.info(f"sample {i}: {img_file.name} with {len(annotations)} annotations")
+                for ann in annotations:
+                    class_name = class_names.get(ann.class_id, f"class_{ann.class_id}")
+                    logger.info(f"  - {class_name}: ({ann.center_x:.3f}, {ann.center_y:.3f}) {ann.width:.3f}x{ann.height:.3f}")
+                    
+            except Exception as e:
+                logger.error(f"failed to process {img_file}: {e}")
+                continue
         
         return output_files

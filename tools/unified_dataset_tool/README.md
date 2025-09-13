@@ -4,10 +4,12 @@ a comprehensive PyQt6-based dataset management tool for computer vision projects
 
 ## features
 
-- **dataset analysis**: comprehensive statistics including class distribution, image sizes, annotation counts, and issue detection
-- **dataset splitting**: split datasets into train/validation sets with configurable ratios and random seeds
-- **visualization**: generate sample visualizations with bounding box overlays
-- **format support**: YOLO format annotations with automatic class name loading from various config files
+- **🎥 video processing**: extract frames from videos (single or batch mode) with configurable intervals
+- **📊 dataset analysis**: comprehensive statistics, class distribution, and issue detection
+- **🔀 dataset splitting**: split datasets into train/val sets with custom ratios and seeds
+- **👁️ sample viewer**: generate visualization samples to check annotation quality
+- **📂 smart detection**: automatically detects common dataset directory structures
+- **🎯 yolo support**: full support for yolo format annotations and class files
 
 ## installation
 
@@ -48,12 +50,33 @@ python main.py
    - `val/images/` and `val/labels/`
    - `data.yaml` configuration file
 
-### visualization tab
+### video processing tab (🎥 抽帧工具)
+
+**single video mode:**
+1. click "browse..." next to "video file" and select a video
+2. set output directory for extracted frames
+3. configure extraction settings:
+   - "extract every": interval between frames (default: every 30 frames)
+   - "max frames per video": limit total frames (0 = unlimited)
+4. click "get video info" to check video details
+5. click "extract frames" to start extraction
+
+**batch mode:**
+1. click "browse..." next to "or video directory" and select folder with videos
+2. set output directory (each video will get its own subfolder)
+3. configure same settings as single mode
+4. click "extract frames" to process all videos
+
+### sample viewer tab (👁️ 可视化查看)
+
+**purpose**: generate sample images with annotation overlays to check labeling quality
 
 1. select dataset directory
 2. choose number of samples to visualize (1-50)
 3. optionally specify output directory
-4. click "generate visualizations" to create sample images with annotations
+4. click "generate visualizations" to create sample images
+
+**what it does**: randomly selects labeled images and draws actual bounding boxes with class labels on them. Uses different colors for different classes and includes class names.
 
 ## supported file formats
 
@@ -103,7 +126,26 @@ my_dataset/
 └── classes.txt
 ```
 
-the tool will auto-detect common directory structures or you can specify custom paths.
+## ⚙️ auto-detection behavior
+
+**IMPORTANT**: The tool has smart auto-detection features to reduce configuration complexity:
+
+### Dataset Analysis & Splitting
+- If you only specify the main dataset directory, the tool will automatically search for:
+  - **Images**: `images/`, `train/images/`, `val/images/`, then the root directory
+  - **Labels**: `labels/`, `train/labels/`, `val/labels/`, then the root directory
+- **Override**: Use the optional "images directory" and "labels directory" fields to specify custom locations
+
+### Class Names
+Automatically searches for class definitions in this order:
+1. `classes.txt` (one class per line)
+2. `data.yaml` (YOLO format with `names` field)
+3. `dataset.yaml` (similar format)
+
+### Video Processing
+- **Single mode**: Select one video file
+- **Batch mode**: Select a folder - processes all supported video files
+- Each video gets its own output subfolder automatically
 
 ## requirements
 
@@ -134,9 +176,10 @@ the tool will auto-detect common directory structures or you can specify custom 
 
 ### visualization features
 - random sampling from labeled images
-- bounding box overlay (placeholder implementation)
-- class name display
+- real bounding box overlay with OpenCV integration
+- class name display with colored backgrounds
 - configurable sample count
+- automatic color assignment per class
 
 ## troubleshooting
 

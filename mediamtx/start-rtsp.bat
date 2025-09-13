@@ -18,7 +18,7 @@ set /p video_path=Enter video file path (or press Enter for test pattern):
 
 echo.
 echo Starting MediaMTX server...
-start /min "MediaMTX Server" cmd /c "cd mediamtx && mediamtx.exe"
+start /min "MediaMTX Server" cmd /c "mediamtx.exe"
 
 echo Waiting for server to start...
 timeout /t 3 /nobreak >nul

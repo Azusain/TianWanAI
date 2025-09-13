@@ -14,3 +14,45 @@ pyvenv.cfg
 tianwan.code-workspace
 tianwan-tools/
 tools/unified_tool_app/target
+
+# PyInstaller build artifacts
+build/
+dist/
+# Keep the spec file but ignore built executables
+# *.spec
+*.app
+*.dmg
+*.pkg
+*.msi
+
+# PyInstaller cache and temporary files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dll
+
+# Build logs and warnings
+warn-*.txt
+xref-*.html
+
+# Virtual environment
+venv/
+env/
+.venv/
+.env/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Compiled binaries and executables
+*.exe
+*.out
+*.bin

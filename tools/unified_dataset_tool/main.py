@@ -29,8 +29,8 @@ def main():
     app.setOrganizationName("azusaing")
     
     # enable high dpi support
-    app.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
-    app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+    # app.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+    # app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
     
     # create and show main window
     window = MainWindow()
