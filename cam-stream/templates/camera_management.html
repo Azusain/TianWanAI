@@ -787,11 +787,12 @@
         // Handle both new binding format and legacy format
         if (camera.inference_server_bindings && camera.inference_server_bindings.length > 0) {
           return camera.inference_server_bindings.map(binding => {
-            const name = this.serverMap[binding.server_id] || binding.server_id;
+            const name = this.serverMap[binding.server_id];
+            const displayText = name ? `${name} (${binding.server_id})` : binding.server_id;
             return `
                         <div style="margin-bottom: 4px; font-size: 11px;">
                             <span style="background: #e8f5e8; color: #2d7d2d; padding: 1px 6px; border-radius: 12px;">
-                                ${this.escapeHtml(name)}
+                                ${this.escapeHtml(displayText)}
                             </span>
                             <span style="color: #666; margin-left: 6px;">
                                 阈值 ${Math.round(binding.threshold * 100)}%
