@@ -1,0 +1,417 @@
+import os
+import random
+import shutil
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import dataclass
+import yaml
+import json
+from PIL import Image
+import logging
+
+# configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@dataclass
+class YoloAnnotation:
+    class_id: int
+    center_x: float
+    center_y: float
+    width: float
+    height: float
+
+@dataclass
+class DatasetIssues:
+    missing_labels: List[str]
+    empty_label_files: List[str]
+    invalid_annotations: List[str]
+
+@dataclass
+class DatasetAnalysis:
+    total_images: int
+    labeled_images: int
+    unlabeled_images: int
+    total_annotations: int
+    class_distribution: Dict[int, int]
+    class_names: Dict[int, str]
+    image_sizes: Dict[str, int]
+    issues: DatasetIssues
+
+class DatasetManager:
+    def __init__(self, dataset_path: str):
+        self.dataset_path = Path(dataset_path)
+        if not self.dataset_path.exists():
+            raise FileNotFoundError(f"dataset path does not exist: {dataset_path}")
+        
+        self.image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp'}
+        
+    def find_images(self, directory: Path) -> List[Path]:
+        """find all image files in directory (non-recursive)"""
+        images = []
+        
+        if not directory.exists():
+            return images
+            
+        for file_path in directory.iterdir():
+            if file_path.is_file():
+                if file_path.suffix.lower() in self.image_extensions:
+                    images.append(file_path)
+        
+        return sorted(images)
+    
+    def read_yolo_label(self, label_path: Path) -> List[YoloAnnotation]:
+        """read yolo format annotation file"""
+        if not label_path.exists():
+            return []
+            
+        annotations = []
+        
+        try:
+            with open(label_path, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                        
+                    parts = line.split()
+                    if len(parts) != 5:
+                        logger.warning(f"invalid annotation in {label_path}:{line_num}: {line}")
+                        continue
+                        
+                    try:
+                        class_id = int(parts[0])
+                        center_x = float(parts[1])
+                        center_y = float(parts[2])
+                        width = float(parts[3])
+                        height = float(parts[4])
+                        
+                        # validate coordinates are in [0, 1] range
+                        if not (0.0 <= center_x <= 1.0 and 0.0 <= center_y <= 1.0 and 
+                               0.0 <= width <= 1.0 and 0.0 <= height <= 1.0):
+                            logger.warning(f"invalid coordinates in {label_path}:{line_num}: {line}")
+                            continue
+                            
+                        annotations.append(YoloAnnotation(
+                            class_id=class_id,
+                            center_x=center_x,
+                            center_y=center_y,
+                            width=width,
+                            height=height
+                        ))
+                        
+                    except ValueError:
+                        logger.warning(f"parse error in {label_path}:{line_num}: {line}")
+                        continue
+                        
+        except Exception as e:
+            logger.error(f"failed to read label file {label_path}: {e}")
+            
+        return annotations
+    
+    def load_class_names(self) -> Dict[int, str]:
+        """load class names from various config files"""
+        class_names = {}
+        
+        # try common class name files
+        for filename in ['classes.txt', 'data.yaml', 'dataset.yaml']:
+            file_path = self.dataset_path / filename
+            if not file_path.exists():
+                continue
+                
+            try:
+                if filename.endswith(('.yaml', '.yml')):
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        data = yaml.safe_load(f)
+                        if 'names' in data:
+                            names = data['names']
+                            if isinstance(names, dict):
+                                # names as dict: {0: 'class1', 1: 'class2'}
+                                for key, value in names.items():
+                                    class_names[int(key)] = str(value)
+                            elif isinstance(names, list):
+                                # names as list: ['class1', 'class2']
+                                for i, name in enumerate(names):
+                                    class_names[i] = str(name)
+                            return class_names
+                else:
+                    # classes.txt format: one class per line
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        for i, line in enumerate(f):
+                            line = line.strip()
+                            if line:
+                                class_names[i] = line
+                        return class_names
+                        
+            except Exception as e:
+                logger.warning(f"failed to read class names from {file_path}: {e}")
+                continue
+                
+        return class_names
+    
+    def analyze_dataset(self, images_dir: Optional[str] = None, labels_dir: Optional[str] = None) -> DatasetAnalysis:
+        """analyze dataset and return comprehensive statistics"""
+        logger.info("starting dataset analysis...")
+        
+        # determine directories
+        if images_dir:
+            images_path = Path(images_dir)
+        else:
+            # auto-detect images directory
+            images_path = self.dataset_path
+            for possible_dir in ['images', 'train/images', 'val/images']:
+                candidate = self.dataset_path / possible_dir
+                if candidate.exists() and self.find_images(candidate):
+                    images_path = candidate
+                    break
+        
+        if labels_dir:
+            labels_path = Path(labels_dir)
+        else:
+            # auto-detect labels directory
+            labels_path = self.dataset_path
+            for possible_dir in ['labels', 'train/labels', 'val/labels']:
+                candidate = self.dataset_path / possible_dir
+                if candidate.exists():
+                    labels_path = candidate
+                    break
+        
+        logger.info(f"analyzing images in: {images_path}")
+        logger.info(f"analyzing labels in: {labels_path}")
+        
+        # find all images
+        image_files = self.find_images(images_path)
+        logger.info(f"found {len(image_files)} image files")
+        
+        if not image_files:
+            raise ValueError("no image files found")
+        
+        # initialize analysis
+        issues = DatasetIssues([], [], [])
+        analysis = DatasetAnalysis(
+            total_images=len(image_files),
+            labeled_images=0,
+            unlabeled_images=0,
+            total_annotations=0,
+            class_distribution={},
+            class_names={},
+            image_sizes={},
+            issues=issues
+        )
+        
+        # analyze each image
+        for img_file in image_files:
+            img_stem = img_file.stem
+            label_file = labels_path / f"{img_stem}.txt"
+            
+            # check if label exists
+            if not label_file.exists():
+                analysis.unlabeled_images += 1
+                issues.missing_labels.append(str(img_file))
+                continue
+            
+            # read annotations
+            try:
+                annotations = self.read_yolo_label(label_file)
+            except Exception as e:
+                logger.warning(f"failed to read label file {label_file}: {e}")
+                issues.invalid_annotations.append(str(label_file))
+                continue
+            
+            if not annotations:
+                analysis.unlabeled_images += 1
+                issues.empty_label_files.append(str(label_file))
+            else:
+                analysis.labeled_images += 1
+                analysis.total_annotations += len(annotations)
+                
+                # count class occurrences
+                for ann in annotations:
+                    analysis.class_distribution[ann.class_id] = (
+                        analysis.class_distribution.get(ann.class_id, 0) + 1
+                    )
+            
+            # get image dimensions
+            try:
+                with Image.open(img_file) as img:
+                    width, height = img.size
+                    size_key = f"{width}x{height}"
+                    analysis.image_sizes[size_key] = analysis.image_sizes.get(size_key, 0) + 1
+            except Exception:
+                # fallback for corrupted images
+                ext = img_file.suffix.lower()
+                size_key = f"corrupted{ext}"
+                analysis.image_sizes[size_key] = analysis.image_sizes.get(size_key, 0) + 1
+        
+        # load class names
+        analysis.class_names = self.load_class_names()
+        
+        logger.info("dataset analysis complete!")
+        logger.info(f"total images: {analysis.total_images}")
+        logger.info(f"labeled images: {analysis.labeled_images}")
+        logger.info(f"unlabeled images: {analysis.unlabeled_images}")
+        logger.info(f"total annotations: {analysis.total_annotations}")
+        
+        return analysis
+    
+    def split_dataset(self, output_path: str, train_ratio: float = 0.8, 
+                     split_mode: str = "random", seed: int = 42,
+                     images_dir: Optional[str] = None, labels_dir: Optional[str] = None) -> str:
+        """split dataset into train/val sets"""
+        logger.info(f"starting dataset split with ratio {train_ratio}")
+        
+        # determine source directories
+        if images_dir:
+            source_images = Path(images_dir)
+        else:
+            source_images = self.dataset_path / "images"
+            if not source_images.exists():
+                source_images = self.dataset_path
+        
+        if labels_dir:
+            source_labels = Path(labels_dir)
+        else:
+            source_labels = self.dataset_path / "labels"
+            if not source_labels.exists():
+                source_labels = self.dataset_path
+        
+        # find all images
+        image_files = self.find_images(source_images)
+        if not image_files:
+            raise ValueError("no image files found")
+        
+        # set random seed
+        random.seed(seed)
+        
+        # shuffle images
+        if split_mode == "random":
+            random.shuffle(image_files)
+        
+        # calculate split point
+        split_point = int(len(image_files) * train_ratio)
+        train_files = image_files[:split_point]
+        val_files = image_files[split_point:]
+        
+        # create output directories
+        output_dir = Path(output_path)
+        train_img_dir = output_dir / "train" / "images"
+        train_label_dir = output_dir / "train" / "labels"
+        val_img_dir = output_dir / "val" / "images"
+        val_label_dir = output_dir / "val" / "labels"
+        
+        for dir_path in [train_img_dir, train_label_dir, val_img_dir, val_label_dir]:
+            dir_path.mkdir(parents=True, exist_ok=True)
+        
+        # copy files
+        def copy_files(file_list: List[Path], img_dest: Path, label_dest: Path):
+            copied_images = 0
+            copied_labels = 0
+            
+            for img_file in file_list:
+                # copy image
+                dest_img = img_dest / img_file.name
+                shutil.copy2(img_file, dest_img)
+                copied_images += 1
+                
+                # copy corresponding label if exists
+                label_file = source_labels / f"{img_file.stem}.txt"
+                if label_file.exists():
+                    dest_label = label_dest / f"{img_file.stem}.txt"
+                    shutil.copy2(label_file, dest_label)
+                    copied_labels += 1
+            
+            return copied_images, copied_labels
+        
+        train_img_count, train_label_count = copy_files(train_files, train_img_dir, train_label_dir)
+        val_img_count, val_label_count = copy_files(val_files, val_img_dir, val_label_dir)
+        
+        # create data.yaml file
+        data_yaml = {
+            'path': str(output_dir.absolute()),
+            'train': 'train/images',
+            'val': 'val/images',
+            'names': self.load_class_names()
+        }
+        
+        with open(output_dir / "data.yaml", 'w', encoding='utf-8') as f:
+            yaml.dump(data_yaml, f, default_flow_style=False, allow_unicode=True)
+        
+        summary = (
+            f"dataset split completed:\n"
+            f"- output: {output_path}\n"
+            f"- train ratio: {train_ratio:.1%}\n"
+            f"- mode: {split_mode}\n"
+            f"- seed: {seed}\n"
+            f"- train: {train_img_count} images, {train_label_count} labels\n"
+            f"- val: {val_img_count} images, {val_label_count} labels"
+        )
+        
+        logger.info(summary)
+        return summary
+    
+    def visualize_samples(self, output_dir: Optional[str] = None, sample_count: int = 5,
+                         images_dir: Optional[str] = None, labels_dir: Optional[str] = None) -> List[str]:
+        """generate visualization samples with bounding boxes"""
+        logger.info(f"generating {sample_count} visualization samples")
+        
+        # determine source directories
+        if images_dir:
+            source_images = Path(images_dir)
+        else:
+            source_images = self.dataset_path / "images"
+            if not source_images.exists():
+                source_images = self.dataset_path
+        
+        if labels_dir:
+            source_labels = Path(labels_dir)
+        else:
+            source_labels = self.dataset_path / "labels"
+            if not source_labels.exists():
+                source_labels = self.dataset_path
+        
+        # find labeled images
+        image_files = self.find_images(source_images)
+        labeled_images = []
+        
+        for img_file in image_files:
+            label_file = source_labels / f"{img_file.stem}.txt"
+            if label_file.exists():
+                annotations = self.read_yolo_label(label_file)
+                if annotations:
+                    labeled_images.append((img_file, annotations))
+        
+        if not labeled_images:
+            return []
+        
+        # select random samples
+        random.shuffle(labeled_images)
+        samples = labeled_images[:min(sample_count, len(labeled_images))]
+        
+        # determine output directory
+        if output_dir:
+            viz_dir = Path(output_dir)
+        else:
+            viz_dir = self.dataset_path / "visualizations"
+        
+        viz_dir.mkdir(exist_ok=True)
+        
+        # generate visualizations (placeholder - actual implementation would use cv2 or matplotlib)
+        output_files = []
+        class_names = self.load_class_names()
+        
+        for i, (img_file, annotations) in enumerate(samples, 1):
+            output_file = viz_dir / f"sample_{i:02d}.png"
+            
+            # copy original image as placeholder
+            # in real implementation, would draw bounding boxes with cv2
+            shutil.copy2(img_file, output_file)
+            
+            output_files.append(str(output_file))
+            
+            # log annotation info
+            logger.info(f"sample {i}: {img_file.name} with {len(annotations)} annotations")
+            for ann in annotations:
+                class_name = class_names.get(ann.class_id, f"class_{ann.class_id}")
+                logger.info(f"  - {class_name}: ({ann.center_x:.3f}, {ann.center_y:.3f}) {ann.width:.3f}x{ann.height:.3f}")
+        
+        return output_files
