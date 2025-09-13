@@ -27,7 +27,6 @@ func DrawDetections(imageData []byte, detections []Detection, cameraName string)
 
 	// Draw detection boxes
 	for _, det := range detections {
-		Debug(fmt.Sprintf("draw.go:DrawDetection:31 -> confidence %f", det.Confidence))
 		drawDetectionBox(rgbaImg, det)
 	}
 
