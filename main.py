@@ -286,7 +286,7 @@ def app():
         try:
             req = request.json              
         except Exception:         
-            return None, ServiceStatus.INVALID_CONTENT_TYPE.value
+            return {}, 400
         if not req.__contains__('rtsp_address') or req['rtsp_address'] == '':         
             return {
                 "err_msg": "missing json field: rtsp_address",
