@@ -143,11 +143,11 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 
 	// Check if inference was successful (errno == 0 means success)
 	// Note: NO_OBJECT_DETECTED is not an error, it's a valid result with no detections
-	if response.Errno != 0 && response.ErrMsg != "NO_OBJECT_DETECTED" {
+	if response.Errno != 0 && response.Errno != -4 {
 		return nil, fmt.Errorf("inference failed: %s (errno: %d)", response.ErrMsg, response.Errno)
 	}
-
-	if response.ErrMsg == "NO_OBJECT_DETECTED" {
+	// NO_OBJECT_DETECTED
+	if response.Errno == -4 {
 		return []Detection{}, nil
 	}
 
