@@ -34,9 +34,10 @@ RUN apk add --no-cache \
     ca-certificates \
     tzdata
 
-# set timezone for Alpine Linux
-RUN cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
-    echo "Asia/Shanghai" > /etc/timezone
+# set timezone for Alpine Linux - more robust approach
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone
 
 # copy app binary and static assets
 WORKDIR /app
@@ -46,10 +47,9 @@ COPY --from=go-builder /app/assets /app/assets
 COPY --from=go-builder /app/templates /app/templates
 # no need to copy separate stream detector as it's now built into the Go binary
 
-# runtime env for FFmpeg logging noise suppression and timezone
+# runtime env for FFmpeg logging noise suppression
 ENV AV_LOG_LEVEL=error \
-    AV_LOG_FORCE_NOCOLOR=1 \
-    TZ=Asia/Shanghai
+    AV_LOG_FORCE_NOCOLOR=1
 
 # create writable dirs
 RUN mkdir -p /app/output /app/_data
