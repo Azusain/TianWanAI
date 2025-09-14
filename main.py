@@ -281,7 +281,7 @@ def app():
             xyxyn=xyxyn
         )
     
-    # Temporal Fall Detection using ST-GCN - Now follows unified design pattern
+    # Temporal Fall Detection using ST-GCN + Alpha Pose + Tiny YOLO.
     @app.route('/fall/start', methods=['POST'])
     def StartFallDetection():
         # check args.
