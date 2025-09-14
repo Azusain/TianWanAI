@@ -306,7 +306,6 @@ def app():
             person_bbox = person["bbox"]
             person_conf = person["confidence"]
 
-            
             # crop person region from image with padding
             x1, y1, x2, y2 = person_bbox
             # add padding (10% of bbox size)
