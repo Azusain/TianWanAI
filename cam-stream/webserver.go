@@ -1015,10 +1015,13 @@ func (ws *WebServer) startFallDetectionResultPolling(task *FallDetectionTaskStat
 
 				ws.processFallResultsFromPolling(results, server, camera, binding)
 
-			case <-task.pollStopChan:
+		case <-task.pollStopChan:
+			// Safely stop ticker within goroutine to avoid race condition
+			if task.pollTicker != nil {
 				task.pollTicker.Stop()
-				Info(fmt.Sprintf("stopped fall detection result polling for task %s", task.TaskID))
-				return
+			}
+			Info(fmt.Sprintf("stopped fall detection result polling for task %s", task.TaskID))
+			return
 			}
 		}
 	}()
