@@ -1035,17 +1035,21 @@ class DataProcessingTab(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(20)
         
-        # Create sub-tabs for data processing functions
+        # Create sub-tabs for data-related functions
         sub_tabs = QTabWidget()
         
         # Add existing tabs as sub-tabs
         analysis_tab = AnalysisTab(self.parent)
         split_tab = SplitTab(self.parent) 
         visualization_tab = VisualizationTab(self.parent)
+        dataset_mgmt_tab = DatasetManagementTab(self.parent)
+        format_conv_tab = FormatConversionTab(self.parent)
         
         sub_tabs.addTab(analysis_tab, "Analysis")
         sub_tabs.addTab(split_tab, "Split")
         sub_tabs.addTab(visualization_tab, "Visualization")
+        sub_tabs.addTab(dataset_mgmt_tab, "Management")
+        sub_tabs.addTab(format_conv_tab, "Conversion")
         
         layout.addWidget(sub_tabs)
         self.setLayout(layout)
@@ -1285,6 +1289,53 @@ class DatasetManagementTab(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(15)
         
+        # Merge YOLO Datasets
+        merge_group = QGroupBox("Merge YOLO Datasets")
+        merge_group.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        merge_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #cccccc;
+                border-radius: 5px;
+                margin-top: 1ex;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+            }
+        """)
+        merge_layout = QFormLayout()
+        merge_layout.setVerticalSpacing(12)
+        
+        self.merge_src_a_edit = QLineEdit()
+        self.merge_src_a_browse = QPushButton("Browse...")
+        self.merge_src_a_browse.clicked.connect(self.browse_merge_src_a)
+        row_a = QHBoxLayout()
+        row_a.addWidget(self.merge_src_a_edit)
+        row_a.addWidget(self.merge_src_a_browse)
+        merge_layout.addRow("source A:", row_a)
+        
+        self.merge_src_b_edit = QLineEdit()
+        self.merge_src_b_browse = QPushButton("Browse...")
+        self.merge_src_b_browse.clicked.connect(self.browse_merge_src_b)
+        row_b = QHBoxLayout()
+        row_b.addWidget(self.merge_src_b_edit)
+        row_b.addWidget(self.merge_src_b_browse)
+        merge_layout.addRow("source B:", row_b)
+        
+        self.merge_out_edit = QLineEdit()
+        self.merge_out_browse = QPushButton("Browse...")
+        self.merge_out_browse.clicked.connect(self.browse_merge_out)
+        row_out = QHBoxLayout()
+        row_out.addWidget(self.merge_out_edit)
+        row_out.addWidget(self.merge_out_browse)
+        merge_layout.addRow("output directory:", row_out)
+        
+        merge_group.setLayout(merge_layout)
+        layout.addWidget(merge_group)
+        
         # Dataset Reduction Tool
         reduce_group = QGroupBox("Dataset Reduction Tool")
         reduce_group.setFont(QFont("Arial", 12, QFont.Weight.Bold))
@@ -1409,6 +1460,32 @@ class DatasetManagementTab(QWidget):
         # Action buttons
         buttons_layout = QHBoxLayout()
         
+        # Merge button
+        self.merge_btn = QPushButton("Merge Datasets")
+        self.merge_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.merge_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #3d8b40;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.merge_btn.clicked.connect(self.merge_datasets)
+        buttons_layout.addWidget(self.merge_btn)
+        
         # Reduce button
         self.reduce_btn = QPushButton("Reduce Dataset")
         self.reduce_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
@@ -1512,6 +1589,21 @@ class DatasetManagementTab(QWidget):
         directory = QFileDialog.getExistingDirectory(self, "Select Dataset Directory")
         if directory:
             self.reduce_dataset_edit.setText(directory)
+    
+    def browse_merge_src_a(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Source A Dataset Directory")
+        if directory:
+            self.merge_src_a_edit.setText(directory)
+    
+    def browse_merge_src_b(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Source B Dataset Directory")
+        if directory:
+            self.merge_src_b_edit.setText(directory)
+    
+    def browse_merge_out(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Output Directory")
+        if directory:
+            self.merge_out_edit.setText(directory)
     
     def reduce_dataset(self):
         dataset_dir = self.reduce_dataset_edit.text().strip()
@@ -1737,6 +1829,30 @@ class DatasetManagementTab(QWidget):
     def on_replacement_error(self, error_msg):
         self.replace_btn.setEnabled(True)
         self.parent.show_error(f"Class replacement failed: {error_msg}")
+    
+    def merge_datasets(self):
+        src_a = self.merge_src_a_edit.text().strip()
+        src_b = self.merge_src_b_edit.text().strip()
+        out_dir = self.merge_out_edit.text().strip()
+        if not src_a or not src_b or not out_dir:
+            self.parent.show_error("Please specify source A, source B, and output directory")
+            return
+        try:
+            self.merge_btn.setEnabled(False)
+            self.worker = WorkerThread(DatasetManager.merge_yolo_datasets, src_a, src_b, out_dir)
+            self.worker.finished.connect(self.on_merge_complete)
+            self.worker.error.connect(self.on_merge_error)
+            self.worker.start()
+        except Exception as e:
+            self.parent.show_error(f"Merge failed: {e}")
+    
+    def on_merge_complete(self, result):
+        self.merge_btn.setEnabled(True)
+        self.advanced_results.setText(result)
+    
+    def on_merge_error(self, error_msg):
+        self.merge_btn.setEnabled(True)
+        self.parent.show_error(f"Merge failed: {error_msg}")
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -1765,13 +1881,9 @@ class MainWindow(QMainWindow):
         
         # reorganize tabs into logical groups
         self.data_processing_tab = DataProcessingTab(self)
-        self.dataset_management_tab = DatasetManagementTab(self)
-        self.format_conversion_tab = FormatConversionTab(self)
         self.video_processing_tab = VideoProcessingTab(self)
         
-        tab_widget.addTab(self.data_processing_tab, "Data Processing")
-        tab_widget.addTab(self.dataset_management_tab, "Dataset Management")
-        tab_widget.addTab(self.format_conversion_tab, "Format Conversion")
+        tab_widget.addTab(self.data_processing_tab, "Data")
         tab_widget.addTab(self.video_processing_tab, "Video Processing")
         
         layout.addWidget(tab_widget)

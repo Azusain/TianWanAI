@@ -149,6 +149,112 @@ class DatasetManager:
                 
         return class_names
     
+    @staticmethod
+    def merge_yolo_datasets(source_a: str, source_b: str, output_dir: str) -> str:
+        """merge two YOLO-format datasets into a new folder.
+        expected structure for each source: <root>/(images|labels)
+        - copies images and matching labels
+        - on filename conflicts, keeps existing file and renames the incoming one with a numeric suffix
+        - if a label exists but the image is missing, the label is ignored
+        - empty label files are preserved as empty for completeness
+        returns a human-readable summary
+        """
+        from pathlib import Path
+        import shutil
+        
+        def resolve_subdir(root: Path, sub: str) -> Path:
+            candidates = [
+                root / sub,
+                root / f"train/{sub}",
+                root / f"val/{sub}",
+            ]
+            for c in candidates:
+                if c.exists():
+                    return c
+            return root / sub
+        
+        src_a = Path(source_a)
+        src_b = Path(source_b)
+        out_root = Path(output_dir)
+        out_images = out_root / 'images'
+        out_labels = out_root / 'labels'
+        out_images.mkdir(parents=True, exist_ok=True)
+        out_labels.mkdir(parents=True, exist_ok=True)
+        
+        srcs = [
+            (src_a, resolve_subdir(src_a, 'images'), resolve_subdir(src_a, 'labels'), 'a'),
+            (src_b, resolve_subdir(src_b, 'images'), resolve_subdir(src_b, 'labels'), 'b'),
+        ]
+        
+        def next_available_name(dest_dir: Path, base_name: str, suffix_tag: str) -> str:
+            stem = Path(base_name).stem
+            ext = Path(base_name).suffix
+            candidate = f"{stem}{ext}"
+            idx = 1
+            while (dest_dir / candidate).exists():
+                candidate = f"{stem}_{suffix_tag}{idx}{ext}"
+                idx += 1
+            return candidate
+        
+        def copy_pair(img_path: Path, lbl_dir: Path, tag: str) -> Tuple[str, bool]:
+            nonlocal copied_images, copied_labels, skipped_duplicates
+            target_name = next_available_name(out_images, img_path.name, tag)
+            dest_img = out_images / target_name
+            shutil.copy2(img_path, dest_img)
+            copied_images += 1
+            
+            # corresponding label
+            base_stem = img_path.stem
+            src_label_path = lbl_dir / f"{base_stem}.txt"
+            if src_label_path.exists():
+                # ensure label name matches image target name
+                target_stem = Path(target_name).stem
+                dest_label = out_labels / f"{target_stem}.txt"
+                # write label (could be empty)
+                shutil.copy2(src_label_path, dest_label)
+                copied_labels += 1
+                return target_name, True
+            return target_name, False
+        
+        copied_images = 0
+        copied_labels = 0
+        skipped_duplicates = 0
+        
+        # copy from both sources
+        image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp'}
+        for root, img_dir, lbl_dir, tag in srcs:
+            if not img_dir.exists():
+                continue
+            for p in sorted(img_dir.iterdir()):
+                if p.is_file() and p.suffix.lower() in image_exts:
+                    # if filename not taken, keep original name; else resolve
+                    desired_name = p.name
+                    if not (out_images / desired_name).exists():
+                        # try to copy keeping the same name
+                        dest_img = out_images / desired_name
+                        shutil.copy2(p, dest_img)
+                        copied_images += 1
+                        # labels
+                        src_label_path = lbl_dir / f"{p.stem}.txt"
+                        if src_label_path.exists():
+                            dest_label = out_labels / f"{p.stem}.txt"
+                            shutil.copy2(src_label_path, dest_label)
+                            copied_labels += 1
+                    else:
+                        # conflict, choose a new name with suffix
+                        copy_pair(p, lbl_dir, tag)
+        
+        summary = (
+            f"merge completed:\n"
+            f"- source a: {src_a}\n"
+            f"- source b: {src_b}\n"
+            f"- output: {out_root}\n"
+            f"- images copied: {copied_images}\n"
+            f"- labels copied: {copied_labels}"
+        )
+        logger.info(summary)
+        return summary
+    
     def analyze_dataset(self, images_dir: Optional[str] = None, labels_dir: Optional[str] = None) -> DatasetAnalysis:
         """analyze dataset and return comprehensive statistics"""
         logger.info("starting dataset analysis...")
