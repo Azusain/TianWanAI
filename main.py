@@ -25,6 +25,7 @@ g_ponding_service = None
 g_mouse_service = None
 g_cigar_service = None
 g_smoke_service = None
+g_helmet_service = None
 g_pose_service = None
 g_tshirt_service = None
 g_tshirt_classifier = None
@@ -59,7 +60,7 @@ def validate_img_format():
 
 def initialize_models():
     """Initialize all models at startup (except Fall which has special handling)"""
-    global g_gesture_service, g_ponding_service, g_mouse_service, g_cigar_service
+    global g_gesture_service, g_ponding_service, g_mouse_service, g_cigar_service, g_helmet_service
     global g_smoke_service, g_pose_service, g_tshirt_service, g_tshirt_classifier, g_person_detector, g_person_classifier
     
     logger.info("starting model initialization...")
@@ -80,6 +81,9 @@ def initialize_models():
         
         logger.info("loading smoke detection model...")
         g_smoke_service = SmokeFileDetector("__SmokeFire/weights/smoke.pt")
+        
+        logger.info("loading helmet detection model...")
+        g_helmet_service = YoloDetectionService("models/helmet/weights/helmet_v1.pt", 640)
         
         # Initialize pose detection model for tshirt service
         logger.info("loading pose detection model...")
@@ -267,6 +271,110 @@ def app():
             score=score,
             xyxyn=xyxyn
         )
+
+    @app.route('/helmet', methods=['POST'])
+    def HelmetDetect():
+        img, errno = validate_img_format()
+        if img is None:
+            return {
+                "log_id": uuid4(),
+                "errno": errno,
+                "err_msg": ServiceStatus.stringify(errno),
+                "api_version": "0.0.1",
+                "model_version": "0.0.1",
+                "results": []
+            }
+        # TODO: configure threshold somewhere else. 
+        # step 1: detect persons using person detector
+        persons = g_person_detector.detect_persons(img, conf_threshold=0.5)
+        
+        if not persons:
+            return {
+                "log_id": uuid4(),
+                "errno": ServiceStatus.NO_OBJECT_DETECTED.value,
+                "err_msg": ServiceStatus.stringify(ServiceStatus.NO_OBJECT_DETECTED.value),
+                "api_version": "0.0.1",
+                "model_version": "0.0.1",
+                "results": []
+            }
+        
+        # step 2: detect helmets in each person region
+        helmet_results = []
+        img_height, img_width = img.shape[:2]
+        
+        for person_idx, person in enumerate(persons):
+            person_bbox = person["bbox"]
+            person_conf = person["confidence"]
+
+            
+            # crop person region from image with padding
+            x1, y1, x2, y2 = person_bbox
+            # add padding (10% of bbox size)
+            padding_x = int((x2 - x1) * 0.1)
+            padding_y = int((y2 - y1) * 0.1)
+            crop_x1 = max(0, x1 - padding_x)
+            crop_y1 = max(0, y1 - padding_y)
+            crop_x2 = min(img_width, x2 + padding_x)
+            crop_y2 = min(img_height, y2 + padding_y)
+            
+            # crop the person region
+            person_crop = img[crop_y1:crop_y2, crop_x1:crop_x2]
+
+            if person_crop.size == 0:
+                continue
+            
+            # detect helmets in the cropped person region
+            helmet_score, helmet_xyxyn, _ = g_helmet_service.Predict(person_crop)
+            
+            # calculate person coordinates in normalized format (return person bbox, not helmet bbox)
+            person_left_n = x1 / img_width
+            person_top_n = y1 / img_height
+            person_width_n = (x2 - x1) / img_width
+            person_height_n = (y2 - y1) / img_height
+            
+            if helmet_score is not None and helmet_xyxyn is not None:
+                # helmet detected - dangerous score = 1 - helmet_confidence (lower helmet conf = higher danger)
+                helmet_confidence = float(helmet_score) if not isinstance(helmet_score, list) else float(helmet_score[0])
+                dangerous_score = 1.0 - helmet_confidence  # higher helmet confidence = lower danger
+                
+                helmet_results.append({
+                    "score": dangerous_score,
+                    "location": {
+                        "left": person_left_n,
+                        "top": person_top_n,
+                        "width": person_width_n,
+                        "height": person_height_n
+                    }
+                })
+                
+
+            else:
+                # no helmet detected - maximum danger (dangerous score = 1.0)
+                helmet_results.append({
+                    "score": 1.0,  # maximum dangerous score when no helmet detected
+                    "location": {
+                        "left": person_left_n,
+                        "top": person_top_n,
+                        "width": person_width_n,
+                        "height": person_height_n
+                    }
+                })
+                
+        
+        # determine response status
+        if len(helmet_results) > 0:
+            errno = ServiceStatus.SUCCESS.value
+        else:
+            errno = ServiceStatus.NO_OBJECT_DETECTED.value
+            
+        return {
+            "log_id": uuid4(),
+            "errno": errno,
+            "err_msg": ServiceStatus.stringify(errno),
+            "api_version": "0.0.1",
+            "model_version": "0.0.1",
+            "results": helmet_results
+        }
     
     @app.route('/cigar', methods=['POST'])
     def CigarDetect():

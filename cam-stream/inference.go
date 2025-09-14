@@ -386,15 +386,11 @@ func getClassIndexFromModelType(modelType string) int {
 		"other":   0,
 		"gesture": 1,
 		"ponding": 2,
-		"mouse":   3,
-		"tshirt":  4,
-		"cigar":   5,
-		// additional model types in the project
-		"fall":       0, // fallback to 'other' category
-		"smoke":      0, // fallback to 'other' category
-		"fire":       0, // fallback to 'other' category
-		"helmet":     0, // fallback to 'other' category
-		"safetybelt": 0, // fallback to 'other' category
+		"smoke":   3,
+		"mouse":   4,
+		"tshirt":  5,
+		"cigar":   6,
+		"helmet":  7,
 	}
 
 	if classIndex, exists := classMap[modelType]; exists {
