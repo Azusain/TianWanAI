@@ -1130,15 +1130,86 @@ class FormatConversionTab(QWidget):
         classes_row = QHBoxLayout()
         classes_row.addWidget(self.classes_file_edit)
         classes_row.addWidget(self.classes_browse_btn)
-        voc_layout.addRow("Classes File (classes.names):", classes_row)
+        voc_layout.addRow("Classes File (optional - auto-detect if empty):", classes_row)
         
         voc_group.setLayout(voc_layout)
         layout.addWidget(voc_group)
         
-        # Convert button
-        self.convert_btn = QPushButton("Convert VOC to YOLO")
-        self.convert_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        self.convert_btn.setStyleSheet("""
+        # YOLO to VOC conversion
+        yolo_group = QGroupBox("YOLO to PASCAL VOC Conversion")
+        yolo_group.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        yolo_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #cccccc;
+                border-radius: 5px;
+                margin-top: 1ex;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+            }
+        """)
+        yolo_layout = QFormLayout()
+        yolo_layout.setVerticalSpacing(12)
+        
+        # YOLO dataset directory
+        self.yolo_dataset_edit = QLineEdit()
+        self.yolo_dataset_edit.setFont(QFont("Arial", 11))
+        self.yolo_dataset_edit.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QLineEdit:focus {
+                border-color: #4CAF50;
+            }
+        """)
+        
+        self.yolo_dataset_browse = QPushButton("Browse...")
+        self.yolo_dataset_browse.setFont(QFont("Arial", 11))
+        self.yolo_dataset_browse.clicked.connect(self.browse_yolo_dataset)
+        yolo_dataset_row = QHBoxLayout()
+        yolo_dataset_row.addWidget(self.yolo_dataset_edit)
+        yolo_dataset_row.addWidget(self.yolo_dataset_browse)
+        yolo_layout.addRow("YOLO Dataset Directory:", yolo_dataset_row)
+        
+        # Classes file for YOLO to VOC
+        self.yolo_classes_file_edit = QLineEdit()
+        self.yolo_classes_file_edit.setFont(QFont("Arial", 11))
+        self.yolo_classes_file_edit.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QLineEdit:focus {
+                border-color: #4CAF50;
+            }
+        """)
+        
+        self.yolo_classes_browse = QPushButton("Browse...")
+        self.yolo_classes_browse.setFont(QFont("Arial", 11))
+        self.yolo_classes_browse.clicked.connect(self.browse_yolo_classes_file)
+        yolo_classes_row = QHBoxLayout()
+        yolo_classes_row.addWidget(self.yolo_classes_file_edit)
+        yolo_classes_row.addWidget(self.yolo_classes_browse)
+        yolo_layout.addRow("Classes File (classes.txt):", yolo_classes_row)
+        
+        yolo_group.setLayout(yolo_layout)
+        layout.addWidget(yolo_group)
+        
+        # Convert buttons
+        buttons_layout = QHBoxLayout()
+        
+        self.voc_to_yolo_btn = QPushButton("Convert VOC to YOLO")
+        self.voc_to_yolo_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.voc_to_yolo_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
                 color: white;
@@ -1158,8 +1229,35 @@ class FormatConversionTab(QWidget):
                 background-color: #cccccc;
             }
         """)
-        self.convert_btn.clicked.connect(self.convert_voc_to_yolo)
-        layout.addWidget(self.convert_btn)
+        self.voc_to_yolo_btn.clicked.connect(self.convert_voc_to_yolo)
+        buttons_layout.addWidget(self.voc_to_yolo_btn)
+        
+        self.yolo_to_voc_btn = QPushButton("Convert YOLO to VOC")
+        self.yolo_to_voc_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.yolo_to_voc_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+            QPushButton:pressed {
+                background-color: #1565C0;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.yolo_to_voc_btn.clicked.connect(self.convert_yolo_to_voc)
+        buttons_layout.addWidget(self.yolo_to_voc_btn)
+        
+        layout.addLayout(buttons_layout)
         
         # Results
         results_label = QLabel("Conversion Results:")
@@ -1194,19 +1292,32 @@ class FormatConversionTab(QWidget):
         if file_path:
             self.classes_file_edit.setText(file_path)
     
+    def browse_yolo_dataset(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select YOLO Dataset Directory")
+        if directory:
+            self.yolo_dataset_edit.setText(directory)
+    
+    def browse_yolo_classes_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Classes File", "",
+            "Text files (*.names *.txt);;All files (*)"
+        )
+        if file_path:
+            self.yolo_classes_file_edit.setText(file_path)
+    
     def convert_voc_to_yolo(self):
         xml_dir = self.xml_dir_edit.text().strip()
         classes_file = self.classes_file_edit.text().strip()
         
-        if not xml_dir or not classes_file:
-            self.parent.show_error("Please specify both XML directory and classes file")
+        if not xml_dir:
+            self.parent.show_error("Please specify XML directory")
             return
         
         try:
-            self.convert_btn.setEnabled(False)
+            self.voc_to_yolo_btn.setEnabled(False)
             self.worker = WorkerThread(self._do_voc_conversion, xml_dir, classes_file)
-            self.worker.finished.connect(self.on_conversion_complete)
-            self.worker.error.connect(self.on_conversion_error)
+            self.worker.finished.connect(self.on_voc_conversion_complete)
+            self.worker.error.connect(self.on_voc_conversion_error)
             self.worker.start()
         except Exception as e:
             self.parent.show_error(f"Conversion failed: {e}")
@@ -1215,68 +1326,669 @@ class FormatConversionTab(QWidget):
         import glob
         import xml.etree.ElementTree as ET
         import os
+        import shutil
+        from pathlib import Path
         
-        # Load classes
+        # determine if this is a full VOC dataset or just annotations directory
+        xml_path = Path(xml_dir)
+        is_full_voc = False
+        voc_root = xml_path
+        images_dir = xml_path  # default to same directory
+        
+        # check if this is standard VOC structure
+        if xml_path.name == "Annotations":
+            voc_root = xml_path.parent
+            if (voc_root / "JPEGImages").exists():
+                images_dir = voc_root / "JPEGImages"
+                is_full_voc = True
+            elif (voc_root / "images").exists():
+                images_dir = voc_root / "images"
+                is_full_voc = True
+        else:
+            # check if images directory exists in same parent
+            possible_img_dirs = ["JPEGImages", "images", "Images"]
+            for img_dir_name in possible_img_dirs:
+                candidate = xml_path.parent / img_dir_name
+                if candidate.exists():
+                    images_dir = candidate
+                    is_full_voc = True
+                    break
+        
+        print(f"processing XML directory: {xml_path}")
+        print(f"processing images directory: {images_dir}")
+        
+        # Load or auto-detect classes
         classes_dict = {}
-        with open(classes_file, 'r') as f:
-            for idx, line in enumerate(f.readlines()):
-                class_name = line.strip()
+        auto_detected_classes = set()
+        
+        if classes_file and os.path.exists(classes_file):
+            with open(classes_file, 'r') as f:
+                for idx, line in enumerate(f.readlines()):
+                    class_name = line.strip()
+                    if class_name:
+                        classes_dict[class_name] = idx
+            print(f"loaded {len(classes_dict)} classes from file: {classes_file}")
+        else:
+            print("auto-detecting classes from XML files...")
+            # auto-detect classes from XML files
+            xml_files = list(Path(xml_dir).glob('*.xml'))
+            print(f"found {len(xml_files)} XML files for class detection")
+            
+            for xml_file in xml_files:
+                try:
+                    tree = ET.parse(xml_file)
+                    for obj in tree.findall('object'):
+                        name_elem = obj.find('name')
+                        if name_elem is not None and name_elem.text:
+                            class_name = name_elem.text.strip()
+                            auto_detected_classes.add(class_name)
+                except Exception as e:
+                    print(f"warning: failed to parse {xml_file}: {e}")
+                    continue
+            
+            # create classes dictionary
+            for idx, class_name in enumerate(sorted(auto_detected_classes)):
                 classes_dict[class_name] = idx
-        
-        xml_files = glob.glob(os.path.join(xml_dir, "*.xml"))
-        converted_count = 0
-        
-        for xml_file in xml_files:
-            try:
-                # Parse XML
-                tree = ET.parse(xml_file)
-                size = tree.find('size')
-                width = int(size.find('width').text)
-                height = int(size.find('height').text)
                 
+            print(f"auto-detected {len(classes_dict)} classes: {', '.join(sorted(auto_detected_classes))}")
+        
+        if not classes_dict:
+            raise Exception("no classes found. either provide a classes file or ensure XML files contain class names")
+        
+        # create output directory structure - directly output to images/labels
+        if is_full_voc:
+            output_root = voc_root / "images"
+            labels_root = voc_root / "labels"
+        else:
+            output_root = xml_path.parent / "images"
+            labels_root = xml_path.parent / "labels"
+        
+        # create directories
+        output_root.mkdir(parents=True, exist_ok=True)
+        labels_root.mkdir(parents=True, exist_ok=True)
+        
+        # get all XML files
+        xml_files = list(Path(xml_dir).glob('*.xml'))
+        print(f"processing {len(xml_files)} XML files...")
+        
+        converted_count = 0
+        copied_images = 0
+        skipped_files = []
+        error_files = []
+        
+        for i, xml_file in enumerate(xml_files):
+            if i % 1000 == 0:
+                print(f"processed {i}/{len(xml_files)} files...")
+                
+            try:
+                # parse XML
+                tree = ET.parse(xml_file)
+                root = tree.getroot()
+                
+                # get image dimensions
+                size = root.find('size')
+                if size is None:
+                    error_files.append(f"{xml_file.name} (no size element)")
+                    continue
+                    
+                width_elem = size.find('width')
+                height_elem = size.find('height')
+                
+                if width_elem is None or height_elem is None:
+                    error_files.append(f"{xml_file.name} (missing width/height)")
+                    continue
+                    
+                try:
+                    width = int(width_elem.text)
+                    height = int(height_elem.text)
+                except (ValueError, TypeError):
+                    error_files.append(f"{xml_file.name} (invalid width/height values)")
+                    continue
+                
+                # STANDARD PASCAL VOC APPROACH: use filename from XML content
+                filename_elem = root.find('filename')
+                if filename_elem is None or not filename_elem.text:
+                    error_files.append(f"{xml_file.name} (missing filename element)")
+                    continue
+                
+                image_filename = filename_elem.text.strip()
+                image_path = images_dir / image_filename
+                
+                # verify image file exists exactly as specified in XML
+                if not image_path.exists():
+                    skipped_files.append(f"{xml_file.name} (image file not found: {image_filename})")
+                    continue
+                
+                # process annotations
                 lines = []
-                for obj in tree.findall('object'):
-                    class_name = obj.find('name').text
+                objects = root.findall('object')
+                
+                for obj in objects:
+                    name_elem = obj.find('name')
+                    if name_elem is None or not name_elem.text:
+                        continue
+                        
+                    class_name = name_elem.text.strip()
                     if class_name not in classes_dict:
+                        print(f"warning: unknown class '{class_name}' in {xml_file.name}, skipping object")
                         continue
                         
                     label = classes_dict[class_name]
                     bbox = obj.find('bndbox')
-                    x, y, x2, y2 = (
-                        int(bbox.find('xmin').text),
-                        int(bbox.find('ymin').text),
-                        int(bbox.find('xmax').text),
-                        int(bbox.find('ymax').text)
-                    )
                     
-                    # Convert to YOLO format
-                    cx = (x2 + x) * 0.5 / width
-                    cy = (y2 + y) * 0.5 / height
-                    w = (x2 - x) * 1. / width
-                    h = (y2 - y) * 1. / height
+                    if bbox is None:
+                        continue
+                        
+                    try:
+                        xmin = float(bbox.find('xmin').text)
+                        ymin = float(bbox.find('ymin').text)
+                        xmax = float(bbox.find('xmax').text)
+                        ymax = float(bbox.find('ymax').text)
+                    except (AttributeError, ValueError, TypeError):
+                        print(f"warning: invalid bbox in {xml_file.name}, skipping object")
+                        continue
+                    
+                    # convert to YOLO format (normalized center coordinates and dimensions)
+                    cx = (xmax + xmin) * 0.5 / width
+                    cy = (ymax + ymin) * 0.5 / height
+                    w = (xmax - xmin) / width
+                    h = (ymax - ymin) / height
+                    
+                    # clamp values to [0, 1] to handle any rounding errors
+                    cx = max(0.0, min(1.0, cx))
+                    cy = max(0.0, min(1.0, cy))
+                    w = max(0.0, min(1.0, w))
+                    h = max(0.0, min(1.0, h))
+                    
+                    # skip invalid boxes (width or height is 0)
+                    if w <= 0 or h <= 0:
+                        print(f"warning: invalid box dimensions in {xml_file.name}, skipping object")
+                        continue
                     
                     line = f"{label} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}\n"
                     lines.append(line)
                 
-                # Save YOLO format
-                txt_file = xml_file.replace(".xml", ".txt")
-                with open(txt_file, "w") as f:
+                # save YOLO format label file
+                label_filename = image_path.stem + ".txt"
+                label_path = labels_root / label_filename
+                
+                with open(label_path, "w", encoding='utf-8') as f:
                     f.writelines(lines)
+                
+                # copy image to output directory
+                dest_image_path = output_root / image_path.name
+                if not dest_image_path.exists():
+                    shutil.copy2(image_path, dest_image_path)
+                    copied_images += 1
                 
                 converted_count += 1
                 
             except Exception as e:
-                print(f"Error converting {xml_file}: {e}")
+                error_files.append(f"{xml_file.name} (error: {str(e)})")
+                print(f"error processing {xml_file.name}: {e}")
         
-        return f"Successfully converted {converted_count} XML files to YOLO format"
+        print(f"conversion completed. processed {converted_count}/{len(xml_files)} files")
+        
+        # create classes.txt file in parent directory
+        if is_full_voc:
+            classes_file_path = voc_root / "classes.txt"
+            data_yaml_path = voc_root / "data.yaml"
+        else:
+            classes_file_path = xml_path.parent / "classes.txt"
+            data_yaml_path = xml_path.parent / "data.yaml"
+            
+        with open(classes_file_path, 'w', encoding='utf-8') as f:
+            for class_name in sorted(classes_dict.keys(), key=lambda x: classes_dict[x]):
+                f.write(f"{class_name}\n")
+        
+        # create data.yaml file
+        with open(data_yaml_path, 'w', encoding='utf-8') as f:
+            f.write(f"path: {classes_file_path.parent.absolute()}\n")
+            f.write("train: images\n")
+            f.write("val: images\n")
+            f.write(f"nc: {len(classes_dict)}\n")
+            f.write("names:\n")
+            for idx, class_name in sorted([(v, k) for k, v in classes_dict.items()]):
+                f.write(f"  {idx}: {class_name}\n")
+        
+        # create summary
+        summary_lines = [
+            f"VOC to YOLO conversion completed:",
+            f"- processed {len(xml_files)} XML files",
+            f"- successfully converted {converted_count} files",
+            f"- copied {copied_images} unique images",
+            f"- found {len(classes_dict)} classes: {', '.join(sorted(classes_dict.keys()))}",
+            f"- output structure: images/ and labels/ directories",
+            f"- created files: classes.txt, data.yaml"
+        ]
+        
+        if skipped_files:
+            summary_lines.append(f"- skipped {len(skipped_files)} files (missing images)")
+            if len(skipped_files) <= 10:
+                for skipped in skipped_files:
+                    summary_lines.append(f"  • {skipped}")
+            else:
+                for skipped in skipped_files[:5]:
+                    summary_lines.append(f"  • {skipped}")
+                summary_lines.append(f"  • ... and {len(skipped_files) - 5} more")
+        
+        if error_files:
+            summary_lines.append(f"- {len(error_files)} files had errors")
+            if len(error_files) <= 10:
+                for error in error_files:
+                    summary_lines.append(f"  • {error}")
+            else:
+                for error in error_files[:5]:
+                    summary_lines.append(f"  • {error}")
+                summary_lines.append(f"  • ... and {len(error_files) - 5} more")
+        
+        if not classes_file and auto_detected_classes:
+            summary_lines.append(f"- auto-detected classes: {', '.join(sorted(auto_detected_classes))}")
+        
+        # final validation
+        total_issues = len(skipped_files) + len(error_files)
+        if total_issues == 0:
+            summary_lines.append("✓ all files processed successfully!")
+        elif converted_count > 0:
+            success_rate = (converted_count / len(xml_files)) * 100
+            summary_lines.append(f"success rate: {success_rate:.1f}%")
+        
+        return "\n".join(summary_lines)
     
-    def on_conversion_complete(self, result):
-        self.convert_btn.setEnabled(True)
+    def convert_yolo_to_voc(self):
+        yolo_dataset = self.yolo_dataset_edit.text().strip()
+        classes_file = self.yolo_classes_file_edit.text().strip()
+        
+        if not yolo_dataset:
+            self.parent.show_error("Please specify YOLO dataset directory")
+            return
+            
+        if not classes_file:
+            self.parent.show_error("Please specify classes file for YOLO to VOC conversion")
+            return
+        
+        try:
+            self.yolo_to_voc_btn.setEnabled(False)
+            self.worker = WorkerThread(self._do_yolo_conversion, yolo_dataset, classes_file)
+            self.worker.finished.connect(self.on_yolo_conversion_complete)
+            self.worker.error.connect(self.on_yolo_conversion_error)
+            self.worker.start()
+        except Exception as e:
+            self.parent.show_error(f"Conversion failed: {e}")
+    
+    def _do_yolo_conversion(self, yolo_dataset, classes_file):
+        import os
+        import xml.etree.ElementTree as ET
+        from pathlib import Path
+        from PIL import Image
+        import xml.dom.minidom
+        
+        dataset_path = Path(yolo_dataset)
+        
+        # find images and labels directories
+        images_dir = None
+        labels_dir = None
+        
+        # check for standard YOLO structure
+        if (dataset_path / "images").exists():
+            images_dir = dataset_path / "images"
+        elif (dataset_path / "train" / "images").exists():
+            images_dir = dataset_path / "train" / "images"
+        else:
+            # look for any directory containing images
+            for subdir in dataset_path.iterdir():
+                if subdir.is_dir():
+                    image_files = list(subdir.glob("*.jpg")) + list(subdir.glob("*.jpeg")) + list(subdir.glob("*.png"))
+                    if image_files:
+                        images_dir = subdir
+                        break
+        
+        if (dataset_path / "labels").exists():
+            labels_dir = dataset_path / "labels"
+        elif (dataset_path / "train" / "labels").exists():
+            labels_dir = dataset_path / "train" / "labels"
+        else:
+            # look for directory containing .txt files
+            for subdir in dataset_path.iterdir():
+                if subdir.is_dir():
+                    txt_files = list(subdir.glob("*.txt"))
+                    if txt_files:
+                        labels_dir = subdir
+                        break
+        
+        if not images_dir or not images_dir.exists():
+            raise Exception(f"images directory not found in {yolo_dataset}")
+        
+        if not labels_dir or not labels_dir.exists():
+            raise Exception(f"labels directory not found in {yolo_dataset}")
+        
+        print(f"processing YOLO dataset: {dataset_path}")
+        print(f"images directory: {images_dir}")
+        print(f"labels directory: {labels_dir}")
+        
+        # load classes
+        classes = []
+        if not os.path.exists(classes_file):
+            raise Exception(f"classes file not found: {classes_file}")
+            
+        with open(classes_file, 'r', encoding='utf-8') as f:
+            for line in f.readlines():
+                class_name = line.strip()
+                if class_name:
+                    classes.append(class_name)
+        
+        print(f"loaded {len(classes)} classes: {', '.join(classes)}")
+        
+        if not classes:
+            raise Exception("no classes found in classes file")
+        
+        # create output directories
+        output_root = dataset_path / "VOC_Dataset"
+        voc_annotations_dir = output_root / "Annotations"
+        voc_images_dir = output_root / "JPEGImages"
+        voc_imagesets_dir = output_root / "ImageSets" / "Main"
+        
+        voc_annotations_dir.mkdir(parents=True, exist_ok=True)
+        voc_images_dir.mkdir(parents=True, exist_ok=True)
+        voc_imagesets_dir.mkdir(parents=True, exist_ok=True)
+        
+        # get all image files
+        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp']
+        image_files = []
+        for ext in image_extensions:
+            image_files.extend(images_dir.glob(f'*{ext}'))
+            image_files.extend(images_dir.glob(f'*{ext.upper()}'))
+        
+        print(f"found {len(image_files)} image files")
+        
+        converted_count = 0
+        copied_images = 0
+        skipped_files = []
+        error_files = []
+        all_image_names = []
+        
+        for i, image_file in enumerate(image_files):
+            if i % 1000 == 0:
+                print(f"processed {i}/{len(image_files)} files...")
+            
+            try:
+                # get corresponding label file
+                label_file = labels_dir / (image_file.stem + ".txt")
+                
+                if not label_file.exists():
+                    # create empty XML for images without labels
+                    try:
+                        with Image.open(image_file) as img:
+                            width, height = img.size
+                        
+                        # create empty XML
+                        xml_content = self._create_voc_xml(
+                            image_file.name, width, height, [], classes
+                        )
+                        
+                        xml_file = voc_annotations_dir / (image_file.stem + ".xml")
+                        with open(xml_file, 'w', encoding='utf-8') as f:
+                            f.write(xml_content)
+                        
+                        # copy image
+                        dest_image = voc_images_dir / image_file.name
+                        if not dest_image.exists():
+                            import shutil
+                            shutil.copy2(image_file, dest_image)
+                            copied_images += 1
+                        
+                        all_image_names.append(image_file.stem)
+                        converted_count += 1
+                        continue
+                        
+                    except Exception as e:
+                        error_files.append(f"{image_file.name} (no label, failed to get image size: {e})")
+                        continue
+                
+                # read image dimensions
+                try:
+                    with Image.open(image_file) as img:
+                        width, height = img.size
+                except Exception as e:
+                    error_files.append(f"{image_file.name} (failed to read image: {e})")
+                    continue
+                
+                # read YOLO annotations
+                objects = []
+                try:
+                    with open(label_file, 'r', encoding='utf-8') as f:
+                        for line_num, line in enumerate(f, 1):
+                            line = line.strip()
+                            if not line:
+                                continue
+                            
+                            parts = line.split()
+                            if len(parts) != 5:
+                                print(f"warning: invalid annotation format in {label_file.name}, line {line_num}")
+                                continue
+                            
+                            try:
+                                class_id = int(parts[0])
+                                if class_id >= len(classes) or class_id < 0:
+                                    print(f"warning: invalid class ID {class_id} in {label_file.name}")
+                                    continue
+                                
+                                cx, cy, w, h = map(float, parts[1:5])
+                                
+                                # convert from YOLO format to VOC format
+                                # YOLO: normalized center coordinates and dimensions
+                                # VOC: absolute pixel coordinates (xmin, ymin, xmax, ymax)
+                                xmin = int((cx - w/2) * width)
+                                ymin = int((cy - h/2) * height)
+                                xmax = int((cx + w/2) * width)
+                                ymax = int((cy + h/2) * height)
+                                
+                                # clamp to image boundaries
+                                xmin = max(0, min(width-1, xmin))
+                                ymin = max(0, min(height-1, ymin))
+                                xmax = max(1, min(width, xmax))
+                                ymax = max(1, min(height, ymax))
+                                
+                                # skip invalid boxes
+                                if xmax <= xmin or ymax <= ymin:
+                                    print(f"warning: invalid box dimensions in {label_file.name}, line {line_num}")
+                                    continue
+                                
+                                objects.append({
+                                    'class': classes[class_id],
+                                    'xmin': xmin,
+                                    'ymin': ymin,
+                                    'xmax': xmax,
+                                    'ymax': ymax
+                                })
+                                
+                            except (ValueError, IndexError) as e:
+                                print(f"warning: invalid annotation in {label_file.name}, line {line_num}: {e}")
+                                continue
+                                
+                except Exception as e:
+                    error_files.append(f"{image_file.name} (failed to read labels: {e})")
+                    continue
+                
+                # create VOC XML
+                xml_content = self._create_voc_xml(
+                    image_file.name, width, height, objects, classes
+                )
+                
+                # save XML file
+                xml_file = voc_annotations_dir / (image_file.stem + ".xml")
+                with open(xml_file, 'w', encoding='utf-8') as f:
+                    f.write(xml_content)
+                
+                # copy image
+                dest_image = voc_images_dir / image_file.name
+                if not dest_image.exists():
+                    import shutil
+                    shutil.copy2(image_file, dest_image)
+                    copied_images += 1
+                
+                all_image_names.append(image_file.stem)
+                converted_count += 1
+                
+            except Exception as e:
+                error_files.append(f"{image_file.name} (error: {str(e)})")
+                print(f"error processing {image_file.name}: {e}")
+        
+        print(f"conversion completed. processed {converted_count}/{len(image_files)} files")
+        
+        # create ImageSets files
+        train_file = voc_imagesets_dir / "train.txt"
+        val_file = voc_imagesets_dir / "val.txt"
+        trainval_file = voc_imagesets_dir / "trainval.txt"
+        
+        with open(trainval_file, 'w', encoding='utf-8') as f:
+            for name in sorted(all_image_names):
+                f.write(f"{name}\n")
+        
+        # split 80/20 for train/val
+        import random
+        random.seed(42)
+        shuffled_names = all_image_names.copy()
+        random.shuffle(shuffled_names)
+        
+        split_idx = int(len(shuffled_names) * 0.8)
+        train_names = shuffled_names[:split_idx]
+        val_names = shuffled_names[split_idx:]
+        
+        with open(train_file, 'w', encoding='utf-8') as f:
+            for name in sorted(train_names):
+                f.write(f"{name}\n")
+        
+        with open(val_file, 'w', encoding='utf-8') as f:
+            for name in sorted(val_names):
+                f.write(f"{name}\n")
+        
+        # create summary
+        summary_lines = [
+            f"YOLO to VOC conversion completed:",
+            f"- processed {len(image_files)} image files",
+            f"- successfully converted {converted_count} files",
+            f"- copied {copied_images} unique images",
+            f"- used {len(classes)} classes: {', '.join(classes)}",
+            f"- output directory: {output_root}",
+            f"- created: Annotations/, JPEGImages/, ImageSets/",
+            f"- train/val split: {len(train_names)}/{len(val_names)} files"
+        ]
+        
+        if skipped_files:
+            summary_lines.append(f"- skipped {len(skipped_files)} files")
+            if len(skipped_files) <= 10:
+                for skipped in skipped_files:
+                    summary_lines.append(f"  • {skipped}")
+            else:
+                for skipped in skipped_files[:5]:
+                    summary_lines.append(f"  • {skipped}")
+                summary_lines.append(f"  • ... and {len(skipped_files) - 5} more")
+        
+        if error_files:
+            summary_lines.append(f"- {len(error_files)} files had errors")
+            if len(error_files) <= 10:
+                for error in error_files:
+                    summary_lines.append(f"  • {error}")
+            else:
+                for error in error_files[:5]:
+                    summary_lines.append(f"  • {error}")
+                summary_lines.append(f"  • ... and {len(error_files) - 5} more")
+        
+        # final validation
+        total_issues = len(skipped_files) + len(error_files)
+        if total_issues == 0:
+            summary_lines.append("✓ all files processed successfully!")
+        elif converted_count > 0:
+            success_rate = (converted_count / len(image_files)) * 100
+            summary_lines.append(f"success rate: {success_rate:.1f}%")
+        
+        return "\n".join(summary_lines)
+    
+    def _create_voc_xml(self, filename, width, height, objects, classes):
+        """Create VOC format XML content"""
+        import xml.etree.ElementTree as ET
+        import xml.dom.minidom
+        
+        # create root element
+        root = ET.Element('annotation')
+        
+        # folder
+        folder = ET.SubElement(root, 'folder')
+        folder.text = 'VOC_Dataset'
+        
+        # filename
+        filename_elem = ET.SubElement(root, 'filename')
+        filename_elem.text = filename
+        
+        # path (optional)
+        path = ET.SubElement(root, 'path')
+        path.text = filename
+        
+        # source
+        source = ET.SubElement(root, 'source')
+        database = ET.SubElement(source, 'database')
+        database.text = 'Unknown'
+        
+        # size
+        size = ET.SubElement(root, 'size')
+        width_elem = ET.SubElement(size, 'width')
+        width_elem.text = str(width)
+        height_elem = ET.SubElement(size, 'height')
+        height_elem.text = str(height)
+        depth = ET.SubElement(size, 'depth')
+        depth.text = '3'
+        
+        # segmented
+        segmented = ET.SubElement(root, 'segmented')
+        segmented.text = '0'
+        
+        # objects
+        for obj in objects:
+            object_elem = ET.SubElement(root, 'object')
+            
+            name = ET.SubElement(object_elem, 'name')
+            name.text = obj['class']
+            
+            pose = ET.SubElement(object_elem, 'pose')
+            pose.text = 'Unspecified'
+            
+            truncated = ET.SubElement(object_elem, 'truncated')
+            truncated.text = '0'
+            
+            difficult = ET.SubElement(object_elem, 'difficult')
+            difficult.text = '0'
+            
+            bndbox = ET.SubElement(object_elem, 'bndbox')
+            xmin = ET.SubElement(bndbox, 'xmin')
+            xmin.text = str(obj['xmin'])
+            ymin = ET.SubElement(bndbox, 'ymin')
+            ymin.text = str(obj['ymin'])
+            xmax = ET.SubElement(bndbox, 'xmax')
+            xmax.text = str(obj['xmax'])
+            ymax = ET.SubElement(bndbox, 'ymax')
+            ymax.text = str(obj['ymax'])
+        
+        # convert to pretty XML string
+        rough_string = ET.tostring(root, 'unicode')
+        reparsed = xml.dom.minidom.parseString(rough_string)
+        return reparsed.toprettyxml(indent="  ", encoding=None)
+    
+    def on_voc_conversion_complete(self, result):
+        self.voc_to_yolo_btn.setEnabled(True)
         self.conversion_results.setText(result)
     
-    def on_conversion_error(self, error_msg):
-        self.convert_btn.setEnabled(True)
-        self.parent.show_error(f"Conversion failed: {error_msg}")
+    def on_voc_conversion_error(self, error_msg):
+        self.voc_to_yolo_btn.setEnabled(True)
+        self.parent.show_error(f"VOC Conversion failed: {error_msg}")
+    
+    def on_yolo_conversion_complete(self, result):
+        self.yolo_to_voc_btn.setEnabled(True)
+        self.conversion_results.setText(result)
+    
+    def on_yolo_conversion_error(self, error_msg):
+        self.yolo_to_voc_btn.setEnabled(True)
+        self.parent.show_error(f"YOLO Conversion failed: {error_msg}")
 
 # Dataset Management Tab - dataset reduction, completion, and class replacement
 class DatasetManagementTab(QWidget):
@@ -1457,6 +2169,80 @@ class DatasetManagementTab(QWidget):
         class_replace_group.setLayout(class_replace_layout)
         layout.addWidget(class_replace_group)
         
+        # Class Removal Tool
+        class_remove_group = QGroupBox("Class ID Removal Tool")
+        class_remove_group.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        class_remove_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #cccccc;
+                border-radius: 5px;
+                margin-top: 1ex;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+            }
+        """)
+        class_remove_layout = QFormLayout()
+        class_remove_layout.setVerticalSpacing(12)
+        
+        # Dataset directory for class removal
+        self.remove_class_dataset_edit = QLineEdit()
+        self.remove_class_dataset_edit.setFont(QFont("Arial", 11))
+        self.remove_class_dataset_browse = QPushButton("Browse...")
+        self.remove_class_dataset_browse.setFont(QFont("Arial", 11))
+        self.remove_class_dataset_browse.clicked.connect(self.browse_remove_class_dataset)
+        remove_class_dataset_row = QHBoxLayout()
+        remove_class_dataset_row.addWidget(self.remove_class_dataset_edit)
+        remove_class_dataset_row.addWidget(self.remove_class_dataset_browse)
+        class_remove_layout.addRow("Dataset Directory:", remove_class_dataset_row)
+        
+        # Class ID to remove
+        self.remove_class_id_spin = QSpinBox()
+        self.remove_class_id_spin.setRange(0, 100)
+        self.remove_class_id_spin.setValue(1)
+        class_remove_layout.addRow("Class ID to Remove:", self.remove_class_id_spin)
+        
+        class_remove_group.setLayout(class_remove_layout)
+        layout.addWidget(class_remove_group)
+        
+        # Cleanup Orphaned Labels Tool
+        cleanup_group = QGroupBox("Cleanup Orphaned Labels")
+        cleanup_group.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        cleanup_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #cccccc;
+                border-radius: 5px;
+                margin-top: 1ex;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+            }
+        """)
+        cleanup_layout = QFormLayout()
+        cleanup_layout.setVerticalSpacing(12)
+        
+        # Dataset directory for cleanup
+        self.cleanup_dataset_edit = QLineEdit()
+        self.cleanup_dataset_edit.setFont(QFont("Arial", 11))
+        self.cleanup_dataset_browse = QPushButton("Browse...")
+        self.cleanup_dataset_browse.setFont(QFont("Arial", 11))
+        self.cleanup_dataset_browse.clicked.connect(self.browse_cleanup_dataset)
+        cleanup_dataset_row = QHBoxLayout()
+        cleanup_dataset_row.addWidget(self.cleanup_dataset_edit)
+        cleanup_dataset_row.addWidget(self.cleanup_dataset_browse)
+        cleanup_layout.addRow("Dataset Directory:", cleanup_dataset_row)
+        
+        cleanup_group.setLayout(cleanup_layout)
+        layout.addWidget(cleanup_group)
+        
         # Action buttons
         buttons_layout = QHBoxLayout()
         
@@ -1563,6 +2349,58 @@ class DatasetManagementTab(QWidget):
         """)
         self.replace_btn.clicked.connect(self.replace_class_ids)
         buttons_layout.addWidget(self.replace_btn)
+        
+        # Remove class ID button
+        self.remove_class_btn = QPushButton("Remove Class ID")
+        self.remove_class_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.remove_class_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #F44336;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #D32F2F;
+            }
+            QPushButton:pressed {
+                background-color: #B71C1C;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.remove_class_btn.clicked.connect(self.remove_class_id)
+        buttons_layout.addWidget(self.remove_class_btn)
+        
+        # Cleanup orphaned labels button
+        self.cleanup_btn = QPushButton("Cleanup Orphaned Labels")
+        self.cleanup_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.cleanup_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #E91E63;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #C2185B;
+            }
+            QPushButton:pressed {
+                background-color: #AD1457;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.cleanup_btn.clicked.connect(self.cleanup_orphaned_labels)
+        buttons_layout.addWidget(self.cleanup_btn)
         
         layout.addLayout(buttons_layout)
         
@@ -1684,6 +2522,16 @@ class DatasetManagementTab(QWidget):
         if directory:
             self.replace_dataset_edit.setText(directory)
     
+    def browse_remove_class_dataset(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Dataset Directory for Class Removal")
+        if directory:
+            self.remove_class_dataset_edit.setText(directory)
+    
+    def browse_cleanup_dataset(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Dataset Directory for Cleanup")
+        if directory:
+            self.cleanup_dataset_edit.setText(directory)
+    
     def complete_dataset(self):
         """Create empty label files for images that don't have corresponding labels"""
         dataset_dir = self.complete_dataset_edit.text().strip()
@@ -1702,35 +2550,79 @@ class DatasetManagementTab(QWidget):
             self.parent.show_error(f"Dataset completion failed: {e}")
     
     def _do_dataset_completion(self, dataset_dir):
-        """Create empty txt files for images without corresponding labels"""
+        """Create empty txt files for images without corresponding labels.
+        supports both simple (images/labels) and standard YOLO (train|val|test)/(images|labels) structure
+        """
         import os
+        from pathlib import Path
         
-        images_dir = os.path.join(dataset_dir, 'images')
-        labels_dir = os.path.join(dataset_dir, 'labels')
+        def find_dataset_structure(root_dir):
+            """detect dataset structure and return available splits"""
+            root = Path(root_dir)
+            structure = {}
+            
+            # check for standard YOLO structure
+            for split in ['train', 'val', 'test']:
+                split_dir = root / split
+                if split_dir.exists():
+                    images_dir = split_dir / 'images'
+                    if images_dir.exists():
+                        labels_dir = split_dir / 'labels'
+                        structure[split] = {'images': images_dir, 'labels': labels_dir}
+            
+            # fallback: check for direct images/labels structure
+            if not structure:
+                images_dir = root / 'images'
+                if images_dir.exists():
+                    labels_dir = root / 'labels'
+                    structure['main'] = {'images': images_dir, 'labels': labels_dir}
+            
+            return structure
         
-        if not os.path.exists(images_dir):
-            raise Exception(f"Images directory not found: {images_dir}")
+        dataset_structure = find_dataset_structure(dataset_dir)
         
-        if not os.path.exists(labels_dir):
-            os.makedirs(labels_dir)
+        if not dataset_structure:
+            raise Exception("no valid dataset structure found (expected images/ directory or train|val|test/images/)")
         
-        created_count = 0
-        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif']
+        total_created = 0
+        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp']
+        split_stats = {}
         
-        # Get all image files
-        for filename in os.listdir(images_dir):
-            if any(filename.lower().endswith(ext) for ext in image_extensions):
-                # Get the base name without extension
-                base_name = os.path.splitext(filename)[0]
-                label_path = os.path.join(labels_dir, base_name + '.txt')
-                
-                # Create empty label file if it doesn't exist
-                if not os.path.exists(label_path):
-                    with open(label_path, 'w') as f:
-                        pass  # Create empty file
-                    created_count += 1
+        # process each split
+        for split, dirs in dataset_structure.items():
+            images_dir = dirs['images']
+            labels_dir = dirs['labels']
+            
+            # create labels directory if it doesn't exist
+            if not labels_dir.exists():
+                labels_dir.mkdir(parents=True, exist_ok=True)
+            
+            created_count = 0
+            
+            # get all image files
+            for filename in os.listdir(images_dir):
+                if any(filename.lower().endswith(ext) for ext in image_extensions):
+                    # get the base name without extension
+                    base_name = os.path.splitext(filename)[0]
+                    label_path = labels_dir / f"{base_name}.txt"
+                    
+                    # create empty label file if it doesn't exist
+                    if not label_path.exists():
+                        with open(label_path, 'w') as f:
+                            pass  # create empty file
+                        created_count += 1
+            
+            split_stats[split] = created_count
+            total_created += created_count
         
-        return f"Created {created_count} empty label files for unlabeled images"
+        # create summary message
+        if len(split_stats) == 1 and 'main' in split_stats:
+            return f"created {total_created} empty label files for unlabeled images"
+        else:
+            summary_lines = [f"created {total_created} empty label files across splits:"]
+            for split, count in split_stats.items():
+                summary_lines.append(f"  - {split}: {count} files")
+            return "\n".join(summary_lines)
     
     def on_completion_complete(self, result):
         self.complete_btn.setEnabled(True)
@@ -1853,6 +2745,203 @@ class DatasetManagementTab(QWidget):
     def on_merge_error(self, error_msg):
         self.merge_btn.setEnabled(True)
         self.parent.show_error(f"Merge failed: {error_msg}")
+    
+    def cleanup_orphaned_labels(self):
+        """Remove label files that don't have corresponding image files"""
+        dataset_dir = self.cleanup_dataset_edit.text().strip()
+        
+        if not dataset_dir:
+            self.parent.show_error("Please specify dataset directory")
+            return
+        
+        try:
+            self.cleanup_btn.setEnabled(False)
+            self.worker = WorkerThread(self._do_orphaned_labels_cleanup, dataset_dir)
+            self.worker.finished.connect(self.on_cleanup_complete)
+            self.worker.error.connect(self.on_cleanup_error)
+            self.worker.start()
+        except Exception as e:
+            self.parent.show_error(f"Cleanup failed: {e}")
+    
+    def _do_orphaned_labels_cleanup(self, dataset_dir):
+        """Remove label files that don't have corresponding image files"""
+        import os
+        
+        labels_dir = os.path.join(dataset_dir, 'labels')
+        images_dir = os.path.join(dataset_dir, 'images')
+        
+        if not os.path.exists(labels_dir):
+            raise Exception(f"Labels directory not found: {labels_dir}")
+        
+        if not os.path.exists(images_dir):
+            raise Exception(f"Images directory not found: {images_dir}")
+        
+        removed_count = 0
+        total_labels = 0
+        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp']
+        
+        # Get all existing image files (without extension) for quick lookup
+        existing_images = set()
+        for filename in os.listdir(images_dir):
+            if any(filename.lower().endswith(ext) for ext in image_extensions):
+                base_name = os.path.splitext(filename)[0]
+                existing_images.add(base_name)
+        
+        # Check each label file
+        for filename in os.listdir(labels_dir):
+            if not filename.endswith('.txt'):
+                continue
+                
+            total_labels += 1
+            base_name = os.path.splitext(filename)[0]
+            
+            # If no corresponding image exists, remove the label file
+            if base_name not in existing_images:
+                label_path = os.path.join(labels_dir, filename)
+                try:
+                    os.remove(label_path)
+                    removed_count += 1
+                except Exception as e:
+                    print(f"Error removing {label_path}: {e}")
+        
+        return f"Removed {removed_count} orphaned label files out of {total_labels} total labels"
+    
+    def on_cleanup_complete(self, result):
+        self.cleanup_btn.setEnabled(True)
+        self.advanced_results.setText(result)
+    
+    def on_cleanup_error(self, error_msg):
+        self.cleanup_btn.setEnabled(True)
+        self.parent.show_error(f"Cleanup failed: {error_msg}")
+    
+    def remove_class_id(self):
+        """Remove all label lines with the specified class ID from the dataset"""
+        dataset_dir = self.remove_class_dataset_edit.text().strip()
+        class_id = self.remove_class_id_spin.value()
+        
+        if not dataset_dir:
+            self.parent.show_error("please specify dataset directory")
+            return
+        
+        try:
+            self.remove_class_btn.setEnabled(False)
+            self.worker = WorkerThread(self._do_class_removal, dataset_dir, class_id)
+            self.worker.finished.connect(self.on_class_removal_complete)
+            self.worker.error.connect(self.on_class_removal_error)
+            self.worker.start()
+        except Exception as e:
+            self.parent.show_error(f"class removal failed: {e}")
+    
+    def _do_class_removal(self, dataset_dir, class_id):
+        """Remove all annotation lines with the specified class ID from YOLO label files
+        Keep empty label files as background samples instead of deleting them
+        """
+        import os
+        from pathlib import Path
+        
+        dataset_path = Path(dataset_dir)
+        
+        # find labels directory - support multiple structures
+        possible_label_dirs = [
+            dataset_path / "labels",
+            dataset_path / "train" / "labels",
+            dataset_path / "val" / "labels",
+            dataset_path / "test" / "labels"
+        ]
+        
+        found_dirs = []
+        for label_dir in possible_label_dirs:
+            if label_dir.exists() and any(label_dir.glob("*.txt")):
+                found_dirs.append(label_dir)
+        
+        if not found_dirs:
+            raise Exception(f"no label directories found in dataset: {dataset_dir}")
+        
+        total_files_processed = 0
+        total_lines_removed = 0
+        files_became_empty = 0
+        
+        for labels_dir in found_dirs:
+            print(f"processing labels directory: {labels_dir}")
+            
+            for label_file in labels_dir.glob("*.txt"):
+                try:
+                    # read all lines
+                    with open(label_file, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                    
+                    original_line_count = len([line for line in lines if line.strip()])
+                    
+                    # filter out lines with the target class ID
+                    filtered_lines = []
+                    lines_removed_in_file = 0
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if not line:
+                            continue  # skip empty lines
+                        
+                        parts = line.split()
+                        if len(parts) >= 5:  # valid YOLO format
+                            try:
+                                line_class_id = int(parts[0])
+                                if line_class_id != class_id:
+                                    filtered_lines.append(line)
+                                else:
+                                    lines_removed_in_file += 1
+                            except ValueError:
+                                # keep lines with invalid class ID format
+                                filtered_lines.append(line)
+                        else:
+                            # keep lines with invalid format
+                            filtered_lines.append(line)
+                    
+                    # update counters
+                    total_lines_removed += lines_removed_in_file
+                    
+                    # always write back to file (even if empty)
+                    with open(label_file, 'w', encoding='utf-8') as f:
+                        if filtered_lines:
+                            for line in filtered_lines:
+                                f.write(line + '\n')
+                        # if no filtered_lines, create empty file (background sample)
+                    
+                    # track files that became empty (now background samples)
+                    if original_line_count > 0 and len(filtered_lines) == 0:
+                        files_became_empty += 1
+                        print(f"file {label_file.name} became empty - now a background sample")
+                    
+                    total_files_processed += 1
+                    
+                except Exception as e:
+                    print(f"error processing {label_file}: {e}")
+                    continue
+        
+        # create summary
+        summary_lines = [
+            f"class ID removal completed:",
+            f"- processed {total_files_processed} label files",
+            f"- removed {total_lines_removed} annotation lines with class ID {class_id}",
+            f"- {files_became_empty} files became empty (preserved as background samples)",
+            f"- processed directories: {', '.join([str(d) for d in found_dirs])}"
+        ]
+        
+        if total_lines_removed == 0:
+            summary_lines.append(f"⚠ no annotations found with class ID {class_id}")
+        else:
+            summary_lines.append(f"✓ successfully removed all instances of class ID {class_id}")
+            if files_became_empty > 0:
+                summary_lines.append(f"✓ preserved {files_became_empty} images as background samples")
+        
+        return "\n".join(summary_lines)
+    
+    def on_class_removal_complete(self, result):
+        self.remove_class_btn.setEnabled(True)
+        self.advanced_results.setText(result)
+    
+    def on_class_removal_error(self, error_msg):
+        self.remove_class_btn.setEnabled(True)
+        self.parent.show_error(f"class removal failed: {error_msg}")
 
 class MainWindow(QMainWindow):
     def __init__(self):

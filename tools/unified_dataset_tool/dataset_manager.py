@@ -151,42 +151,44 @@ class DatasetManager:
     
     @staticmethod
     def merge_yolo_datasets(source_a: str, source_b: str, output_dir: str) -> str:
-        """merge two YOLO-format datasets into a new folder.
-        expected structure for each source: <root>/(images|labels)
-        - copies images and matching labels
-        - on filename conflicts, keeps existing file and renames the incoming one with a numeric suffix
-        - if a label exists but the image is missing, the label is ignored
-        - empty label files are preserved as empty for completeness
+        """merge two standard YOLO-format datasets into a new dataset.
+        expected structure for each source: <root>/(train|val)/(images|labels)
+        output structure: <root>/(train|val)/(images|labels) + data.yaml
+        - merges both train and val splits from both datasets
+        - on filename conflicts, renames files with suffix to avoid overwrites
+        - creates data.yaml config file for the merged dataset
+        - preserves class information from source datasets
         returns a human-readable summary
         """
         from pathlib import Path
         import shutil
+        import yaml
+        import random
         
-        def resolve_subdir(root: Path, sub: str) -> Path:
-            candidates = [
-                root / sub,
-                root / f"train/{sub}",
-                root / f"val/{sub}",
-            ]
-            for c in candidates:
-                if c.exists():
-                    return c
-            return root / sub
+        def find_dataset_structure(root: Path) -> dict:
+            """detect dataset structure and return available splits"""
+            structure = {}
+            # check for standard YOLO structure
+            for split in ['train', 'val', 'test']:
+                split_dir = root / split
+                if split_dir.exists():
+                    images_dir = split_dir / 'images'
+                    labels_dir = split_dir / 'labels'
+                    if images_dir.exists() and labels_dir.exists():
+                        structure[split] = {'images': images_dir, 'labels': labels_dir}
+            
+            # fallback: check for direct images/labels structure
+            if not structure:
+                images_dir = root / 'images'
+                labels_dir = root / 'labels'
+                if images_dir.exists() and labels_dir.exists():
+                    structure['train'] = {'images': images_dir, 'labels': labels_dir}
+            
+            return structure
         
-        src_a = Path(source_a)
-        src_b = Path(source_b)
-        out_root = Path(output_dir)
-        out_images = out_root / 'images'
-        out_labels = out_root / 'labels'
-        out_images.mkdir(parents=True, exist_ok=True)
-        out_labels.mkdir(parents=True, exist_ok=True)
-        
-        srcs = [
-            (src_a, resolve_subdir(src_a, 'images'), resolve_subdir(src_a, 'labels'), 'a'),
-            (src_b, resolve_subdir(src_b, 'images'), resolve_subdir(src_b, 'labels'), 'b'),
-        ]
         
         def next_available_name(dest_dir: Path, base_name: str, suffix_tag: str) -> str:
+            """generate unique filename to avoid conflicts"""
             stem = Path(base_name).stem
             ext = Path(base_name).suffix
             candidate = f"{stem}{ext}"
@@ -196,62 +198,139 @@ class DatasetManager:
                 idx += 1
             return candidate
         
-        def copy_pair(img_path: Path, lbl_dir: Path, tag: str) -> Tuple[str, bool]:
-            nonlocal copied_images, copied_labels, skipped_duplicates
-            target_name = next_available_name(out_images, img_path.name, tag)
-            dest_img = out_images / target_name
-            shutil.copy2(img_path, dest_img)
-            copied_images += 1
+        def copy_image_label_pair(img_path: Path, src_labels_dir: Path, 
+                                dest_images_dir: Path, dest_labels_dir: Path, 
+                                tag: str) -> Tuple[bool, bool]:
+            """copy image and its corresponding label file"""
+            nonlocal total_images, total_labels
             
-            # corresponding label
+            # determine target filename
+            target_name = img_path.name
+            if (dest_images_dir / target_name).exists():
+                target_name = next_available_name(dest_images_dir, img_path.name, tag)
+            
+            # copy image
+            dest_img = dest_images_dir / target_name
+            shutil.copy2(img_path, dest_img)
+            total_images += 1
+            
+            # copy corresponding label if exists
             base_stem = img_path.stem
-            src_label_path = lbl_dir / f"{base_stem}.txt"
+            src_label_path = src_labels_dir / f"{base_stem}.txt"
+            copied_label = False
+            
             if src_label_path.exists():
-                # ensure label name matches image target name
                 target_stem = Path(target_name).stem
-                dest_label = out_labels / f"{target_stem}.txt"
-                # write label (could be empty)
+                dest_label = dest_labels_dir / f"{target_stem}.txt"
                 shutil.copy2(src_label_path, dest_label)
-                copied_labels += 1
-                return target_name, True
-            return target_name, False
+                total_labels += 1
+                copied_label = True
+            
+            return True, copied_label
         
-        copied_images = 0
-        copied_labels = 0
-        skipped_duplicates = 0
+        # initialize counters
+        total_images = 0
+        total_labels = 0
         
-        # copy from both sources
+        # setup paths
+        src_a = Path(source_a)
+        src_b = Path(source_b)
+        out_root = Path(output_dir)
+        out_root.mkdir(parents=True, exist_ok=True)
+        
+        # detect dataset structures
+        struct_a = find_dataset_structure(src_a)
+        struct_b = find_dataset_structure(src_b)
+        
+        if not struct_a and not struct_b:
+            raise Exception("no valid YOLO dataset structure found in either source")
+        
+        logger.info(f"source A structure: {list(struct_a.keys())}")
+        logger.info(f"source B structure: {list(struct_b.keys())}")
+        
+        # get all available splits from both datasets
+        all_splits = set(struct_a.keys()) | set(struct_b.keys())
+        split_stats = {}
+        
         image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp'}
-        for root, img_dir, lbl_dir, tag in srcs:
-            if not img_dir.exists():
-                continue
-            for p in sorted(img_dir.iterdir()):
-                if p.is_file() and p.suffix.lower() in image_exts:
-                    # if filename not taken, keep original name; else resolve
-                    desired_name = p.name
-                    if not (out_images / desired_name).exists():
-                        # try to copy keeping the same name
-                        dest_img = out_images / desired_name
-                        shutil.copy2(p, dest_img)
-                        copied_images += 1
-                        # labels
-                        src_label_path = lbl_dir / f"{p.stem}.txt"
-                        if src_label_path.exists():
-                            dest_label = out_labels / f"{p.stem}.txt"
-                            shutil.copy2(src_label_path, dest_label)
-                            copied_labels += 1
-                    else:
-                        # conflict, choose a new name with suffix
-                        copy_pair(p, lbl_dir, tag)
         
-        summary = (
-            f"merge completed:\n"
-            f"- source a: {src_a}\n"
-            f"- source b: {src_b}\n"
-            f"- output: {out_root}\n"
-            f"- images copied: {copied_images}\n"
-            f"- labels copied: {copied_labels}"
-        )
+        # process each split
+        for split in all_splits:
+            logger.info(f"processing {split} split...")
+            
+            # create output directories for this split
+            out_split_images = out_root / split / 'images'
+            out_split_labels = out_root / split / 'labels'
+            out_split_images.mkdir(parents=True, exist_ok=True)
+            out_split_labels.mkdir(parents=True, exist_ok=True)
+            
+            split_images = 0
+            split_labels = 0
+            
+            # process source A
+            if split in struct_a:
+                src_images_dir = struct_a[split]['images']
+                src_labels_dir = struct_a[split]['labels']
+                
+                for img_file in sorted(src_images_dir.iterdir()):
+                    if img_file.is_file() and img_file.suffix.lower() in image_exts:
+                        copied_img, copied_lbl = copy_image_label_pair(
+                            img_file, src_labels_dir, out_split_images, out_split_labels, 'a'
+                        )
+                        if copied_img:
+                            split_images += 1
+                        if copied_lbl:
+                            split_labels += 1
+            
+            # process source B
+            if split in struct_b:
+                src_images_dir = struct_b[split]['images']
+                src_labels_dir = struct_b[split]['labels']
+                
+                for img_file in sorted(src_images_dir.iterdir()):
+                    if img_file.is_file() and img_file.suffix.lower() in image_exts:
+                        copied_img, copied_lbl = copy_image_label_pair(
+                            img_file, src_labels_dir, out_split_images, out_split_labels, 'b'
+                        )
+                        if copied_img:
+                            split_images += 1
+                        if copied_lbl:
+                            split_labels += 1
+            
+            split_stats[split] = {'images': split_images, 'labels': split_labels}
+            logger.info(f"{split} split: {split_images} images, {split_labels} labels")
+        
+        # create data.yaml configuration
+        data_yaml = {
+            'path': str(out_root.absolute()),
+            'train': 'train/images' if 'train' in all_splits else None,
+            'val': 'val/images' if 'val' in all_splits else None,
+            'test': 'test/images' if 'test' in all_splits else None,
+        }
+        
+        # remove None entries
+        data_yaml = {k: v for k, v in data_yaml.items() if v is not None}
+        
+        # write data.yaml
+        with open(out_root / 'data.yaml', 'w', encoding='utf-8') as f:
+            yaml.dump(data_yaml, f, default_flow_style=False, allow_unicode=True)
+        
+        # create summary
+        summary_lines = [
+            f"YOLO dataset merge completed:",
+            f"- source A: {src_a}",
+            f"- source B: {src_b}",
+            f"- output: {out_root}",
+            f"- total images: {total_images}",
+            f"- total labels: {total_labels}",
+            f"- splits merged: {', '.join(all_splits)}"
+        ]
+        
+        # add per-split statistics
+        for split, stats in split_stats.items():
+            summary_lines.append(f"  - {split}: {stats['images']} images, {stats['labels']} labels")
+        
+        summary = "\n".join(summary_lines)
         logger.info(summary)
         return summary
     
