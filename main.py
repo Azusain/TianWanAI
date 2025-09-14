@@ -5,6 +5,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '__SmokeFire')))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '__Fall')))
 from __Fall import FallDetector, ResultHandler
+import shared_state
 from __SmokeFire.smoke import SmokeFileDetector
 from flask import Flask, request
 from uuid import uuid4 as uuid4
@@ -102,6 +103,8 @@ def initialize_models():
         # set global variables for ResultHandler (using detection model instead of classification)
         ResultHandler.g_person_classifier = g_person_classifier
         ResultHandler.g_person_class_index = 0  # person class is index 0 in COCO dataset
+        # also set in shared state for consistency
+        shared_state.set_person_classifier(g_person_classifier, 0)
         logger.info("person detection model loaded for fall verification (COCO class 0: person)")
         
         logger.success("all models initialized successfully!")
@@ -340,8 +343,25 @@ def app():
         if not task_id:
             return jsonify({"error": "task_id is required"}), 400
 
-        with ResultHandler.g_images_lock:
-            if task_id not in ResultHandler.g_images or len(ResultHandler.g_images[task_id]) == 0:
+        # use shared state instead of module-local variables
+        g_images = shared_state.get_images_dict()
+        g_images_lock = shared_state.get_images_lock()
+        
+        logger.info(f"querying results for task_id: {task_id}")
+        
+        with g_images_lock:
+            logger.info(f"available task IDs in shared g_images: {list(g_images.keys())}")
+            logger.info(f"available task IDs in ResultHandler.g_images: {list(ResultHandler.g_images.keys())}")
+            
+            # try both shared state and module state for compatibility
+            if task_id in g_images and len(g_images[task_id]) > 0:
+                logger.info(f"found {len(g_images[task_id])} results in shared state for task_id {task_id}")
+                images_dict = g_images
+            elif task_id in ResultHandler.g_images and len(ResultHandler.g_images[task_id]) > 0:
+                logger.info(f"found {len(ResultHandler.g_images[task_id])} results in module state for task_id {task_id}")
+                images_dict = ResultHandler.g_images
+            else:
+                logger.warning(f"result no found for {task_id} in either shared or module state")
                 return jsonify({"results": []})
             
             if limit is not None:
@@ -353,11 +373,11 @@ def app():
                     return jsonify({"error": "limit must be an integer"}), 400
 
                 results_list = []
-                for _ in range(min(limit, len(ResultHandler.g_images[task_id]))):
-                    results_list.append(ResultHandler.g_images[task_id].popleft())
+                for _ in range(min(limit, len(images_dict[task_id]))):
+                    results_list.append(images_dict[task_id].popleft())
             else:
-                results_list = list(ResultHandler.g_images[task_id])
-                ResultHandler.g_images[task_id].clear()
+                results_list = list(images_dict[task_id])
+                images_dict[task_id].clear()
 
         resp = []
         for item in results_list:

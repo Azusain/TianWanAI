@@ -273,12 +273,10 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 			continue
 		}
 
-		// For fall detection, process each result on its own image (still async)
+		// For fall detection, skip frame-based processing since we now use active polling
+		// The polling mechanism handles result retrieval independently
 		if server.ModelType == "fall" {
-			go func(s *InferenceServer, b InferenceServerBinding) {
-				// Process fall detection and save results directly in goroutine
-				processFallDetectionResults(s, cameraConfig, &b, manager)
-			}(server, binding)
+			// Skip - results are handled by polling goroutine in webserver
 			continue
 		}
 

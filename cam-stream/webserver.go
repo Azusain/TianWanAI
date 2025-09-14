@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -218,6 +219,10 @@ type FallDetectionTaskState struct {
 	StartedAt time.Time `json:"started_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	ErrorMsg  string    `json:"error_msg,omitempty"`
+	
+	// Polling mechanism fields (not persisted to JSON)
+	pollTicker   *time.Ticker `json:"-"` // Ticker for periodic result polling
+	pollStopChan chan bool    `json:"-"` // Channel to stop the polling goroutine
 }
 
 type DataStore struct {
@@ -965,6 +970,147 @@ func (ws *WebServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 
 // Fall Detection Task Management Functions
 
+// startFallDetectionResultPolling starts a polling goroutine for fall detection results
+func (ws *WebServer) startFallDetectionResultPolling(task *FallDetectionTaskState, server *InferenceServer, camera *CameraConfig) {
+	// Create ticker for high-frequency polling (every 200ms to handle 25 FPS)
+	// This ensures we don't miss results from the inference server
+	task.pollTicker = time.NewTicker(200 * time.Millisecond)
+	task.pollStopChan = make(chan bool, 1)
+
+	// Start polling goroutine
+	go func() {
+		Info(fmt.Sprintf("started fall detection result polling for task %s (camera: %s, server: %s)", task.TaskID, camera.Name, server.Name))
+
+		for {
+			select {
+			case <-task.pollTicker.C:
+				// Fetch fall detection results
+				limit := 20
+				results, err := GetFallDetectionResults(server, task.TaskID, &limit)
+				if err != nil {
+					Warn(fmt.Sprintf("failed to poll fall detection results for task %s: %v", task.TaskID, err))
+					continue
+				}
+
+				if len(results) == 0 {
+					continue // no results, continue polling
+				}
+
+				Info(fmt.Sprintf("polling found %d fall detection results for task %s", len(results), task.TaskID))
+
+				// Process results using existing logic
+				// Find camera binding for threshold check
+				var binding *InferenceServerBinding
+				for _, b := range camera.InferenceServerBindings {
+					if b.ServerID == server.ID {
+						binding = &b
+						break
+					}
+				}
+
+				if binding == nil {
+					Warn(fmt.Sprintf("binding not found for server %s", server.ID))
+					continue
+				}
+
+				ws.processFallResultsFromPolling(results, server, camera, binding)
+
+			case <-task.pollStopChan:
+				task.pollTicker.Stop()
+				Info(fmt.Sprintf("stopped fall detection result polling for task %s", task.TaskID))
+				return
+			}
+		}
+	}()
+}
+
+// processFallResultsFromPolling processes fall detection results from polling
+func (ws *WebServer) processFallResultsFromPolling(results []FallDetectionResultItem, server *InferenceServer, camera *CameraConfig, binding *InferenceServerBinding) {
+	// Process each fall detection result independently and save immediately
+	for _, result := range results {
+		// Decode the image from backend
+		var imageData []byte
+		if result.Image != "" {
+			decoded, err := base64.StdEncoding.DecodeString(result.Image)
+			if err != nil {
+				Warn(fmt.Sprintf("failed to decode fall detection image: %v", err))
+				continue
+			}
+			imageData = decoded
+		} else {
+			Warn("fall detection result has empty image data")
+			continue
+		}
+
+		// Convert to Detection format
+		confidence := result.Results.Score
+		if confidence > 1.0 {
+			confidence = confidence / 100.0
+		}
+
+		// Check threshold
+		if confidence < binding.Threshold {
+			continue
+		}
+
+		detection := Detection{
+			Class:      "FALL_DETECTED",
+			Confidence: confidence,
+			X1:         int(result.Results.Location.Left),
+			Y1:         int(result.Results.Location.Top),
+			X2:         int(result.Results.Location.Left + result.Results.Location.Width),
+			Y2:         int(result.Results.Location.Top + result.Results.Location.Height),
+		}
+
+		// Draw detection on the original image
+		drawnImage, err := DrawDetections(imageData, []Detection{detection}, camera.Name)
+		if err != nil {
+			Warn(fmt.Sprintf("failed to draw fall detection: %v", err))
+			continue
+		}
+
+		// Store original image copy for DEBUG mode
+		var originalImageCopy []byte
+		if globalDebugMode {
+			originalImageCopy = make([]byte, len(imageData))
+			copy(originalImageCopy, imageData)
+		}
+
+		// Create ModelResult for this SINGLE detection
+		singleModelResult := map[string]*ModelResult{
+			server.ModelType: {
+				ModelType:          server.ModelType,
+				ServerID:           binding.ServerID,
+				Detections:         []Detection{detection},
+				DisplayResultImage: drawnImage,
+				OriginalImage:      originalImageCopy,
+				Error:              nil,
+			},
+		}
+
+		// Save this single fall detection result immediately
+		if ws.rtspManager != nil {
+			ws.rtspManager.saveResultsByModel(camera.Name, singleModelResult)
+			Info(fmt.Sprintf("saved fall detection result: confidence=%.2f, camera=%s", confidence, camera.Name))
+		} else {
+			Warn("rtspManager is nil, cannot save fall detection result")
+		}
+	}
+}
+
+// stopFallDetectionResultPolling stops the polling goroutine for a task
+func (ws *WebServer) stopFallDetectionResultPolling(task *FallDetectionTaskState) {
+	if task.pollStopChan != nil {
+		task.pollStopChan <- true
+		close(task.pollStopChan)
+		task.pollStopChan = nil
+	}
+	if task.pollTicker != nil {
+		task.pollTicker.Stop()
+		task.pollTicker = nil
+	}
+}
+
 // startFallDetectionTask starts a fall detection task for a camera with a fall detection server
 func (ws *WebServer) startFallDetectionTask(camera *CameraConfig, server *InferenceServer) {
 	// Check if there's already a running task for this camera-server combination
@@ -993,7 +1139,7 @@ func (ws *WebServer) startFallDetectionTask(camera *CameraConfig, server *Infere
 	}
 
 	// Create successful task state using the returned taskID as key
-	fallDetectionTasks[taskID] = &FallDetectionTaskState{
+	task := &FallDetectionTaskState{
 		TaskID:    taskID,
 		CameraID:  camera.ID,
 		ServerID:  server.ID,
@@ -1001,8 +1147,12 @@ func (ws *WebServer) startFallDetectionTask(camera *CameraConfig, server *Infere
 		StartedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
+	fallDetectionTasks[taskID] = task
 
-	Info(fmt.Sprintf("started fall detection task %s for camera %s with server %s", taskID, camera.ID, server.ID))
+	// Start independent result polling for this task
+	ws.startFallDetectionResultPolling(task, server, camera)
+
+	Info(fmt.Sprintf("started fall detection task %s with result polling for camera %s with server %s", taskID, camera.ID, server.ID))
 }
 
 // stopFallDetectionTasksForCamera stops all fall detection tasks for a specific camera-server combination
@@ -1030,6 +1180,10 @@ func (ws *WebServer) stopFallDetectionTasksForCamera(cameraID, serverID string) 
 	// Stop each task
 	for _, taskID := range tasksToStop {
 		task := fallDetectionTasks[taskID]
+		
+		// Stop the result polling first
+		ws.stopFallDetectionResultPolling(task)
+		
 		err := StopFallDetection(server, taskID)
 		if err != nil {
 			Warn(fmt.Sprintf("failed to stop fall detection task %s: %v", taskID, err))
@@ -1041,7 +1195,7 @@ func (ws *WebServer) stopFallDetectionTasksForCamera(cameraID, serverID string) 
 			// Update task state to stopped
 			task.Status = "stopped"
 			task.UpdatedAt = time.Now()
-			Info(fmt.Sprintf("stopped fall detection task %s for camera %s with server %s", taskID, cameraID, serverID))
+			Info(fmt.Sprintf("stopped fall detection task %s with polling for camera %s with server %s", taskID, cameraID, serverID))
 		}
 	}
 }

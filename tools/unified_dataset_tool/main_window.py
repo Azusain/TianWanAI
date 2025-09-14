@@ -1050,6 +1050,7 @@ class DataProcessingTab(QWidget):
         layout.addWidget(sub_tabs)
         self.setLayout(layout)
 
+
 # Format Conversion Tab
 class FormatConversionTab(QWidget):
     def __init__(self, parent):
@@ -1273,8 +1274,8 @@ class FormatConversionTab(QWidget):
         self.convert_btn.setEnabled(True)
         self.parent.show_error(f"Conversion failed: {error_msg}")
 
-# Advanced Tools Tab
-class AdvancedToolsTab(QWidget):
+# Dataset Management Tab - dataset reduction, completion, and class replacement
+class DatasetManagementTab(QWidget):
     def __init__(self, parent):
         super().__init__()
         self.parent = parent
@@ -1331,6 +1332,83 @@ class AdvancedToolsTab(QWidget):
         reduce_group.setLayout(reduce_layout)
         layout.addWidget(reduce_group)
         
+        # Dataset Completion Tool
+        complete_group = QGroupBox("Dataset Completion Tool")
+        complete_group.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        complete_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #cccccc;
+                border-radius: 5px;
+                margin-top: 1ex;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+            }
+        """)
+        complete_layout = QFormLayout()
+        complete_layout.setVerticalSpacing(12)
+        
+        # Dataset directory for completion
+        self.complete_dataset_edit = QLineEdit()
+        self.complete_dataset_edit.setFont(QFont("Arial", 11))
+        self.complete_dataset_browse = QPushButton("Browse...")
+        self.complete_dataset_browse.setFont(QFont("Arial", 11))
+        self.complete_dataset_browse.clicked.connect(self.browse_complete_dataset)
+        complete_dataset_row = QHBoxLayout()
+        complete_dataset_row.addWidget(self.complete_dataset_edit)
+        complete_dataset_row.addWidget(self.complete_dataset_browse)
+        complete_layout.addRow("Dataset Directory:", complete_dataset_row)
+        
+        complete_group.setLayout(complete_layout)
+        layout.addWidget(complete_group)
+        
+        # Class Replacement Tool
+        class_replace_group = QGroupBox("Class ID Replacement Tool")
+        class_replace_group.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        class_replace_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #cccccc;
+                border-radius: 5px;
+                margin-top: 1ex;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+            }
+        """)
+        class_replace_layout = QFormLayout()
+        class_replace_layout.setVerticalSpacing(12)
+        
+        # Dataset directory for class replacement
+        self.replace_dataset_edit = QLineEdit()
+        self.replace_dataset_edit.setFont(QFont("Arial", 11))
+        self.replace_dataset_browse = QPushButton("Browse...")
+        self.replace_dataset_browse.setFont(QFont("Arial", 11))
+        self.replace_dataset_browse.clicked.connect(self.browse_replace_dataset)
+        replace_dataset_row = QHBoxLayout()
+        replace_dataset_row.addWidget(self.replace_dataset_edit)
+        replace_dataset_row.addWidget(self.replace_dataset_browse)
+        class_replace_layout.addRow("Dataset Directory:", replace_dataset_row)
+        
+        # New class ID
+        self.new_class_id_spin = QSpinBox()
+        self.new_class_id_spin.setRange(0, 100)
+        self.new_class_id_spin.setValue(0)
+        class_replace_layout.addRow("New Class ID:", self.new_class_id_spin)
+        
+        class_replace_group.setLayout(class_replace_layout)
+        layout.addWidget(class_replace_group)
+        
+        # Action buttons
+        buttons_layout = QHBoxLayout()
+        
         # Reduce button
         self.reduce_btn = QPushButton("Reduce Dataset")
         self.reduce_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
@@ -1355,7 +1433,61 @@ class AdvancedToolsTab(QWidget):
             }
         """)
         self.reduce_btn.clicked.connect(self.reduce_dataset)
-        layout.addWidget(self.reduce_btn)
+        buttons_layout.addWidget(self.reduce_btn)
+        
+        # Complete dataset button
+        self.complete_btn = QPushButton("Complete Dataset")
+        self.complete_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.complete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+            QPushButton:pressed {
+                background-color: #1565C0;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.complete_btn.clicked.connect(self.complete_dataset)
+        buttons_layout.addWidget(self.complete_btn)
+        
+        # Replace class IDs button
+        self.replace_btn = QPushButton("Replace Class IDs")
+        self.replace_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.replace_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+            QPushButton:pressed {
+                background-color: #E65100;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.replace_btn.clicked.connect(self.replace_class_ids)
+        buttons_layout.addWidget(self.replace_btn)
+        
+        layout.addLayout(buttons_layout)
         
         # Results
         results_label = QLabel("Operation Results:")
@@ -1449,6 +1581,162 @@ class AdvancedToolsTab(QWidget):
     def on_reduction_error(self, error_msg):
         self.reduce_btn.setEnabled(True)
         self.parent.show_error(f"Reduction failed: {error_msg}")
+    
+    def browse_complete_dataset(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Dataset Directory for Completion")
+        if directory:
+            self.complete_dataset_edit.setText(directory)
+    
+    def browse_replace_dataset(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Dataset Directory for Class Replacement")
+        if directory:
+            self.replace_dataset_edit.setText(directory)
+    
+    def complete_dataset(self):
+        """Create empty label files for images that don't have corresponding labels"""
+        dataset_dir = self.complete_dataset_edit.text().strip()
+        
+        if not dataset_dir:
+            self.parent.show_error("Please specify dataset directory")
+            return
+        
+        try:
+            self.complete_btn.setEnabled(False)
+            self.worker = WorkerThread(self._do_dataset_completion, dataset_dir)
+            self.worker.finished.connect(self.on_completion_complete)
+            self.worker.error.connect(self.on_completion_error)
+            self.worker.start()
+        except Exception as e:
+            self.parent.show_error(f"Dataset completion failed: {e}")
+    
+    def _do_dataset_completion(self, dataset_dir):
+        """Create empty txt files for images without corresponding labels"""
+        import os
+        
+        images_dir = os.path.join(dataset_dir, 'images')
+        labels_dir = os.path.join(dataset_dir, 'labels')
+        
+        if not os.path.exists(images_dir):
+            raise Exception(f"Images directory not found: {images_dir}")
+        
+        if not os.path.exists(labels_dir):
+            os.makedirs(labels_dir)
+        
+        created_count = 0
+        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif']
+        
+        # Get all image files
+        for filename in os.listdir(images_dir):
+            if any(filename.lower().endswith(ext) for ext in image_extensions):
+                # Get the base name without extension
+                base_name = os.path.splitext(filename)[0]
+                label_path = os.path.join(labels_dir, base_name + '.txt')
+                
+                # Create empty label file if it doesn't exist
+                if not os.path.exists(label_path):
+                    with open(label_path, 'w') as f:
+                        pass  # Create empty file
+                    created_count += 1
+        
+        return f"Created {created_count} empty label files for unlabeled images"
+    
+    def on_completion_complete(self, result):
+        self.complete_btn.setEnabled(True)
+        self.advanced_results.setText(result)
+    
+    def on_completion_error(self, error_msg):
+        self.complete_btn.setEnabled(True)
+        self.parent.show_error(f"Dataset completion failed: {error_msg}")
+    
+    def replace_class_ids(self):
+        """Replace all class IDs in label files with a specified new class ID"""
+        dataset_dir = self.replace_dataset_edit.text().strip()
+        new_class_id = self.new_class_id_spin.value()
+        
+        if not dataset_dir:
+            self.parent.show_error("Please specify dataset directory")
+            return
+        
+        try:
+            self.replace_btn.setEnabled(False)
+            self.worker = WorkerThread(self._do_class_replacement, dataset_dir, new_class_id)
+            self.worker.finished.connect(self.on_replacement_complete)
+            self.worker.error.connect(self.on_replacement_error)
+            self.worker.start()
+        except Exception as e:
+            self.parent.show_error(f"Class replacement failed: {e}")
+    
+    def _do_class_replacement(self, dataset_dir, new_class_id):
+        """Replace all class IDs in YOLO label files with the specified new class ID"""
+        import os
+        import re
+        
+        labels_dir = os.path.join(dataset_dir, 'labels')
+        
+        if not os.path.exists(labels_dir):
+            raise Exception(f"Labels directory not found: {labels_dir}")
+        
+        processed_files = 0
+        total_annotations = 0
+        
+        for filename in os.listdir(labels_dir):
+            if not filename.endswith('.txt'):
+                continue
+                
+            label_path = os.path.join(labels_dir, filename)
+            
+            try:
+                with open(label_path, 'r') as f:
+                    lines = f.readlines()
+                
+                if not lines:  # Skip empty files
+                    continue
+                    
+                modified_lines = []
+                file_modified = False
+                
+                for line in lines:
+                    line = line.strip()
+                    if not line:  # Skip empty lines
+                        modified_lines.append(line)
+                        continue
+                    
+                    # Parse YOLO format: class_id x_center y_center width height
+                    parts = line.split()
+                    if len(parts) >= 5:
+                        # Replace class ID with new class ID
+                        old_class_id = parts[0]
+                        parts[0] = str(new_class_id)
+                        modified_line = ' '.join(parts)
+                        modified_lines.append(modified_line)
+                        
+                        if old_class_id != str(new_class_id):
+                            file_modified = True
+                        total_annotations += 1
+                    else:
+                        # Keep invalid lines as is (shouldn't happen in proper YOLO format)
+                        modified_lines.append(line)
+                
+                # Write back to file if modified
+                if file_modified or len(modified_lines) != len(lines):
+                    with open(label_path, 'w') as f:
+                        for line in modified_lines:
+                            if line.strip():  # Only write non-empty lines
+                                f.write(line + '\n')
+                    processed_files += 1
+                    
+            except Exception as e:
+                print(f"Error processing {label_path}: {e}")
+        
+        return f"Processed {processed_files} label files, updated {total_annotations} annotations to class ID {new_class_id}"
+    
+    def on_replacement_complete(self, result):
+        self.replace_btn.setEnabled(True)
+        self.advanced_results.setText(result)
+    
+    def on_replacement_error(self, error_msg):
+        self.replace_btn.setEnabled(True)
+        self.parent.show_error(f"Class replacement failed: {error_msg}")
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -1477,14 +1765,14 @@ class MainWindow(QMainWindow):
         
         # reorganize tabs into logical groups
         self.data_processing_tab = DataProcessingTab(self)
+        self.dataset_management_tab = DatasetManagementTab(self)
         self.format_conversion_tab = FormatConversionTab(self)
         self.video_processing_tab = VideoProcessingTab(self)
-        self.advanced_tools_tab = AdvancedToolsTab(self)
         
         tab_widget.addTab(self.data_processing_tab, "Data Processing")
+        tab_widget.addTab(self.dataset_management_tab, "Dataset Management")
         tab_widget.addTab(self.format_conversion_tab, "Format Conversion")
         tab_widget.addTab(self.video_processing_tab, "Video Processing")
-        tab_widget.addTab(self.advanced_tools_tab, "Advanced Tools")
         
         layout.addWidget(tab_widget)
         
