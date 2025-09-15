@@ -3,7 +3,8 @@ from PyQt6.QtWidgets import (QMainWindow, QTabWidget, QVBoxLayout, QHBoxLayout,
                             QWidget, QPushButton, QLabel, QLineEdit, QTextEdit, 
                             QFileDialog, QProgressBar, QComboBox, QSpinBox, 
                             QGroupBox, QFormLayout, QScrollArea, QTableWidget, 
-                            QTableWidgetItem, QHeaderView, QCheckBox, QDoubleSpinBox)
+                            QTableWidgetItem, QHeaderView, QCheckBox, QDoubleSpinBox,
+                            QListWidget)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QPixmap, QIcon
 from typing import Optional
@@ -2002,7 +2003,7 @@ class DatasetManagementTab(QWidget):
         layout.setSpacing(15)
         
         # Merge YOLO Datasets
-        merge_group = QGroupBox("Merge YOLO Datasets")
+        merge_group = QGroupBox("Merge Multiple YOLO Datasets")
         merge_group.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         merge_group.setStyleSheet("""
             QGroupBox {
@@ -2018,32 +2019,80 @@ class DatasetManagementTab(QWidget):
                 padding: 0 10px 0 10px;
             }
         """)
-        merge_layout = QFormLayout()
-        merge_layout.setVerticalSpacing(12)
+        merge_layout = QVBoxLayout()
+        merge_layout.setSpacing(12)
         
-        self.merge_src_a_edit = QLineEdit()
-        self.merge_src_a_browse = QPushButton("Browse...")
-        self.merge_src_a_browse.clicked.connect(self.browse_merge_src_a)
-        row_a = QHBoxLayout()
-        row_a.addWidget(self.merge_src_a_edit)
-        row_a.addWidget(self.merge_src_a_browse)
-        merge_layout.addRow("source A:", row_a)
+        # dataset list with add/remove buttons
+        datasets_label = QLabel("source datasets:")
+        datasets_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        merge_layout.addWidget(datasets_label)
         
-        self.merge_src_b_edit = QLineEdit()
-        self.merge_src_b_browse = QPushButton("Browse...")
-        self.merge_src_b_browse.clicked.connect(self.browse_merge_src_b)
-        row_b = QHBoxLayout()
-        row_b.addWidget(self.merge_src_b_edit)
-        row_b.addWidget(self.merge_src_b_browse)
-        merge_layout.addRow("source B:", row_b)
+        # list widget for datasets
+        self.datasets_list = QListWidget()
+        self.datasets_list.setMaximumHeight(120)
+        self.datasets_list.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+                alternate-background-color: #f9f9f9;
+            }
+        """)
+        merge_layout.addWidget(self.datasets_list)
+        
+        # buttons for managing dataset list
+        list_buttons_layout = QHBoxLayout()
+        
+        self.add_dataset_btn = QPushButton("Add Dataset...")
+        self.add_dataset_btn.setFont(QFont("Arial", 11))
+        self.add_dataset_btn.clicked.connect(self.add_dataset)
+        list_buttons_layout.addWidget(self.add_dataset_btn)
+        
+        self.remove_dataset_btn = QPushButton("Remove Selected")
+        self.remove_dataset_btn.setFont(QFont("Arial", 11))
+        self.remove_dataset_btn.clicked.connect(self.remove_selected_dataset)
+        self.remove_dataset_btn.setEnabled(False)
+        list_buttons_layout.addWidget(self.remove_dataset_btn)
+        
+        self.clear_datasets_btn = QPushButton("Clear All")
+        self.clear_datasets_btn.setFont(QFont("Arial", 11))
+        self.clear_datasets_btn.clicked.connect(self.clear_all_datasets)
+        self.clear_datasets_btn.setEnabled(False)
+        list_buttons_layout.addWidget(self.clear_datasets_btn)
+        
+        list_buttons_layout.addStretch()
+        merge_layout.addLayout(list_buttons_layout)
+        
+        # enable/disable buttons based on selection
+        self.datasets_list.itemSelectionChanged.connect(self.update_dataset_buttons)
+        
+        # output directory
+        output_layout = QHBoxLayout()
+        output_label = QLabel("output directory:")
+        output_label.setFont(QFont("Arial", 11))
+        output_layout.addWidget(output_label)
         
         self.merge_out_edit = QLineEdit()
+        self.merge_out_edit.setFont(QFont("Arial", 11))
+        self.merge_out_edit.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QLineEdit:focus {
+                border-color: #4CAF50;
+            }
+        """)
+        output_layout.addWidget(self.merge_out_edit)
+        
         self.merge_out_browse = QPushButton("Browse...")
+        self.merge_out_browse.setFont(QFont("Arial", 11))
         self.merge_out_browse.clicked.connect(self.browse_merge_out)
-        row_out = QHBoxLayout()
-        row_out.addWidget(self.merge_out_edit)
-        row_out.addWidget(self.merge_out_browse)
-        merge_layout.addRow("output directory:", row_out)
+        output_layout.addWidget(self.merge_out_browse)
+        
+        merge_layout.addLayout(output_layout)
         
         merge_group.setLayout(merge_layout)
         layout.addWidget(merge_group)
@@ -2428,15 +2477,6 @@ class DatasetManagementTab(QWidget):
         if directory:
             self.reduce_dataset_edit.setText(directory)
     
-    def browse_merge_src_a(self):
-        directory = QFileDialog.getExistingDirectory(self, "Select Source A Dataset Directory")
-        if directory:
-            self.merge_src_a_edit.setText(directory)
-    
-    def browse_merge_src_b(self):
-        directory = QFileDialog.getExistingDirectory(self, "Select Source B Dataset Directory")
-        if directory:
-            self.merge_src_b_edit.setText(directory)
     
     def browse_merge_out(self):
         directory = QFileDialog.getExistingDirectory(self, "Select Output Directory")
@@ -2723,20 +2763,31 @@ class DatasetManagementTab(QWidget):
         self.parent.show_error(f"Class replacement failed: {error_msg}")
     
     def merge_datasets(self):
-        src_a = self.merge_src_a_edit.text().strip()
-        src_b = self.merge_src_b_edit.text().strip()
+        """merge multiple YOLO datasets using the new multi-source interface"""
+        # collect all dataset paths from the list
+        source_paths = []
+        for i in range(self.datasets_list.count()):
+            source_paths.append(self.datasets_list.item(i).text())
+        
         out_dir = self.merge_out_edit.text().strip()
-        if not src_a or not src_b or not out_dir:
-            self.parent.show_error("Please specify source A, source B, and output directory")
+        
+        if len(source_paths) < 2:
+            self.parent.show_error("please add at least 2 datasets to merge")
             return
+            
+        if not out_dir:
+            self.parent.show_error("please specify an output directory")
+            return
+            
         try:
             self.merge_btn.setEnabled(False)
-            self.worker = WorkerThread(DatasetManager.merge_yolo_datasets, src_a, src_b, out_dir)
+            # use the new multi-source merge method
+            self.worker = WorkerThread(DatasetManager.merge_yolo_datasets, source_paths, out_dir)
             self.worker.finished.connect(self.on_merge_complete)
             self.worker.error.connect(self.on_merge_error)
             self.worker.start()
         except Exception as e:
-            self.parent.show_error(f"Merge failed: {e}")
+            self.parent.show_error(f"merge failed: {e}")
     
     def on_merge_complete(self, result):
         self.merge_btn.setEnabled(True)
@@ -2942,6 +2993,40 @@ class DatasetManagementTab(QWidget):
     def on_class_removal_error(self, error_msg):
         self.remove_class_btn.setEnabled(True)
         self.parent.show_error(f"class removal failed: {error_msg}")
+    
+    # dataset list management methods
+    def add_dataset(self):
+        """add a dataset to the list for merging"""
+        directory = QFileDialog.getExistingDirectory(self, "select dataset directory")
+        if directory:
+            # check if directory is already in the list
+            for i in range(self.datasets_list.count()):
+                if self.datasets_list.item(i).text() == directory:
+                    self.parent.show_error("this dataset is already in the list")
+                    return
+            
+            self.datasets_list.addItem(directory)
+            self.update_dataset_buttons()
+    
+    def remove_selected_dataset(self):
+        """remove the selected dataset from the list"""
+        current_row = self.datasets_list.currentRow()
+        if current_row >= 0:
+            self.datasets_list.takeItem(current_row)
+            self.update_dataset_buttons()
+    
+    def clear_all_datasets(self):
+        """clear all datasets from the list"""
+        self.datasets_list.clear()
+        self.update_dataset_buttons()
+    
+    def update_dataset_buttons(self):
+        """enable/disable buttons based on list state and selection"""
+        has_items = self.datasets_list.count() > 0
+        has_selection = self.datasets_list.currentRow() >= 0
+        
+        self.remove_dataset_btn.setEnabled(has_selection)
+        self.clear_datasets_btn.setEnabled(has_items)
 
 class MainWindow(QMainWindow):
     def __init__(self):

@@ -150,16 +150,22 @@ class DatasetManager:
         return class_names
     
     @staticmethod
-    def merge_yolo_datasets(source_a: str, source_b: str, output_dir: str) -> str:
-        """merge two standard YOLO-format datasets into a new dataset.
+    def merge_yolo_datasets(sources: list, output_dir: str) -> str:
+        """merge multiple standard YOLO-format datasets into a new dataset.
         expected structure for each source: <root>/(train|val)/(images|labels)
         output structure: <root>/(train|val)/(images|labels) + data.yaml
-        - merges both train and val splits from both datasets
+        - merges train and val splits from all source datasets
         - on filename conflicts, renames files with suffix to avoid overwrites
         - creates data.yaml config file for the merged dataset
         - preserves class information from source datasets
         returns a human-readable summary
+        
+        Args:
+            sources: list of source dataset directory paths
+            output_dir: output directory path
         """
+        if not sources or len(sources) < 2:
+            raise ValueError("at least 2 source datasets are required for merging")
         from pathlib import Path
         import shutil
         import yaml
@@ -232,26 +238,40 @@ class DatasetManager:
         total_images = 0
         total_labels = 0
         
-        # setup paths
-        src_a = Path(source_a)
-        src_b = Path(source_b)
+        # setup output path
         out_root = Path(output_dir)
         out_root.mkdir(parents=True, exist_ok=True)
         
-        # detect dataset structures
-        struct_a = find_dataset_structure(src_a)
-        struct_b = find_dataset_structure(src_b)
+        # convert sources to Path objects and detect structures
+        source_paths = [Path(src) for src in sources]
+        source_structures = []
         
-        if not struct_a and not struct_b:
-            raise Exception("no valid YOLO dataset structure found in either source")
+        for i, src_path in enumerate(source_paths):
+            if not src_path.exists():
+                logger.warning(f"source dataset {i} does not exist: {src_path}")
+                continue
+                
+            structure = find_dataset_structure(src_path)
+            if not structure:
+                logger.warning(f"no valid YOLO dataset structure found in source {i}: {src_path}")
+                continue
+                
+            source_structures.append({
+                'path': src_path,
+                'structure': structure,
+                'index': i
+            })
+            logger.info(f"source {i} ({src_path.name}): {list(structure.keys())}")
         
-        logger.info(f"source A structure: {list(struct_a.keys())}")
-        logger.info(f"source B structure: {list(struct_b.keys())}")
+        if len(source_structures) < 2:
+            raise Exception(f"need at least 2 valid datasets, found {len(source_structures)}")
         
-        # get all available splits from both datasets
-        all_splits = set(struct_a.keys()) | set(struct_b.keys())
+        # get all available splits from all datasets
+        all_splits = set()
+        for src_info in source_structures:
+            all_splits.update(src_info['structure'].keys())
+        
         split_stats = {}
-        
         image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp'}
         
         # process each split
@@ -267,30 +287,24 @@ class DatasetManager:
             split_images = 0
             split_labels = 0
             
-            # process source A
-            if split in struct_a:
-                src_images_dir = struct_a[split]['images']
-                src_labels_dir = struct_a[split]['labels']
+            # process each source dataset that has this split
+            for src_info in source_structures:
+                src_structure = src_info['structure']
+                src_index = src_info['index']
+                
+                if split not in src_structure:
+                    continue
+                    
+                src_images_dir = src_structure[split]['images']
+                src_labels_dir = src_structure[split]['labels']
+                tag = f"src{src_index}"
+                
+                logger.info(f"  processing source {src_index} for {split} split...")
                 
                 for img_file in sorted(src_images_dir.iterdir()):
                     if img_file.is_file() and img_file.suffix.lower() in image_exts:
                         copied_img, copied_lbl = copy_image_label_pair(
-                            img_file, src_labels_dir, out_split_images, out_split_labels, 'a'
-                        )
-                        if copied_img:
-                            split_images += 1
-                        if copied_lbl:
-                            split_labels += 1
-            
-            # process source B
-            if split in struct_b:
-                src_images_dir = struct_b[split]['images']
-                src_labels_dir = struct_b[split]['labels']
-                
-                for img_file in sorted(src_images_dir.iterdir()):
-                    if img_file.is_file() and img_file.suffix.lower() in image_exts:
-                        copied_img, copied_lbl = copy_image_label_pair(
-                            img_file, src_labels_dir, out_split_images, out_split_labels, 'b'
+                            img_file, src_labels_dir, out_split_images, out_split_labels, tag
                         )
                         if copied_img:
                             split_images += 1
@@ -318,13 +332,19 @@ class DatasetManager:
         # create summary
         summary_lines = [
             f"YOLO dataset merge completed:",
-            f"- source A: {src_a}",
-            f"- source B: {src_b}",
+            f"- merged {len(source_structures)} datasets:"
+        ]
+        
+        # add source dataset info
+        for src_info in source_structures:
+            summary_lines.append(f"  • source {src_info['index']}: {src_info['path']} ({', '.join(src_info['structure'].keys())})")
+        
+        summary_lines.extend([
             f"- output: {out_root}",
             f"- total images: {total_images}",
             f"- total labels: {total_labels}",
             f"- splits merged: {', '.join(all_splits)}"
-        ]
+        ])
         
         # add per-split statistics
         for split, stats in split_stats.items():
