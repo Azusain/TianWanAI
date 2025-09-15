@@ -683,12 +683,15 @@ func (ws *WebServer) handleAPIImageServers(w http.ResponseWriter, r *http.Reques
 	for _, e := range entries {
 		if e.IsDir() {
 			id := e.Name()
-			name := id
-			// map to friendly name if available
-			if s, ok := dataStore.InferenceServers[id]; ok && s != nil && s.Name != "" {
-				name = s.Name
+			// only include servers that exist in dataStore (not deleted)
+			if s, ok := dataStore.InferenceServers[id]; ok && s != nil {
+				name := s.Name
+				if name == "" {
+					name = id // fallback to id if name is empty
+				}
+				servers = append(servers, ImageServer{ID: id, Name: name})
 			}
-			servers = append(servers, ImageServer{ID: id, Name: name})
+			// Note: directories for deleted servers are ignored but files remain on disk
 		}
 	}
 
