@@ -469,13 +469,39 @@ class SplitTab(QWidget):
         output_row.addWidget(self.output_browse_btn)
         split_layout.addRow("output directory:", output_row)
         
+        # train ratio
         self.train_ratio_spin = QDoubleSpinBox()
         self.train_ratio_spin.setRange(0.1, 0.9)
-        self.train_ratio_spin.setValue(0.8)
-        self.train_ratio_spin.setSingleStep(0.1)
-        self.train_ratio_spin.setSuffix(" (80% train, 20% val)")
-        self.train_ratio_spin.valueChanged.connect(self.update_ratio_label)
+        self.train_ratio_spin.setValue(0.7)
+        self.train_ratio_spin.setSingleStep(0.05)
+        self.train_ratio_spin.setDecimals(2)
+        self.train_ratio_spin.valueChanged.connect(self.update_ratio_labels)
         split_layout.addRow("train ratio:", self.train_ratio_spin)
+        
+        # val ratio
+        self.val_ratio_spin = QDoubleSpinBox()
+        self.val_ratio_spin.setRange(0.05, 0.5)
+        self.val_ratio_spin.setValue(0.15)
+        self.val_ratio_spin.setSingleStep(0.05)
+        self.val_ratio_spin.setDecimals(2)
+        self.val_ratio_spin.valueChanged.connect(self.update_ratio_labels)
+        split_layout.addRow("val ratio:", self.val_ratio_spin)
+        
+        # test ratio
+        self.test_ratio_spin = QDoubleSpinBox()
+        self.test_ratio_spin.setRange(0.05, 0.5)
+        self.test_ratio_spin.setValue(0.15)
+        self.test_ratio_spin.setSingleStep(0.05)
+        self.test_ratio_spin.setDecimals(2)
+        self.test_ratio_spin.valueChanged.connect(self.update_ratio_labels)
+        split_layout.addRow("test ratio:", self.test_ratio_spin)
+        
+        # ratio summary label
+        self.ratio_summary_label = QLabel()
+        self.ratio_summary_label.setFont(QFont("Arial", 10))
+        self.ratio_summary_label.setStyleSheet("color: #666; padding: 5px;")
+        split_layout.addRow("", self.ratio_summary_label)
+        self.update_ratio_labels()  # initialize label
         
         self.split_mode_combo = QComboBox()
         self.split_mode_combo.addItems(["random"])
@@ -555,11 +581,26 @@ class SplitTab(QWidget):
         if directory:
             self.output_path_edit.setText(directory)
     
-    def update_ratio_label(self):
-        ratio = self.train_ratio_spin.value()
-        train_pct = int(ratio * 100)
-        val_pct = 100 - train_pct
-        self.train_ratio_spin.setSuffix(f" ({train_pct}% train, {val_pct}% val)")
+    def update_ratio_labels(self):
+        """update ratio summary label when any ratio changes"""
+        train_ratio = self.train_ratio_spin.value()
+        val_ratio = self.val_ratio_spin.value()
+        test_ratio = self.test_ratio_spin.value()
+        
+        total = train_ratio + val_ratio + test_ratio
+        
+        # update summary label
+        train_pct = train_ratio * 100
+        val_pct = val_ratio * 100
+        test_pct = test_ratio * 100
+        
+        if abs(total - 1.0) > 0.001:
+            self.ratio_summary_label.setText(f"⚠ ratios sum to {total:.3f} (should be 1.0)")
+            self.ratio_summary_label.setStyleSheet("color: red; padding: 5px; font-weight: bold;")
+        else:
+            summary = f"train: {train_pct:.1f}%, val: {val_pct:.1f}%, test: {test_pct:.1f}%"
+            self.ratio_summary_label.setText(f"✓ {summary}")
+            self.ratio_summary_label.setStyleSheet("color: #666; padding: 5px;")
     
     def split_dataset(self):
         dataset_path = self.dataset_path_edit.text().strip()
@@ -577,10 +618,18 @@ class SplitTab(QWidget):
         
         # get parameters
         train_ratio = self.train_ratio_spin.value()
+        val_ratio = self.val_ratio_spin.value()
+        test_ratio = self.test_ratio_spin.value()
         split_mode = self.split_mode_combo.currentText()
         seed = self.seed_spin.value()
         images_dir = self.images_dir_edit.text().strip() or None
         labels_dir = self.labels_dir_edit.text().strip() or None
+        
+        # validate ratios
+        total = train_ratio + val_ratio + test_ratio
+        if abs(total - 1.0) > 0.001:
+            self.parent.show_error(f"ratios must sum to 1.0, currently {total:.3f}")
+            return
         
         # start split in worker thread
         self.split_btn.setEnabled(False)
@@ -589,7 +638,7 @@ class SplitTab(QWidget):
         
         self.worker = WorkerThread(
             dataset_manager.split_dataset,
-            output_path, train_ratio, split_mode, seed, images_dir, labels_dir
+            output_path, train_ratio, val_ratio, test_ratio, split_mode, seed, images_dir, labels_dir
         )
         self.worker.finished.connect(self.on_split_complete)
         self.worker.error.connect(self.on_split_error)
@@ -1205,6 +1254,86 @@ class FormatConversionTab(QWidget):
         yolo_group.setLayout(yolo_layout)
         layout.addWidget(yolo_group)
         
+        # YOLO to Flat Format conversion
+        flat_group = QGroupBox("YOLO to Flat Format Conversion")
+        flat_group.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        flat_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #cccccc;
+                border-radius: 5px;
+                margin-top: 1ex;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+            }
+        """)
+        flat_layout = QFormLayout()
+        flat_layout.setVerticalSpacing(12)
+        
+        # YOLO input directory
+        self.flat_input_edit = QLineEdit()
+        self.flat_input_edit.setFont(QFont("Arial", 11))
+        self.flat_input_edit.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QLineEdit:focus {
+                border-color: #4CAF50;
+            }
+        """)
+        
+        self.flat_input_browse = QPushButton("Browse...")
+        self.flat_input_browse.setFont(QFont("Arial", 11))
+        self.flat_input_browse.clicked.connect(self.browse_flat_input)
+        flat_input_row = QHBoxLayout()
+        flat_input_row.addWidget(self.flat_input_edit)
+        flat_input_row.addWidget(self.flat_input_browse)
+        flat_layout.addRow("YOLO Dataset Directory:", flat_input_row)
+        
+        # Flat output directory
+        self.flat_output_edit = QLineEdit()
+        self.flat_output_edit.setFont(QFont("Arial", 11))
+        self.flat_output_edit.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QLineEdit:focus {
+                border-color: #4CAF50;
+            }
+        """)
+        
+        self.flat_output_browse = QPushButton("Browse...")
+        self.flat_output_browse.setFont(QFont("Arial", 11))
+        self.flat_output_browse.clicked.connect(self.browse_flat_output)
+        flat_output_row = QHBoxLayout()
+        flat_output_row.addWidget(self.flat_output_edit)
+        flat_output_row.addWidget(self.flat_output_browse)
+        flat_layout.addRow("Output Directory:", flat_output_row)
+        
+        # Conversion options
+        self.merge_splits_checkbox = QCheckBox("Merge splits into single folder")
+        self.merge_splits_checkbox.setFont(QFont("Arial", 11))
+        self.merge_splits_checkbox.setChecked(True)
+        flat_layout.addRow("", self.merge_splits_checkbox)
+        
+        self.preserve_split_info_checkbox = QCheckBox("Preserve split info in filenames")
+        self.preserve_split_info_checkbox.setFont(QFont("Arial", 11))
+        self.preserve_split_info_checkbox.setChecked(True)
+        flat_layout.addRow("", self.preserve_split_info_checkbox)
+        
+        flat_group.setLayout(flat_layout)
+        layout.addWidget(flat_group)
+        
         # Convert buttons
         buttons_layout = QHBoxLayout()
         
@@ -1258,6 +1387,31 @@ class FormatConversionTab(QWidget):
         self.yolo_to_voc_btn.clicked.connect(self.convert_yolo_to_voc)
         buttons_layout.addWidget(self.yolo_to_voc_btn)
         
+        self.yolo_to_flat_btn = QPushButton("Convert YOLO to Flat")
+        self.yolo_to_flat_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.yolo_to_flat_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF5722;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #E64A19;
+            }
+            QPushButton:pressed {
+                background-color: #D84315;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.yolo_to_flat_btn.clicked.connect(self.convert_yolo_to_flat)
+        buttons_layout.addWidget(self.yolo_to_flat_btn)
+        
         layout.addLayout(buttons_layout)
         
         # Results
@@ -1305,6 +1459,16 @@ class FormatConversionTab(QWidget):
         )
         if file_path:
             self.yolo_classes_file_edit.setText(file_path)
+    
+    def browse_flat_input(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select YOLO Dataset Directory")
+        if directory:
+            self.flat_input_edit.setText(directory)
+    
+    def browse_flat_output(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Output Directory")
+        if directory:
+            self.flat_output_edit.setText(directory)
     
     def convert_voc_to_yolo(self):
         xml_dir = self.xml_dir_edit.text().strip()
@@ -1990,6 +2154,73 @@ class FormatConversionTab(QWidget):
     def on_yolo_conversion_error(self, error_msg):
         self.yolo_to_voc_btn.setEnabled(True)
         self.parent.show_error(f"YOLO Conversion failed: {error_msg}")
+    
+    def convert_yolo_to_flat(self):
+        input_dataset = self.flat_input_edit.text().strip()
+        output_dir = self.flat_output_edit.text().strip()
+        
+        if not input_dataset:
+            self.parent.show_error("Please specify YOLO dataset directory")
+            return
+            
+        if not output_dir:
+            self.parent.show_error("Please specify output directory")
+            return
+        
+        # get options
+        merge_splits = self.merge_splits_checkbox.isChecked()
+        preserve_split_info = self.preserve_split_info_checkbox.isChecked()
+        
+        try:
+            self.yolo_to_flat_btn.setEnabled(False)
+            self.worker = WorkerThread(self._do_yolo_to_flat_conversion, 
+                                     input_dataset, output_dir, merge_splits, preserve_split_info)
+            self.worker.finished.connect(self.on_flat_conversion_complete)
+            self.worker.error.connect(self.on_flat_conversion_error)
+            self.worker.start()
+        except Exception as e:
+            self.parent.show_error(f"Conversion failed: {e}")
+    
+    def _do_yolo_to_flat_conversion(self, input_dataset, output_dir, merge_splits, preserve_split_info):
+        """
+        Convert YOLO dataset to flat images+labels format.
+        Uses the standalone yolo_to_flat_converter.py implementation.
+        """
+        import os
+        import sys
+        import subprocess
+        
+        # Get the path to the yolo_to_flat_converter.py script
+        script_path = os.path.join(os.path.dirname(__file__), "yolo_to_flat_converter.py")
+        
+        if not os.path.exists(script_path):
+            raise FileNotFoundError(f"yolo_to_flat_converter.py not found at {script_path}")
+        
+        # Build command arguments
+        cmd = [sys.executable, script_path, input_dataset, output_dir]
+        
+        if merge_splits:
+            cmd.append("--merge-splits")
+        
+        if preserve_split_info:
+            cmd.append("--preserve-split-info")
+        
+        # Run the conversion script
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            return result.stdout
+        except subprocess.CalledProcessError as e:
+            raise Exception(f"Conversion script failed: {e.stderr}")
+        except Exception as e:
+            raise Exception(f"Failed to run conversion script: {str(e)}")
+    
+    def on_flat_conversion_complete(self, result):
+        self.yolo_to_flat_btn.setEnabled(True)
+        self.conversion_results.setText(result)
+    
+    def on_flat_conversion_error(self, error_msg):
+        self.yolo_to_flat_btn.setEnabled(True)
+        self.parent.show_error(f"YOLO to Flat Conversion failed: {error_msg}")
 
 # Dataset Management Tab - dataset reduction, completion, and class replacement
 class DatasetManagementTab(QWidget):

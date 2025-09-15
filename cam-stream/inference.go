@@ -241,12 +241,15 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 
 // ModelResult represents detection results for a specific model
 type ModelResult struct {
-	ModelType          string      `json:"model_type"`
-	ServerID           string      `json:"server_id"`
-	Detections         []Detection `json:"detections"`
-	DisplayResultImage []byte      `json:"display_image"`
-	OriginalImage      []byte      `json:"-"` // Original image without detection boxes (for DEBUG mode)
-	Error              error       `json:"-"`
+	ModelType  string      `json:"model_type"`
+	ServerID   string      `json:"server_id"`
+	Detections []Detection `json:"detections"`
+	// image sent to their platform.
+	DisplayResultImage []byte `json:"display_image"`
+	// used for displayed on debug platform.
+	DisplayDebugImage []byte `json:"debug_img"`
+	OriginalImage     []byte `json:"-"` // Original image without detection boxes (for DEBUG mode)
+	Error             error  `json:"-"`
 }
 
 // ProcessFrameWithMultipleInference processes a frame with multiple inference servers concurrently
@@ -284,16 +287,24 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 		goroutineCount++
 		go func(s *InferenceServer, b InferenceServerBinding) {
 			// Create frame data copy for this goroutine
+			// TODO: shit codes.
 			frameDataCopy := make([]byte, len(frameData))
 			copy(frameDataCopy, frameData)
+			frameDataCopy2 := make([]byte, len(frameData))
+			copy(frameDataCopy2, frameData)
 
 			// Process inference
 			detections := processInferenceServer(frameDataCopy, s, &b, cameraConfig.ID)
 
 			// Draw detections on image copy
-			displayedImage, err := DrawDetections(frameDataCopy, detections, cameraConfig.Name)
+			displayedImage, err := DrawDetections(frameDataCopy, detections, cameraConfig.Name, false)
 			if err != nil {
 				Warn(fmt.Sprintf("failed to draw results for model %q: %v", s.ModelType, err))
+			}
+			// without conf label.
+			debugImage, err := DrawDetections(frameDataCopy2, detections, cameraConfig.Name, true)
+			if err != nil {
+				Warn(fmt.Sprintf("failed to draw debug image for model %q: %v", s.ModelType, err))
 			}
 
 			// Store original image copy for DEBUG mode
@@ -308,6 +319,7 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 				ServerID:           b.ServerID,
 				Detections:         detections,
 				DisplayResultImage: displayedImage,
+				DisplayDebugImage:  debugImage,
 				OriginalImage:      originalImageCopy,
 				Error:              nil,
 			}
@@ -454,98 +466,4 @@ func SendAlertIfConfigured(imageData []byte, modelType, cameraName string, score
 		cameraName, modelType, score))
 
 	return nil
-}
-
-// processFallDetectionResults processes fall detection results independently
-func processFallDetectionResults(server *InferenceServer, cameraConfig *CameraConfig, binding *InferenceServerBinding, manager *RTSPManager) {
-	// Find the running task for this camera and server
-	var taskID string
-	for id, task := range fallDetectionTasks {
-		if task.CameraID == cameraConfig.ID && task.ServerID == server.ID && task.Status == "running" {
-			taskID = id
-			break
-		}
-	}
-
-	if taskID == "" {
-		return
-	}
-
-	// Fetch multiple results
-	limit := 20
-	results, err := GetFallDetectionResults(server, taskID, &limit)
-	if err != nil || len(results) == 0 {
-		if err != nil {
-			Warn(fmt.Sprintf("failed to get fall detection results for task %s: %v", taskID, err))
-		}
-		return
-	}
-
-	// Process each fall detection result independently and save immediately
-	// This prevents multiple fall detection results from being overwritten
-	for _, result := range results {
-		// Decode the image from backend
-		var imageData []byte
-		if result.Image != "" {
-			decoded, err := base64.StdEncoding.DecodeString(result.Image)
-			if err != nil {
-				Warn(fmt.Sprintf("failed to decode fall detection image: %v", err))
-				continue
-			}
-			imageData = decoded
-		}
-
-		// Convert to Detection format
-		confidence := result.Results.Score
-		if confidence > 1.0 {
-			confidence = confidence / 100.0
-		}
-
-		// Check threshold
-		if confidence < binding.Threshold {
-			continue
-		}
-
-		detection := Detection{
-			Class:      "FALL_DETECTED",
-			Confidence: confidence,
-			X1:         int(result.Results.Location.Left),
-			Y1:         int(result.Results.Location.Top),
-			X2:         int(result.Results.Location.Left + result.Results.Location.Width),
-			Y2:         int(result.Results.Location.Top + result.Results.Location.Height),
-		}
-
-		// Draw detection on the original image
-		drawnImage, err := DrawDetections(imageData, []Detection{detection}, cameraConfig.Name)
-		if err != nil {
-			Warn(fmt.Sprintf("failed to draw fall detection: %v", err))
-			continue
-		}
-
-		// Store original image copy for DEBUG mode
-		var originalImageCopy []byte
-		if globalDebugMode {
-			originalImageCopy = make([]byte, len(imageData))
-			copy(originalImageCopy, imageData)
-		}
-
-		// Create ModelResult for this SINGLE detection
-		// For fall detection, each ModelResult should contain exactly ONE detection
-		singleModelResult := map[string]*ModelResult{
-			server.ModelType: {
-				ModelType:          server.ModelType,
-				ServerID:           binding.ServerID,
-				Detections:         []Detection{detection}, // Exactly one detection
-				DisplayResultImage: drawnImage,
-				OriginalImage:      originalImageCopy,
-				Error:              nil,
-			},
-		}
-
-		// Save this single fall detection result immediately (async)
-		// This ensures each fall detection is saved as a separate image/result
-		go manager.saveResultsByModel(cameraConfig.Name, singleModelResult)
-
-		// Alert will be sent by saveResultsByModel -> sendDetectionAlerts
-	}
 }

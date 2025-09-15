@@ -279,7 +279,7 @@ func (m *RTSPManager) saveResultsByModel(cameraName string, modelResults map[str
 				return
 			}
 			filePath := fmt.Sprintf("%s/%s", serverDir, filename)
-			if err := os.WriteFile(filePath, result.DisplayResultImage, 0644); err != nil {
+			if err := os.WriteFile(filePath, result.DisplayDebugImage, 0644); err != nil {
 				Warn(fmt.Sprintf("failed to save detection image for model %s: %v", modelType, err))
 				return
 			}

@@ -217,6 +217,17 @@
 
   <!-- 摄像头管理标签页 -->
   <div id="camerasSection">
+    <!-- 配置导入导出功能 -->
+    <div class="card">
+      <h3>配置管理</h3>
+      <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
+        <button class="btn btn-primary" onclick="exportConfig()" style="background: #27ae60;">+ 导入配置</button>
+        <button class="btn btn-primary" onclick="importConfig()" style="background: #f39c12;">< 导出配置</button>
+        <input type="file" id="configFileInput" accept=".json" style="display: none;" onchange="handleFileImport(this)">
+        <small style="color: #7f8c8d; font-size: 12px; margin-left: 10px;">支持导入/导出摄像头和推理服务器配置</small>
+      </div>
+    </div>
+
     <!-- 添加摄像头表单 -->
     <div class="card">
       <h3>添加摄像头</h3>
@@ -457,13 +468,18 @@
                             </label>
                         </div>
                         <div id="threshold-${server.id}" style="display: none; margin-left: 24px;">
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <label style="font-size: 12px; color: #666; min-width: 80px;">置信度阈值:</label>
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                <label style="font-size: 12px; color: #666; min-width: 80px;">最低阈值:</label>
                                 <input type="range" name="threshold-${server.id}" min="0" max="100" value="50" style="flex: 1;" oninput="updateThresholdValue('${server.id}', this.value)">
                                 <span id="threshold-value-${server.id}" style="font-size: 12px; color: #333; min-width: 40px;">50%</span>
                             </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <label style="font-size: 12px; color: #666; min-width: 80px;">最高阈值:</label>
+                                <input type="range" name="max-threshold-${server.id}" min="0" max="100" value="100" style="flex: 1;" oninput="updateMaxThresholdValue('${server.id}', this.value)">
+                                <span id="max-threshold-value-${server.id}" style="font-size: 12px; color: #333; min-width: 40px;">100%</span>
+                            </div>
                             <div style="font-size: 11px; color: #999; margin-top: 4px;">
-                                ${server.model_type === 'fall' ? '跌倒检测不使用阈值' : '检测置信度达到此阈值时保存图片'}
+                                ${server.model_type === 'fall' ? '跌倒检测不使用阈值' : '检测置信度在此范围内时保存图片 (0表示无最高限制)'}
                             </div>
                         </div>
                     </div>
@@ -496,10 +512,13 @@
         if (selectedServers.length > 0) {
           const bindings = selectedServers.map(serverId => {
             const thresholdInput = document.querySelector(`input[name="threshold-${serverId}"]`);
+            const maxThresholdInput = document.querySelector(`input[name="max-threshold-${serverId}"]`);
             const threshold = thresholdInput ? parseFloat(thresholdInput.value) / 100.0 : 0.5;
+            const maxThreshold = maxThresholdInput ? parseFloat(maxThresholdInput.value) / 100.0 : 1.0;
             return {
               server_id: serverId,
-              threshold: threshold
+              threshold: threshold,
+              max_threshold: maxThreshold === 1.0 ? 0 : maxThreshold // 0 means no max limit
             };
           });
           cameraData.inference_server_bindings = bindings;
@@ -645,12 +664,16 @@
         const currentBindings = camera.inference_server_bindings || [];
         const bindingMap = {};
         currentBindings.forEach(binding => {
-          bindingMap[binding.server_id] = binding.threshold;
+          bindingMap[binding.server_id] = {
+            threshold: binding.threshold,
+            max_threshold: binding.max_threshold || 0
+          };
         });
 
         container.innerHTML = servers.map(server => {
           const isSelected = bindingMap.hasOwnProperty(server.id);
-          const threshold = isSelected ? Math.round(bindingMap[server.id] * 100) : 50;
+          const threshold = isSelected ? Math.round(bindingMap[server.id].threshold * 100) : 50;
+          const maxThreshold = isSelected && bindingMap[server.id].max_threshold > 0 ? Math.round(bindingMap[server.id].max_threshold * 100) : 100;
 
           return `
                         <div style="margin-bottom: 12px; padding: 8px; border: 1px solid #eee; border-radius: 6px; background: #fafafa;">
@@ -668,15 +691,22 @@
                                 </label>
                             </div>
                             <div id="edit-threshold-${server.id}" style="display: ${isSelected ? 'block' : 'none'}; margin-left: 24px;">
-                                <div style="display: flex; align-items: center; gap: 8px;">
-                                    <label style="font-size: 12px; color: #666; min-width: 80px;">置信度阈值:</label>
+                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                    <label style="font-size: 12px; color: #666; min-width: 80px;">最低阈值:</label>
                                     <input type="range" name="edit-threshold-${server.id}" min="0" max="100" value="${threshold}" 
                                            style="flex: 1;" 
                                            oninput="updateEditThresholdValue('${server.id}', this.value)">
                                     <span id="edit-threshold-value-${server.id}" style="font-size: 12px; color: #333; min-width: 40px;">${threshold}%</span>
                                 </div>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <label style="font-size: 12px; color: #666; min-width: 80px;">最高阈值:</label>
+                                    <input type="range" name="edit-max-threshold-${server.id}" min="0" max="100" value="${maxThreshold}" 
+                                           style="flex: 1;" 
+                                           oninput="updateEditMaxThresholdValue('${server.id}', this.value)">
+                                    <span id="edit-max-threshold-value-${server.id}" style="font-size: 12px; color: #333; min-width: 40px;">${maxThreshold}%</span>
+                                </div>
                                 <div style="font-size: 11px; color: #999; margin-top: 4px;">
-                                    ${server.model_type === 'fall' ? '跌倒检测不使用阈值' : '检测置信度达到此阈值时保存图片'}
+                                    ${server.model_type === 'fall' ? '跌倒检测不使用阈值' : '检测置信度在此范围内时保存图片 (100%表示无最高限制)'}
                                 </div>
                             </div>
                         </div>
@@ -708,10 +738,13 @@
         if (selectedServers.length > 0) {
           const bindings = selectedServers.map(serverId => {
             const thresholdInput = document.querySelector(`input[name="edit-threshold-${serverId}"]`);
+            const maxThresholdInput = document.querySelector(`input[name="edit-max-threshold-${serverId}"]`);
             const threshold = thresholdInput ? parseFloat(thresholdInput.value) / 100.0 : 0.5;
+            const maxThreshold = maxThresholdInput ? parseFloat(maxThresholdInput.value) / 100.0 : 1.0;
             return {
               server_id: serverId,
-              threshold: threshold
+              threshold: threshold,
+              max_threshold: maxThreshold === 1.0 ? 0 : maxThreshold // 0 means no max limit
             };
           });
           cameraData.inference_server_bindings = bindings;
@@ -1038,6 +1071,79 @@
       const valueSpan = document.getElementById(`edit-threshold-value-${serverId}`);
       if (valueSpan) {
         valueSpan.textContent = `${value}%`;
+      }
+    }
+
+    // 最大阈值管理功能
+    function updateMaxThresholdValue(serverId, value) {
+      const valueSpan = document.getElementById(`max-threshold-value-${serverId}`);
+      if (valueSpan) {
+        valueSpan.textContent = `${value}%`;
+      }
+    }
+
+    function updateEditMaxThresholdValue(serverId, value) {
+      const valueSpan = document.getElementById(`edit-max-threshold-value-${serverId}`);
+      if (valueSpan) {
+        valueSpan.textContent = `${value}%`;
+      }
+    }
+
+    // 配置导入导出功能
+    function exportConfig() {
+      // 点击文件输入按钮进行导入
+      document.getElementById('configFileInput').click();
+    }
+
+    function importConfig() {
+      // 导出配置到文件
+      const apiBase = '/api';
+      const link = document.createElement('a');
+      link.href = `${apiBase}/config/export`;
+      link.download = 'cameras_config.json';
+      link.click();
+    }
+
+    async function handleFileImport(input) {
+      const file = input.files[0];
+      if (!file) {
+        return;
+      }
+
+      if (!file.name.toLowerCase().endsWith('.json')) {
+        alert('请选择JSON配置文件');
+        return;
+      }
+
+      if (!confirm('导入配置将替换当前所有设置，是否继续？')) {
+        input.value = ''; // 清空文件选择
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const response = await fetch('/api/config/import', {
+          method: 'POST',
+          body: await file.text() // 直接传送JSON数据
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          alert(`配置导入成功！已导入 ${result.data.cameras_count} 个摄像头和 ${result.data.inference_servers_count} 个推理服务器。`);
+          // 重新加载数据
+          cameraManager.loadCameras();
+          cameraManager.loadInferenceServersForForm();
+        } else {
+          alert('导入配置失败: ' + (result.error || result.message));
+        }
+      } catch (error) {
+        console.error('导入错误:', error);
+        alert('导入配置时发生错误，请检查文件格式');
+      } finally {
+        input.value = ''; // 清空文件选择
       }
     }
   </script>

@@ -459,11 +459,27 @@ class DatasetManager:
         
         return analysis
     
-    def split_dataset(self, output_path: str, train_ratio: float = 0.8, 
+    def split_dataset(self, output_path: str, train_ratio: float = 0.7, val_ratio: float = 0.15, test_ratio: float = 0.15,
                      split_mode: str = "random", seed: int = 42,
                      images_dir: Optional[str] = None, labels_dir: Optional[str] = None) -> str:
-        """split dataset into train/val sets"""
-        logger.info(f"starting dataset split with ratio {train_ratio}")
+        """split dataset into train/val/test sets
+        
+        Args:
+            output_path: output directory path
+            train_ratio: ratio for training set (default: 0.7)
+            val_ratio: ratio for validation set (default: 0.15)
+            test_ratio: ratio for test set (default: 0.15)
+            split_mode: splitting mode ('random' or 'sequential')
+            seed: random seed for reproducible splits
+            images_dir: custom images directory
+            labels_dir: custom labels directory
+        """
+        # validate ratios
+        total_ratio = train_ratio + val_ratio + test_ratio
+        if abs(total_ratio - 1.0) > 0.001:
+            raise ValueError(f"ratios must sum to 1.0, got {total_ratio:.3f}")
+        
+        logger.info(f"starting dataset split with ratios - train: {train_ratio}, val: {val_ratio}, test: {test_ratio}")
         
         # determine source directories
         if images_dir:
@@ -492,10 +508,14 @@ class DatasetManager:
         if split_mode == "random":
             random.shuffle(image_files)
         
-        # calculate split point
-        split_point = int(len(image_files) * train_ratio)
-        train_files = image_files[:split_point]
-        val_files = image_files[split_point:]
+        # calculate split points
+        total_files = len(image_files)
+        train_end = int(total_files * train_ratio)
+        val_end = train_end + int(total_files * val_ratio)
+        
+        train_files = image_files[:train_end]
+        val_files = image_files[train_end:val_end]
+        test_files = image_files[val_end:]
         
         # create output directories
         output_dir = Path(output_path)
@@ -503,8 +523,10 @@ class DatasetManager:
         train_label_dir = output_dir / "train" / "labels"
         val_img_dir = output_dir / "val" / "images"
         val_label_dir = output_dir / "val" / "labels"
+        test_img_dir = output_dir / "test" / "images"
+        test_label_dir = output_dir / "test" / "labels"
         
-        for dir_path in [train_img_dir, train_label_dir, val_img_dir, val_label_dir]:
+        for dir_path in [train_img_dir, train_label_dir, val_img_dir, val_label_dir, test_img_dir, test_label_dir]:
             dir_path.mkdir(parents=True, exist_ok=True)
         
         # copy files
@@ -529,12 +551,14 @@ class DatasetManager:
         
         train_img_count, train_label_count = copy_files(train_files, train_img_dir, train_label_dir)
         val_img_count, val_label_count = copy_files(val_files, val_img_dir, val_label_dir)
+        test_img_count, test_label_count = copy_files(test_files, test_img_dir, test_label_dir)
         
         # create data.yaml file
         data_yaml = {
             'path': str(output_dir.absolute()),
             'train': 'train/images',
             'val': 'val/images',
+            'test': 'test/images',
             'names': self.load_class_names()
         }
         
@@ -544,11 +568,11 @@ class DatasetManager:
         summary = (
             f"dataset split completed:\n"
             f"- output: {output_path}\n"
-            f"- train ratio: {train_ratio:.1%}\n"
+            f"- train ratio: {train_ratio:.1%} ({train_img_count} images, {train_label_count} labels)\n"
+            f"- val ratio: {val_ratio:.1%} ({val_img_count} images, {val_label_count} labels)\n"
+            f"- test ratio: {test_ratio:.1%} ({test_img_count} images, {test_label_count} labels)\n"
             f"- mode: {split_mode}\n"
-            f"- seed: {seed}\n"
-            f"- train: {train_img_count} images, {train_label_count} labels\n"
-            f"- val: {val_img_count} images, {val_label_count} labels"
+            f"- seed: {seed}"
         )
         
         logger.info(summary)

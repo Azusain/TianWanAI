@@ -13,7 +13,7 @@ import (
 )
 
 // DrawDetections draws detection boxes on the image
-func DrawDetections(imageData []byte, detections []Detection, cameraName string) ([]byte, error) {
+func DrawDetections(imageData []byte, detections []Detection, cameraName string, saveConfidenceLabel bool) ([]byte, error) {
 	// Decode JPEG
 	img, err := jpeg.Decode(bytes.NewReader(imageData))
 	if err != nil {
@@ -27,7 +27,12 @@ func DrawDetections(imageData []byte, detections []Detection, cameraName string)
 
 	// Draw detection boxes
 	for _, det := range detections {
-		drawDetectionBox(rgbaImg, det)
+		boxColor := getClassColor(det.Class)
+		drawThickRectangle(rgbaImg, det.X1, det.Y1, det.X2, det.Y2, boxColor, 3)
+		if !saveConfidenceLabel {
+			continue
+		}
+		drawConfidenceLabel(rgbaImg, det)
 	}
 
 	// Add timestamp and camera name overlay with clear text
@@ -40,21 +45,6 @@ func DrawDetections(imageData []byte, detections []Detection, cameraName string)
 	}
 
 	return buf.Bytes(), nil
-}
-
-// drawDetectionBox draws a single detection box with confidence score
-func drawDetectionBox(img *image.RGBA, det Detection) {
-	// Debug: log detection details
-	// fmt.Printf("Drawing detection: Class=%s, Confidence=%.2f, Coords=(%d,%d,%d,%d)\n", det.Class, det.Confidence, det.X1, det.Y1, det.X2, det.Y2)
-
-	// Define colors for different classes
-	boxColor := getClassColor(det.Class)
-
-	// Draw box border (3 pixels wide for visibility)
-	drawThickRectangle(img, det.X1, det.Y1, det.X2, det.Y2, boxColor, 3)
-
-	// Draw confidence score label
-	drawConfidenceLabel(img, det)
 }
 
 // drawThickRectangle draws a rectangle with specified thickness

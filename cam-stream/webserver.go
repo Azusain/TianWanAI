@@ -131,6 +131,10 @@ func (ws *WebServer) Start() error {
 	api.HandleFunc("/image-servers", ws.handleAPIImageServers).Methods("GET", "OPTIONS")
 	api.HandleFunc("/server-images/{serverId}", ws.handleAPIServerImages).Methods("GET", "OPTIONS")
 
+	// Config import/export routes
+	api.HandleFunc("/config/export", ws.handleAPIConfigExport).Methods("GET", "OPTIONS")
+	api.HandleFunc("/config/import", ws.handleAPIConfigImport).Methods("POST", "OPTIONS")
+
 	// Web Routes
 	router.HandleFunc("/", ws.handleIndex).Methods("GET")
 	router.HandleFunc("/cameras", ws.handleCameraManagement).Methods("GET")
@@ -181,8 +185,9 @@ type InferenceServer struct {
 
 // InferenceServerBinding represents a binding between camera and inference server with threshold
 type InferenceServerBinding struct {
-	ServerID  string  `json:"server_id"`
-	Threshold float64 `json:"threshold"` // Confidence threshold (0.0-1.0) for saving images
+	ServerID     string  `json:"server_id"`
+	Threshold    float64 `json:"threshold"`     // Minimum confidence threshold (0.0-1.0) for saving images
+	MaxThreshold float64 `json:"max_threshold"` // Maximum confidence threshold (0.0-1.0) for saving images
 }
 
 type CameraConfig struct {
@@ -219,7 +224,7 @@ type FallDetectionTaskState struct {
 	StartedAt time.Time `json:"started_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	ErrorMsg  string    `json:"error_msg,omitempty"`
-	
+
 	// Polling mechanism fields (not persisted to JSON)
 	pollTicker   *time.Ticker `json:"-"` // Ticker for periodic result polling
 	pollStopChan chan bool    `json:"-"` // Channel to stop the polling goroutine
@@ -1015,13 +1020,13 @@ func (ws *WebServer) startFallDetectionResultPolling(task *FallDetectionTaskStat
 
 				ws.processFallResultsFromPolling(results, server, camera, binding)
 
-		case <-task.pollStopChan:
-			// Safely stop ticker within goroutine to avoid race condition
-			if task.pollTicker != nil {
-				task.pollTicker.Stop()
-			}
-			Info(fmt.Sprintf("stopped fall detection result polling for task %s", task.TaskID))
-			return
+			case <-task.pollStopChan:
+				// Safely stop ticker within goroutine to avoid race condition
+				if task.pollTicker != nil {
+					task.pollTicker.Stop()
+				}
+				Info(fmt.Sprintf("stopped fall detection result polling for task %s", task.TaskID))
+				return
 			}
 		}
 	}()
@@ -1051,8 +1056,12 @@ func (ws *WebServer) processFallResultsFromPolling(results []FallDetectionResult
 			confidence = confidence / 100.0
 		}
 
-		// Check threshold
+		// Check threshold range (min and max)
 		if confidence < binding.Threshold {
+			continue
+		}
+		// Check max threshold if set (0 means no max limit)
+		if binding.MaxThreshold > 0 && confidence > binding.MaxThreshold {
 			continue
 		}
 
@@ -1066,9 +1075,15 @@ func (ws *WebServer) processFallResultsFromPolling(results []FallDetectionResult
 		}
 
 		// Draw detection on the original image
-		drawnImage, err := DrawDetections(imageData, []Detection{detection}, camera.Name)
+		drawnImage, err := DrawDetections(imageData, []Detection{detection}, camera.Name, false)
 		if err != nil {
-			Warn(fmt.Sprintf("failed to draw fall detection: %v", err))
+			Warn(fmt.Sprintf("failed to draw image for fall detection: %v", err))
+			continue
+		}
+		// debug image.
+		debugImage, err := DrawDetections(imageData, []Detection{detection}, camera.Name, true)
+		if err != nil {
+			Warn(fmt.Sprintf("failed to draw debug image for fall detection: %v", err))
 			continue
 		}
 
@@ -1086,6 +1101,7 @@ func (ws *WebServer) processFallResultsFromPolling(results []FallDetectionResult
 				ServerID:           binding.ServerID,
 				Detections:         []Detection{detection},
 				DisplayResultImage: drawnImage,
+				DisplayDebugImage:  debugImage,
 				OriginalImage:      originalImageCopy,
 				Error:              nil,
 			},
@@ -1183,10 +1199,10 @@ func (ws *WebServer) stopFallDetectionTasksForCamera(cameraID, serverID string) 
 	// Stop each task
 	for _, taskID := range tasksToStop {
 		task := fallDetectionTasks[taskID]
-		
+
 		// Stop the result polling first
 		ws.stopFallDetectionResultPolling(task)
-		
+
 		err := StopFallDetection(server, taskID)
 		if err != nil {
 			Warn(fmt.Sprintf("failed to stop fall detection task %s: %v", taskID, err))
@@ -1201,4 +1217,150 @@ func (ws *WebServer) stopFallDetectionTasksForCamera(cameraID, serverID string) 
 			Info(fmt.Sprintf("stopped fall detection task %s with polling for camera %s with server %s", taskID, cameraID, serverID))
 		}
 	}
+}
+
+// Config Export/Import API Handlers
+
+// handleAPIConfigExport exports the current camera configuration as JSON
+func (ws *WebServer) handleAPIConfigExport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "attachment; filename=cameras.json")
+
+	// Export current dataStore as JSON
+	data, err := json.MarshalIndent(dataStore, "", "  ")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		response := APIResponse{
+			Success: false,
+			Message: "Failed to export configuration",
+			Error:   err.Error(),
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Return the JSON data directly for download
+	w.Write(data)
+	Info("configuration exported successfully")
+}
+
+// handleAPIConfigImport imports camera configuration from uploaded JSON
+func (ws *WebServer) handleAPIConfigImport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		response := APIResponse{
+			Success: false,
+			Message: "Method not allowed",
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Read the uploaded JSON data
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		response := APIResponse{
+			Success: false,
+			Message: "Failed to read request body",
+			Error:   err.Error(),
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Parse the JSON data
+	var importedData DataStore
+	if err := json.Unmarshal(body, &importedData); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		response := APIResponse{
+			Success: false,
+			Message: "Invalid JSON format",
+			Error:   err.Error(),
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Validate imported data
+	if importedData.Cameras == nil {
+		importedData.Cameras = make(map[string]*CameraConfig)
+	}
+	if importedData.InferenceServers == nil {
+		importedData.InferenceServers = make(map[string]*InferenceServer)
+	}
+
+	// Stop all running cameras and fall detection tasks before import
+	if ws.rtspManager != nil {
+		for cameraID := range dataStore.Cameras {
+			ws.rtspManager.StopCamera(cameraID)
+		}
+	}
+
+	// Stop all fall detection tasks
+	for _, task := range fallDetectionTasks {
+		ws.stopFallDetectionResultPolling(task)
+	}
+	fallDetectionTasks = make(map[string]*FallDetectionTaskState)
+
+	// Replace current dataStore with imported data
+	dataStore = &importedData
+
+	// Ensure max_threshold field is set for existing bindings without it
+	for _, camera := range dataStore.Cameras {
+		for i := range camera.InferenceServerBindings {
+			binding := &camera.InferenceServerBindings[i]
+			if binding.MaxThreshold == 0 {
+				// Set default max threshold to 1.0 if not specified
+				binding.MaxThreshold = 1.0
+			}
+		}
+	}
+
+	// Save the imported configuration
+	if err := saveDataStore(); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		response := APIResponse{
+			Success: false,
+			Message: "Failed to save imported configuration",
+			Error:   err.Error(),
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Start imported cameras
+	if ws.rtspManager != nil {
+		for _, camera := range dataStore.Cameras {
+			if camera.Enabled && camera.Running {
+				if err := ws.rtspManager.StartCamera(camera); err != nil {
+					Warn(fmt.Sprintf("failed to start imported camera %s: %v", camera.ID, err))
+				}
+
+				// Start fall detection tasks for fall detection servers
+				for _, binding := range camera.InferenceServerBindings {
+					server, serverExists := dataStore.InferenceServers[binding.ServerID]
+					if serverExists && server.Enabled && server.ModelType == "fall" {
+						ws.startFallDetectionTask(camera, server)
+					}
+				}
+			}
+		}
+	}
+
+	Info(fmt.Sprintf("configuration imported successfully: %d cameras, %d inference servers", 
+		len(dataStore.Cameras), len(dataStore.InferenceServers)))
+
+	response := APIResponse{
+		Success: true,
+		Message: fmt.Sprintf("Configuration imported successfully: %d cameras, %d inference servers", 
+			len(dataStore.Cameras), len(dataStore.InferenceServers)),
+		Data: map[string]interface{}{
+			"cameras_count":          len(dataStore.Cameras),
+			"inference_servers_count": len(dataStore.InferenceServers),
+		},
+	}
+	json.NewEncoder(w).Encode(response)
 }
