@@ -2401,7 +2401,7 @@ class DatasetManagementTab(QWidget):
         layout.addWidget(complete_group)
         
         # Class Replacement Tool
-        class_replace_group = QGroupBox("Class ID Replacement Tool")
+        class_replace_group = QGroupBox("Class ID Mapping Tool")
         class_replace_group.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         class_replace_group.setStyleSheet("""
             QGroupBox {
@@ -2417,25 +2417,256 @@ class DatasetManagementTab(QWidget):
                 padding: 0 10px 0 10px;
             }
         """)
-        class_replace_layout = QFormLayout()
-        class_replace_layout.setVerticalSpacing(12)
+        class_replace_layout = QVBoxLayout()
+        class_replace_layout.setSpacing(12)
         
         # Dataset directory for class replacement
+        dataset_row = QHBoxLayout()
+        dataset_label = QLabel("dataset directory:")
+        dataset_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        dataset_row.addWidget(dataset_label)
+        
         self.replace_dataset_edit = QLineEdit()
         self.replace_dataset_edit.setFont(QFont("Arial", 11))
+        self.replace_dataset_edit.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QLineEdit:focus {
+                border-color: #4CAF50;
+            }
+        """)
+        dataset_row.addWidget(self.replace_dataset_edit)
+        
         self.replace_dataset_browse = QPushButton("Browse...")
         self.replace_dataset_browse.setFont(QFont("Arial", 11))
         self.replace_dataset_browse.clicked.connect(self.browse_replace_dataset)
-        replace_dataset_row = QHBoxLayout()
-        replace_dataset_row.addWidget(self.replace_dataset_edit)
-        replace_dataset_row.addWidget(self.replace_dataset_browse)
-        class_replace_layout.addRow("Dataset Directory:", replace_dataset_row)
+        dataset_row.addWidget(self.replace_dataset_browse)
         
-        # New class ID
-        self.new_class_id_spin = QSpinBox()
-        self.new_class_id_spin.setRange(0, 100)
-        self.new_class_id_spin.setValue(0)
-        class_replace_layout.addRow("New Class ID:", self.new_class_id_spin)
+        class_replace_layout.addLayout(dataset_row)
+        
+        # Class mapping configuration
+        mapping_label = QLabel("class ID mapping:")
+        mapping_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        class_replace_layout.addWidget(mapping_label)
+        
+        # Mapping list widget
+        self.class_mapping_list = QListWidget()
+        self.class_mapping_list.setMaximumHeight(120)
+        self.class_mapping_list.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+                alternate-background-color: #f9f9f9;
+            }
+        """)
+        class_replace_layout.addWidget(self.class_mapping_list)
+        
+        # Mapping controls - split into two rows to avoid crowding
+        # First row: input controls
+        input_controls_layout = QHBoxLayout()
+        input_controls_layout.setSpacing(10)
+        
+        # Add mapping input with proper styling
+        self.from_class_spin = QSpinBox()
+        self.from_class_spin.setRange(0, 100)
+        self.from_class_spin.setPrefix("from: ")
+        self.from_class_spin.setMinimumWidth(100)
+        self.from_class_spin.setMinimumHeight(35)
+        self.from_class_spin.setFont(QFont("Arial", 11))
+        self.from_class_spin.setStyleSheet("""
+            QSpinBox {
+                padding: 6px 10px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+                font-size: 11px;
+            }
+            QSpinBox:focus {
+                border-color: #4CAF50;
+            }
+        """)
+        input_controls_layout.addWidget(self.from_class_spin)
+        
+        arrow_label = QLabel(" → ")
+        arrow_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        arrow_label.setMinimumHeight(35)
+        arrow_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        input_controls_layout.addWidget(arrow_label)
+        
+        self.to_class_spin = QSpinBox()
+        self.to_class_spin.setRange(0, 100)
+        self.to_class_spin.setPrefix("to: ")
+        self.to_class_spin.setMinimumWidth(100)
+        self.to_class_spin.setMinimumHeight(35)
+        self.to_class_spin.setFont(QFont("Arial", 11))
+        self.to_class_spin.setStyleSheet("""
+            QSpinBox {
+                padding: 6px 10px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+                font-size: 11px;
+            }
+            QSpinBox:focus {
+                border-color: #4CAF50;
+            }
+        """)
+        input_controls_layout.addWidget(self.to_class_spin)
+        
+        self.add_mapping_btn = QPushButton("Add")
+        self.add_mapping_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        self.add_mapping_btn.setMinimumWidth(80)
+        self.add_mapping_btn.setMinimumHeight(35)
+        self.add_mapping_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #3d8b40;
+            }
+        """)
+        self.add_mapping_btn.clicked.connect(self.add_class_mapping)
+        input_controls_layout.addWidget(self.add_mapping_btn)
+        
+        input_controls_layout.addStretch()
+        class_replace_layout.addLayout(input_controls_layout)
+        
+        # Add some spacing between rows
+        class_replace_layout.addSpacing(8)
+        
+        # Second row: management buttons
+        management_buttons_layout = QHBoxLayout()
+        management_buttons_layout.setSpacing(10)
+        
+        self.remove_mapping_btn = QPushButton("Remove Selected")
+        self.remove_mapping_btn.setFont(QFont("Arial", 11))
+        self.remove_mapping_btn.setMinimumHeight(35)
+        self.remove_mapping_btn.setMinimumWidth(120)
+        self.remove_mapping_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
+            QPushButton:pressed {
+                background-color: #b71c1c;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #999999;
+            }
+        """)
+        self.remove_mapping_btn.clicked.connect(self.remove_selected_mapping)
+        self.remove_mapping_btn.setEnabled(False)
+        management_buttons_layout.addWidget(self.remove_mapping_btn)
+        
+        self.clear_mappings_btn = QPushButton("Clear All")
+        self.clear_mappings_btn.setFont(QFont("Arial", 11))
+        self.clear_mappings_btn.setMinimumHeight(35)
+        self.clear_mappings_btn.setMinimumWidth(80)
+        self.clear_mappings_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ff9800;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #f57c00;
+            }
+            QPushButton:pressed {
+                background-color: #e65100;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #999999;
+            }
+        """)
+        self.clear_mappings_btn.clicked.connect(self.clear_all_mappings)
+        self.clear_mappings_btn.setEnabled(False)
+        management_buttons_layout.addWidget(self.clear_mappings_btn)
+        
+        self.load_mapping_btn = QPushButton("Load...")
+        self.load_mapping_btn.setFont(QFont("Arial", 11))
+        self.load_mapping_btn.setMinimumHeight(35)
+        self.load_mapping_btn.setMinimumWidth(70)
+        self.load_mapping_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196f3;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #1976d2;
+            }
+            QPushButton:pressed {
+                background-color: #1565c0;
+            }
+        """)
+        self.load_mapping_btn.clicked.connect(self.load_class_mapping)
+        management_buttons_layout.addWidget(self.load_mapping_btn)
+        
+        self.save_mapping_btn = QPushButton("Save...")
+        self.save_mapping_btn.setFont(QFont("Arial", 11))
+        self.save_mapping_btn.setMinimumHeight(35)
+        self.save_mapping_btn.setMinimumWidth(70)
+        self.save_mapping_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #9c27b0;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #7b1fa2;
+            }
+            QPushButton:pressed {
+                background-color: #6a1b9a;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #999999;
+            }
+        """)
+        self.save_mapping_btn.clicked.connect(self.save_class_mapping)
+        self.save_mapping_btn.setEnabled(False)
+        management_buttons_layout.addWidget(self.save_mapping_btn)
+        
+        management_buttons_layout.addStretch()
+        class_replace_layout.addLayout(management_buttons_layout)
+        
+        # enable/disable buttons based on selection
+        self.class_mapping_list.itemSelectionChanged.connect(self.update_mapping_buttons)
+        
+        # store mapping data
+        self.class_mappings = {}  # {from_id: to_id}
         
         class_replace_group.setLayout(class_replace_layout)
         layout.addWidget(class_replace_group)
@@ -2895,86 +3126,134 @@ class DatasetManagementTab(QWidget):
         self.parent.show_error(f"Dataset completion failed: {error_msg}")
     
     def replace_class_ids(self):
-        """Replace all class IDs in label files with a specified new class ID"""
+        """Replace class IDs in label files based on mapping configuration"""
         dataset_dir = self.replace_dataset_edit.text().strip()
-        new_class_id = self.new_class_id_spin.value()
         
         if not dataset_dir:
-            self.parent.show_error("Please specify dataset directory")
+            self.parent.show_error("please specify dataset directory")
+            return
+        
+        if not self.class_mappings:
+            self.parent.show_error("no class mappings defined. please add at least one mapping")
             return
         
         try:
             self.replace_btn.setEnabled(False)
-            self.worker = WorkerThread(self._do_class_replacement, dataset_dir, new_class_id)
+            self.worker = WorkerThread(self._do_class_replacement, dataset_dir, self.class_mappings)
             self.worker.finished.connect(self.on_replacement_complete)
             self.worker.error.connect(self.on_replacement_error)
             self.worker.start()
         except Exception as e:
-            self.parent.show_error(f"Class replacement failed: {e}")
+            self.parent.show_error(f"class replacement failed: {e}")
     
-    def _do_class_replacement(self, dataset_dir, new_class_id):
-        """Replace all class IDs in YOLO label files with the specified new class ID"""
+    def _do_class_replacement(self, dataset_dir, class_mappings):
+        """Replace class IDs in YOLO label files based on mapping dictionary"""
         import os
-        import re
+        from pathlib import Path
         
-        labels_dir = os.path.join(dataset_dir, 'labels')
+        dataset_path = Path(dataset_dir)
         
-        if not os.path.exists(labels_dir):
-            raise Exception(f"Labels directory not found: {labels_dir}")
+        # find labels directory - support multiple structures
+        possible_label_dirs = [
+            dataset_path / "labels",
+            dataset_path / "train" / "labels",
+            dataset_path / "val" / "labels",
+            dataset_path / "test" / "labels"
+        ]
+        
+        found_dirs = []
+        for label_dir in possible_label_dirs:
+            if label_dir.exists() and any(label_dir.glob("*.txt")):
+                found_dirs.append(label_dir)
+        
+        if not found_dirs:
+            raise Exception(f"no label directories found in dataset: {dataset_dir}")
         
         processed_files = 0
         total_annotations = 0
+        replacement_counts = {}
         
-        for filename in os.listdir(labels_dir):
-            if not filename.endswith('.txt'):
-                continue
-                
-            label_path = os.path.join(labels_dir, filename)
+        # initialize replacement counts
+        for from_id in class_mappings.keys():
+            replacement_counts[from_id] = 0
+        
+        for labels_dir in found_dirs:
+            print(f"processing labels directory: {labels_dir}")
             
-            try:
-                with open(label_path, 'r') as f:
-                    lines = f.readlines()
-                
-                if not lines:  # Skip empty files
-                    continue
+            for label_file in labels_dir.glob("*.txt"):
+                try:
+                    # read all lines
+                    with open(label_file, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
                     
-                modified_lines = []
-                file_modified = False
-                
-                for line in lines:
-                    line = line.strip()
-                    if not line:  # Skip empty lines
-                        modified_lines.append(line)
+                    if not lines:  # skip empty files
                         continue
-                    
-                    # Parse YOLO format: class_id x_center y_center width height
-                    parts = line.split()
-                    if len(parts) >= 5:
-                        # Replace class ID with new class ID
-                        old_class_id = parts[0]
-                        parts[0] = str(new_class_id)
-                        modified_line = ' '.join(parts)
-                        modified_lines.append(modified_line)
                         
-                        if old_class_id != str(new_class_id):
-                            file_modified = True
-                        total_annotations += 1
-                    else:
-                        # Keep invalid lines as is (shouldn't happen in proper YOLO format)
-                        modified_lines.append(line)
-                
-                # Write back to file if modified
-                if file_modified or len(modified_lines) != len(lines):
-                    with open(label_path, 'w') as f:
-                        for line in modified_lines:
-                            if line.strip():  # Only write non-empty lines
-                                f.write(line + '\n')
-                    processed_files += 1
+                    modified_lines = []
+                    file_modified = False
                     
-            except Exception as e:
-                print(f"Error processing {label_path}: {e}")
+                    for line in lines:
+                        line = line.strip()
+                        if not line:  # skip empty lines
+                            continue
+                        
+                        # parse YOLO format: class_id x_center y_center width height
+                        parts = line.split()
+                        if len(parts) >= 5:
+                            try:
+                                old_class_id = int(parts[0])
+                                
+                                # check if this class ID should be mapped
+                                if old_class_id in class_mappings:
+                                    new_class_id = class_mappings[old_class_id]
+                                    parts[0] = str(new_class_id)
+                                    replacement_counts[old_class_id] += 1
+                                    file_modified = True
+                                
+                                modified_line = ' '.join(parts)
+                                modified_lines.append(modified_line)
+                                total_annotations += 1
+                                
+                            except ValueError:
+                                # keep lines with invalid class ID format
+                                modified_lines.append(line)
+                        else:
+                            # keep lines with invalid format
+                            modified_lines.append(line)
+                    
+                    # write back to file if modified
+                    if file_modified:
+                        with open(label_file, 'w', encoding='utf-8') as f:
+                            for line in modified_lines:
+                                f.write(line + '\n')
+                        processed_files += 1
+                        
+                except Exception as e:
+                    print(f"error processing {label_file}: {e}")
         
-        return f"Processed {processed_files} label files, updated {total_annotations} annotations to class ID {new_class_id}"
+        # create summary
+        summary_lines = [
+            f"class ID mapping completed:",
+            f"- processed {processed_files} label files",
+            f"- updated {total_annotations} total annotations",
+            f"- processed directories: {', '.join([str(d) for d in found_dirs])}"
+        ]
+        
+        # add replacement details
+        if replacement_counts:
+            summary_lines.append("- replacements made:")
+            for from_id in sorted(replacement_counts.keys()):
+                count = replacement_counts[from_id]
+                to_id = class_mappings[from_id]
+                summary_lines.append(f"  • class {from_id} → {to_id}: {count} annotations")
+        
+        total_replacements = sum(replacement_counts.values())
+        if total_replacements == 0:
+            summary_lines.append("⚠ no annotations found matching the specified class mappings")
+        else:
+            summary_lines.append(f"✓ successfully replaced {total_replacements} annotations")
+        
+        return "\n".join(summary_lines)
     
     def on_replacement_complete(self, result):
         self.replace_btn.setEnabled(True)
@@ -3216,6 +3495,130 @@ class DatasetManagementTab(QWidget):
         self.remove_class_btn.setEnabled(True)
         self.parent.show_error(f"class removal failed: {error_msg}")
     
+    # class mapping management methods
+    def add_class_mapping(self):
+        """add a class ID mapping to the list"""
+        from_id = self.from_class_spin.value()
+        to_id = self.to_class_spin.value()
+        
+        # check if mapping already exists
+        if from_id in self.class_mappings:
+            self.parent.show_error(f"mapping for class {from_id} already exists (maps to {self.class_mappings[from_id]})")
+            return
+        
+        # add mapping
+        self.class_mappings[from_id] = to_id
+        
+        # update list widget
+        self.update_mapping_list()
+        
+        # update buttons
+        self.update_mapping_buttons()
+    
+    def remove_selected_mapping(self):
+        """remove the selected mapping from the list"""
+        current_item = self.class_mapping_list.currentItem()
+        if current_item:
+            # parse the mapping from the display text
+            text = current_item.text()
+            if " → " in text:
+                from_str = text.split(" → ")[0]
+                try:
+                    from_id = int(from_str)
+                    if from_id in self.class_mappings:
+                        del self.class_mappings[from_id]
+                        self.update_mapping_list()
+                        self.update_mapping_buttons()
+                except ValueError:
+                    pass
+    
+    def clear_all_mappings(self):
+        """clear all mappings from the list"""
+        self.class_mappings.clear()
+        self.update_mapping_list()
+        self.update_mapping_buttons()
+    
+    def update_mapping_list(self):
+        """update the mapping list widget display"""
+        self.class_mapping_list.clear()
+        
+        # sort mappings by from_id for consistent display
+        for from_id in sorted(self.class_mappings.keys()):
+            to_id = self.class_mappings[from_id]
+            display_text = f"{from_id} → {to_id}"
+            self.class_mapping_list.addItem(display_text)
+    
+    def update_mapping_buttons(self):
+        """enable/disable buttons based on mapping state and selection"""
+        has_mappings = len(self.class_mappings) > 0
+        has_selection = self.class_mapping_list.currentRow() >= 0
+        
+        self.remove_mapping_btn.setEnabled(has_selection)
+        self.clear_mappings_btn.setEnabled(has_mappings)
+        self.save_mapping_btn.setEnabled(has_mappings)
+    
+    def load_class_mapping(self):
+        """load class mapping from a JSON file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "load class mapping", "",
+            "JSON files (*.json);;All files (*)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                # validate the loaded data
+                if not isinstance(data, dict):
+                    self.parent.show_error("invalid mapping file format: expected JSON object")
+                    return
+                
+                # convert string keys to integers and validate values
+                new_mappings = {}
+                for key, value in data.items():
+                    try:
+                        from_id = int(key)
+                        to_id = int(value)
+                        new_mappings[from_id] = to_id
+                    except (ValueError, TypeError):
+                        self.parent.show_error(f"invalid mapping entry: {key} -> {value}")
+                        return
+                
+                # replace current mappings
+                self.class_mappings = new_mappings
+                self.update_mapping_list()
+                self.update_mapping_buttons()
+                
+                self.parent.statusBar().showMessage(f"loaded {len(new_mappings)} mappings from {file_path}")
+                
+            except Exception as e:
+                self.parent.show_error(f"failed to load mapping file: {e}")
+    
+    def save_class_mapping(self):
+        """save class mapping to a JSON file"""
+        if not self.class_mappings:
+            self.parent.show_error("no mappings to save")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "save class mapping", "class_mapping.json",
+            "JSON files (*.json);;All files (*)"
+        )
+        
+        if file_path:
+            try:
+                # convert integer keys to strings for JSON compatibility
+                json_data = {str(k): v for k, v in self.class_mappings.items()}
+                
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(json_data, f, indent=2, ensure_ascii=False)
+                
+                self.parent.statusBar().showMessage(f"saved {len(self.class_mappings)} mappings to {file_path}")
+                
+            except Exception as e:
+                self.parent.show_error(f"failed to save mapping file: {e}")
+
     # dataset list management methods
     def add_dataset(self):
         """add a dataset to the list for merging"""

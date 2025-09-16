@@ -103,29 +103,26 @@ func drawConfidenceLabel(img *image.RGBA, det Detection) {
 	fontSize := 16.0
 	fontPath := "./assets/fonts/msyh.ttc"
 
-	fontLoaded := false
 	if err := ctx.LoadFontFace(fontPath, fontSize); err != nil {
 		// Fall back to manual text drawing if font loading fails
 		drawManualConfidenceText(img, labelX, labelY, confidenceText)
 		return
 	}
-	fontLoaded = true
 
-	if fontLoaded {
-		// Use gg library for high-quality text rendering
-		// Draw background rectangle for better readability
-		textWidth, textHeight := ctx.MeasureString(confidenceText)
-		padding := 4.0
+	// Use gg library for high-quality text rendering
+	// Draw background rectangle for better readability
+	textWidth, textHeight := ctx.MeasureString(confidenceText)
+	padding := 4.0
 
-		// Draw semi-transparent background
-		ctx.SetColor(color.RGBA{0, 0, 0, 180})
-		ctx.DrawRectangle(float64(labelX)-padding, float64(labelY)-textHeight-padding, textWidth+2*padding, textHeight+2*padding)
-		ctx.Fill()
+	// Draw semi-transparent background
+	ctx.SetColor(color.RGBA{0, 0, 0, 180})
+	ctx.DrawRectangle(float64(labelX)-padding, float64(labelY)-textHeight-padding, textWidth+2*padding, textHeight+2*padding)
+	ctx.Fill()
 
-		// Draw confidence text in bright yellow/green
-		ctx.SetColor(color.RGBA{255, 255, 0, 255})
-		ctx.DrawString(confidenceText, float64(labelX), float64(labelY))
-	}
+	// Draw confidence text in bright yellow/green
+	ctx.SetColor(color.RGBA{255, 255, 0, 255})
+	ctx.DrawString(confidenceText, float64(labelX), float64(labelY))
+
 }
 
 // drawManualConfidenceText draws confidence text manually when font loading fails
@@ -198,12 +195,6 @@ func addClearOverlay(img *image.RGBA, cameraName string, detectionCount int) {
 	width := bounds.Max.X
 	height := bounds.Max.Y
 
-	// Get current time
-	now := time.Now()
-	timestamp := now.Format("2006-01-02 15:04:05")
-	weekday := getChineseWeekday(now.Weekday())
-	fullTimestamp := fmt.Sprintf("%s %s", timestamp, weekday)
-
 	// Create gg context from the RGBA image
 	ctx := gg.NewContextForRGBA(img)
 
@@ -214,23 +205,12 @@ func addClearOverlay(img *image.RGBA, cameraName string, detectionCount int) {
 	// TODO: hard coding.
 	fontPath := "./assets/fonts/msyh.ttc"
 
-	fontLoaded := false
+	// fontLoaded := false
 	if err := ctx.LoadFontFace(fontPath, fontSize); err != nil {
 		// Font loading failed, will use fallback
-		fontLoaded = false
-	} else {
-		fontLoaded = true
-	}
-
-	if !fontLoaded {
-		// Draw timestamp and camera name with manual large text
-		addLargeTextOverlay(img, fullTimestamp, cameraName, detectionCount)
+		Error(fmt.Sprintf("failed to load font from %s", fontPath))
 		return
 	}
-
-	// Left top corner - Date and time (white text with black outline)
-	drawTextWithOutline(ctx, fullTimestamp, 25, 65, color.RGBA{255, 255, 255, 255}, color.RGBA{0, 0, 0, 255})
-
 	// Right bottom corner - Camera name (yellow text with black outline)
 	// Make sure we have a camera name to display
 	if cameraName == "" {
@@ -277,9 +257,10 @@ func addLargeTextOverlay(img *image.RGBA, timestamp string, cameraName string, _
 	padding := 6     // Smaller padding
 
 	// Left top corner - timestamp (white text)
-	timestampX := 30
-	timestampY := 60
-	drawLargeText(img, timestampX, timestampY, timestamp, color.RGBA{255, 255, 255, 255}, charWidth, charHeight, padding)
+	// TEMPORARILY NO NEEDED.
+	// timestampX := 30
+	// timestampY := 60
+	// drawLargeText(img, timestampX, timestampY, timestamp, color.RGBA{255, 255, 255, 255}, charWidth, charHeight, padding)
 
 	// Right bottom corner - camera name (yellow text)
 	if cameraName == "" {
