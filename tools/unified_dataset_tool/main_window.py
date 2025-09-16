@@ -12,6 +12,7 @@ import json
 
 from dataset_manager import DatasetManager
 from video_processor import VideoProcessor
+from image_similarity import DuplicateImageRemover
 
 class WorkerThread(QThread):
     finished = pyqtSignal(object)
@@ -815,6 +816,418 @@ class VisualizationTab(QWidget):
         self.progress_bar.setVisible(False)
         self.parent.show_error(f"visualization failed: {error_msg}")
 
+# image deduplication tab
+class ImageDeduplicationTab(QWidget):
+    progress_updated = pyqtSignal(str)
+    
+    def __init__(self, parent):
+        super().__init__()
+        self.parent = parent
+        self.init_ui()
+        # connect progress signal to update method
+        self.progress_updated.connect(self._handle_progress_update)
+    
+    def init_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        
+        # configuration group
+        config_group = QGroupBox("duplicate image detection configuration")
+        config_group.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        config_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #cccccc;
+                border-radius: 5px;
+                margin-top: 1ex;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+            }
+        """)
+        config_layout = QFormLayout()
+        config_layout.setVerticalSpacing(12)
+        
+        # directory selection
+        self.directory_edit = QLineEdit()
+        self.directory_edit.setFont(QFont("Arial", 11))
+        self.directory_edit.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QLineEdit:focus {
+                border-color: #4CAF50;
+            }
+        """)
+        
+        self.directory_browse_btn = QPushButton("browse...")
+        self.directory_browse_btn.setFont(QFont("Arial", 11))
+        self.directory_browse_btn.setStyleSheet("""
+            QPushButton {
+                padding: 8px 16px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: #f5f5f5;
+            }
+            QPushButton:hover {
+                background-color: #e9e9e9;
+            }
+            QPushButton:pressed {
+                background-color: #d4edda;
+            }
+        """)
+        self.directory_browse_btn.clicked.connect(self.browse_directory)
+        
+        directory_row = QHBoxLayout()
+        directory_row.addWidget(self.directory_edit)
+        directory_row.addWidget(self.directory_browse_btn)
+        config_layout.addRow("image directory:", directory_row)
+        
+        # similarity threshold
+        self.similarity_threshold_spin = QDoubleSpinBox()
+        self.similarity_threshold_spin.setRange(0.10, 0.99)
+        self.similarity_threshold_spin.setValue(0.90)
+        self.similarity_threshold_spin.setSingleStep(0.01)
+        self.similarity_threshold_spin.setDecimals(2)
+        self.similarity_threshold_spin.setSuffix(" (higher = more strict)")
+        self.similarity_threshold_spin.setFont(QFont("Arial", 11))
+        config_layout.addRow("similarity threshold:", self.similarity_threshold_spin)
+        
+        # duplicate handling strategy
+        self.keep_strategy_combo = QComboBox()
+        self.keep_strategy_combo.addItems(["largest file size", "highest resolution", "first found", "smallest file size"])
+        self.keep_strategy_combo.setCurrentText("largest file size")
+        self.keep_strategy_combo.setFont(QFont("Arial", 11))
+        config_layout.addRow("keep strategy:", self.keep_strategy_combo)
+        
+        # dry run option
+        self.dry_run_checkbox = QCheckBox("dry run (analyze only, don't delete files)")
+        self.dry_run_checkbox.setFont(QFont("Arial", 11))
+        self.dry_run_checkbox.setChecked(True)  # default to safe mode
+        config_layout.addRow("", self.dry_run_checkbox)
+        
+        config_group.setLayout(config_layout)
+        layout.addWidget(config_group)
+        
+        # action buttons
+        buttons_layout = QHBoxLayout()
+        
+        self.analyze_btn = QPushButton("analyze duplicates")
+        self.analyze_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.analyze_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #3d8b40;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.analyze_btn.clicked.connect(self.analyze_duplicates)
+        buttons_layout.addWidget(self.analyze_btn)
+        
+        self.remove_btn = QPushButton("remove duplicates")
+        self.remove_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.remove_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
+            QPushButton:pressed {
+                background-color: #b71c1c;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.remove_btn.clicked.connect(self.remove_duplicates)
+        self.remove_btn.setEnabled(False)  # initially disabled
+        buttons_layout.addWidget(self.remove_btn)
+        
+        buttons_layout.addStretch()
+        layout.addLayout(buttons_layout)
+        
+        # progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+        
+        # results display
+        results_label = QLabel("duplicate detection results:")
+        results_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        layout.addWidget(results_label)
+        
+        self.results_text = QTextEdit()
+        self.results_text.setFont(QFont("Arial", 11))
+        self.results_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #f9f9f9;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                padding: 8px;
+            }
+        """)
+        layout.addWidget(self.results_text)
+        
+        self.setLayout(layout)
+        
+        # store last analysis results
+        self.last_analysis_results = None
+    
+    def browse_directory(self):
+        directory = QFileDialog.getExistingDirectory(self, "select image directory")
+        if directory:
+            self.directory_edit.setText(directory)
+    
+    def _map_strategy_to_internal(self, display_text):
+        """map display text to internal strategy names"""
+        strategy_map = {
+            "largest file size": "largest",
+            "highest resolution": "highest_quality", 
+            "first found": "first",
+            "smallest file size": "smallest"
+        }
+        return strategy_map.get(display_text, "largest")
+    
+    def analyze_duplicates(self):
+        directory = self.directory_edit.text().strip()
+        if not directory:
+            self.parent.show_error("please select an image directory")
+            return
+        
+        # get parameters
+        similarity_threshold = self.similarity_threshold_spin.value()
+        strategy_display = self.keep_strategy_combo.currentText()
+        keep_strategy = self._map_strategy_to_internal(strategy_display)
+        dry_run = True  # always dry run for analysis
+        
+        # start analysis in worker thread
+        self.analyze_btn.setEnabled(False)
+        self.remove_btn.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # indeterminate
+        
+        # create duplicate image remover with callback
+        from image_similarity import DuplicateImageRemover
+        remover = DuplicateImageRemover(similarity_threshold)
+        remover.set_progress_callback(self._update_progress)
+        
+        self.worker = WorkerThread(
+            remover.find_and_remove_duplicates,
+            directory, keep_strategy, dry_run
+        )
+        self.worker.finished.connect(self.on_analysis_complete)
+        self.worker.error.connect(self.on_analysis_error)
+        self.worker.start()
+    
+    def remove_duplicates(self):
+        if not self.last_analysis_results:
+            self.parent.show_error("please run analysis first")
+            return
+        
+        if self.last_analysis_results.get('duplicate_groups', 0) == 0:
+            self.parent.show_error("no duplicates found to remove")
+            return
+        
+        # calculate total duplicates to be removed from report
+        total_duplicates = 0
+        report = self.last_analysis_results.get('report', '')
+        if 'total duplicate files:' in report:
+            # extract from report line
+            for line in report.split('\n'):
+                if 'total duplicate files:' in line:
+                    try:
+                        total_duplicates = int(line.split(':')[1].strip())
+                        break
+                    except:
+                        pass
+        
+        # fallback: use simple calculation
+        if total_duplicates == 0:
+            total_duplicates = self.last_analysis_results.get('duplicate_groups', 0)
+        
+        # confirm with user
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "confirm removal",
+            f"this will permanently delete approximately {total_duplicates} duplicate files. continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        directory = self.directory_edit.text().strip()
+        similarity_threshold = self.similarity_threshold_spin.value()
+        strategy_display = self.keep_strategy_combo.currentText()
+        keep_strategy = self._map_strategy_to_internal(strategy_display)
+        dry_run = False  # actual removal
+        
+        # start removal in worker thread
+        self.analyze_btn.setEnabled(False)
+        self.remove_btn.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # indeterminate
+        
+        # create duplicate image remover with callback
+        from image_similarity import DuplicateImageRemover
+        remover = DuplicateImageRemover(similarity_threshold)
+        remover.set_progress_callback(self._update_progress)
+        
+        self.worker = WorkerThread(
+            remover.find_and_remove_duplicates,
+            directory, keep_strategy, dry_run
+        )
+        self.worker.finished.connect(self.on_removal_complete)
+        self.worker.error.connect(self.on_removal_error)
+        self.worker.start()
+    
+    def _update_progress(self, message):
+        """update progress - called from worker thread via signal"""
+        # emit signal to update UI in main thread
+        self.progress_updated.emit(message)
+    
+    def _handle_progress_update(self, message):
+        """handle progress update in main thread"""
+        if hasattr(self, 'results_text'):
+            current_text = self.results_text.toPlainText()
+            if "progress:" in current_text.lower():
+                # replace last progress line
+                lines = current_text.split('\n')
+                if lines and lines[-1].startswith("progress:"):
+                    lines[-1] = f"progress: {message}"
+                else:
+                    lines.append(f"progress: {message}")
+                self.results_text.setText('\n'.join(lines))
+            else:
+                # add progress line
+                if current_text:
+                    self.results_text.setText(current_text + f"\nprogress: {message}")
+                else:
+                    self.results_text.setText(f"progress: {message}")
+    
+    def on_analysis_complete(self, results):
+        self.analyze_btn.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        
+        self.last_analysis_results = results
+        
+        if results['success']:
+            # format results for display
+            display_text = []
+            display_text.append(f"duplicate analysis completed")
+            display_text.append(f"{'='*50}")
+            display_text.append(f"")
+            display_text.append(f"images scanned: {results['images_scanned']}")
+            display_text.append(f"duplicate groups found: {results['duplicate_groups']}")
+            display_text.append(f"potential space savings: {self._format_bytes(results['total_space_saved'])}")
+            
+            if results['errors']:
+                display_text.append(f"")
+                display_text.append(f"errors encountered: {len(results['errors'])}")
+                for error in results['errors'][:5]:  # show first 5 errors
+                    display_text.append(f"  - {error}")
+                if len(results['errors']) > 5:
+                    display_text.append(f"  ... and {len(results['errors']) - 5} more")
+            
+            if results.get('report'):
+                display_text.append(f"")
+                display_text.append(f"detailed report:")
+                display_text.append(f"{'-'*30}")
+                display_text.append(results['report'])
+            
+            self.results_text.setText("\n".join(display_text))
+            
+            # enable remove button if duplicates found
+            if results['duplicate_groups'] > 0:
+                self.remove_btn.setEnabled(True)
+        else:
+            self.results_text.setText(f"analysis failed: {results['message']}")
+    
+    def on_analysis_error(self, error_msg):
+        self.analyze_btn.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.parent.show_error(f"duplicate analysis failed: {error_msg}")
+        self.results_text.setText(f"analysis error: {error_msg}")
+    
+    def on_removal_complete(self, results):
+        self.analyze_btn.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        
+        if results['success']:
+            # format results for display
+            display_text = []
+            display_text.append(f"duplicate removal completed")
+            display_text.append(f"{'='*50}")
+            display_text.append(f"")
+            display_text.append(f"files removed: {len(results['removed_files'])}")
+            display_text.append(f"space saved: {self._format_bytes(results['total_space_saved'])}")
+            
+            if results['errors']:
+                display_text.append(f"")
+                display_text.append(f"errors encountered: {len(results['errors'])}")
+                for error in results['errors'][:5]:
+                    display_text.append(f"  - {error}")
+                if len(results['errors']) > 5:
+                    display_text.append(f"  ... and {len(results['errors']) - 5} more")
+            
+            # show removed files (up to 20)
+            if results['removed_files']:
+                display_text.append(f"")
+                display_text.append(f"removed files:")
+                for file_path in results['removed_files'][:20]:
+                    display_text.append(f"  - {file_path}")
+                if len(results['removed_files']) > 20:
+                    display_text.append(f"  ... and {len(results['removed_files']) - 20} more")
+            
+            self.results_text.setText("\n".join(display_text))
+            
+            # reset state after successful removal
+            self.last_analysis_results = None
+            self.remove_btn.setEnabled(False)
+        else:
+            self.results_text.setText(f"removal failed: {results['message']}")
+    
+    def on_removal_error(self, error_msg):
+        self.analyze_btn.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.parent.show_error(f"duplicate removal failed: {error_msg}")
+        self.results_text.setText(f"removal error: {error_msg}")
+    
+    def _format_bytes(self, bytes_count):
+        """format bytes in human readable format"""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if bytes_count < 1024:
+                return f"{bytes_count:.1f} {unit}"
+            bytes_count /= 1024
+        return f"{bytes_count:.1f} PB"
+
 class VideoProcessingTab(QWidget):
     def __init__(self, parent):
         super().__init__()
@@ -1094,12 +1507,14 @@ class DataProcessingTab(QWidget):
         visualization_tab = VisualizationTab(self.parent)
         dataset_mgmt_tab = DatasetManagementTab(self.parent)
         format_conv_tab = FormatConversionTab(self.parent)
+        image_dedup_tab = ImageDeduplicationTab(self.parent)
         
         sub_tabs.addTab(analysis_tab, "Analysis")
         sub_tabs.addTab(split_tab, "Split")
         sub_tabs.addTab(visualization_tab, "Visualization")
         sub_tabs.addTab(dataset_mgmt_tab, "Management")
         sub_tabs.addTab(format_conv_tab, "Conversion")
+        sub_tabs.addTab(image_dedup_tab, "Deduplication")
         
         layout.addWidget(sub_tabs)
         self.setLayout(layout)

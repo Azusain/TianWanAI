@@ -10,3 +10,15 @@ train.py/
 tools/
 pyvenv.cfg
 **/input/
+alert-server/
+cam-stream/
+tools/
+mediamtx/
+docs/
+.github/
+.git/
+build.bat
+README.md
+version
+unified_dataset_tool.spec
+venv/
