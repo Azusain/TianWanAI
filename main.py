@@ -20,17 +20,26 @@ import threading
 from flask import Flask, request, jsonify
 
 # Global model instances (initialized at startup)
-g_gesture_service = None
-g_ponding_service = None
-g_mouse_service = None
-g_cigar_service = None
+g_unified_detection_service = None  # unified YOLO detection service for multiple classes
 g_smoke_service = None
-g_helmet_service = None
 g_pose_service = None
 g_tshirt_service = None
 g_tshirt_classifier = None
 g_person_detector = None
 g_person_classifier = None
+
+# class indices for unified detection model
+# names: ['other', 'gesture', 'ponding', 'smoke', 'mouse', 'tshirt', 'cigar', 'helmet']
+CLASS_INDICES = {
+    'other': 0,
+    'gesture': 1,
+    'ponding': 2, 
+    'smoke': 3,
+    'mouse': 4,
+    'tshirt': 5,
+    'cigar': 6,
+    'helmet': 7
+}
 
 # return image and errno.
 def validate_img_format():
@@ -66,24 +75,27 @@ def initialize_models():
     logger.info("starting model initialization...")
     
     try:
-        # Initialize YOLO detection models
-        logger.info("loading gesture detection model...")
-        g_gesture_service = YoloDetectionService("models/gesture/weights/gesture_v2.pt", 640)
+        # Initialize separate unified YOLO detection models for each endpoint to avoid concurrency issues
+        # TODO: update with your actual unified model path
+        unified_model_path = "models/unified/weights/unified_model.pt"
         
-        logger.info("loading ponding detection model...")
-        g_ponding_service = YoloDetectionService("models/ponding/weights/best.pt", 640)
+        logger.info("loading unified gesture detection model...")
+        g_gesture_service = YoloDetectionService(unified_model_path, 640)
         
-        logger.info("loading mouse detection model...")
-        g_mouse_service = YoloDetectionService("models/mouse/weights/mouse_v5.pt", 640)
+        logger.info("loading unified ponding detection model...")
+        g_ponding_service = YoloDetectionService(unified_model_path, 640)
         
-        logger.info("loading cigar detection model...")
-        g_cigar_service = YoloDetectionService("models/cigar/weights/cigar_v1.pt", 640)
+        logger.info("loading unified mouse detection model...")
+        g_mouse_service = YoloDetectionService(unified_model_path, 640)
+        
+        logger.info("loading unified cigar detection model...")
+        g_cigar_service = YoloDetectionService(unified_model_path, 640)
+        
+        logger.info("loading unified helmet detection model...")
+        g_helmet_service = YoloDetectionService(unified_model_path, 640)
         
         logger.info("loading smoke detection model...")
         g_smoke_service = SmokeFileDetector("__SmokeFire/weights/smoke.pt")
-        
-        logger.info("loading helmet detection model...")
-        g_helmet_service = YoloDetectionService("models/helmet/weights/helmet_v1.pt", 640)
         
         # Initialize pose detection model for tshirt service
         logger.info("loading pose detection model...")
@@ -190,8 +202,8 @@ def app():
                 logger.warning(f"empty crop for person {person_idx}, skipping")
                 continue
             
-            # detect gestures in the cropped person region
-            gesture_score, gesture_xyxyn, _ = g_gesture_service.Predict(person_crop)
+            # detect gestures in the cropped person region using unified model with gesture class (index 1)
+            gesture_score, gesture_xyxyn, _ = g_gesture_service.Predict(person_crop, classes=[CLASS_INDICES['gesture']])
             
             if gesture_score is not None and gesture_xyxyn is not None:
                 # convert relative coordinates back to original image coordinates
@@ -251,8 +263,8 @@ def app():
         img, errno = validate_img_format()
         if img is None:
             return g_ponding_service.Response(errno=errno)
-        # inference.
-        score, xyxyn, _ = g_ponding_service.Predict(img)
+        # inference using unified model with ponding class (index 2)
+        score, xyxyn, _ = g_ponding_service.Predict(img, classes=[CLASS_INDICES['ponding']])
         return g_ponding_service.Response(
             errno=errno,
             score=score,
@@ -264,8 +276,8 @@ def app():
         img, errno = validate_img_format()
         if img is None:
             return g_mouse_service.Response(errno=errno)
-        # inference.
-        score, xyxyn, _ = g_mouse_service.Predict(img)
+        # inference using unified model with mouse class (index 4)
+        score, xyxyn, _ = g_mouse_service.Predict(img, classes=[CLASS_INDICES['mouse']])
         return g_mouse_service.Response(
             errno=errno,
             score=score,
@@ -322,8 +334,8 @@ def app():
             if person_crop.size == 0:
                 continue
             
-            # detect helmets in the cropped person region
-            helmet_score, helmet_xyxyn, _ = g_helmet_service.Predict(person_crop)
+            # detect helmets in the cropped person region using unified model with helmet class (index 7)
+            helmet_score, helmet_xyxyn, _ = g_helmet_service.Predict(person_crop, classes=[CLASS_INDICES['helmet']])
             
             # calculate person coordinates in normalized format (return person bbox, not helmet bbox)
             person_left_n = x1 / img_width
@@ -380,8 +392,8 @@ def app():
         img, errno = validate_img_format()
         if img is None:
             return g_cigar_service.Response(errno=errno)
-        # inference.
-        score, xyxyn, _ = g_cigar_service.Predict(img)
+        # inference using unified model with cigar class (index 6)
+        score, xyxyn, _ = g_cigar_service.Predict(img, classes=[CLASS_INDICES['cigar']])
         return g_cigar_service.Response(
             errno=errno,
             score=score,

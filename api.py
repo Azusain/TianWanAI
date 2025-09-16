@@ -149,12 +149,13 @@ class YoloDetectionService():
             verbose=False
         )
         
-    def Predict(self, img):
+    def Predict(self, img, classes=None):
       results = self.model.predict(
           source=img, 
           imgsz=self.imgsz,
           half=self.is_half,
-          verbose=False
+          verbose=False,
+          classes=classes  # filter to specific class indices if provided
       )
       # containing multiple boxes' coordinates
       boxes = results[0].boxes 
