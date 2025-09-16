@@ -149,6 +149,54 @@ class DatasetManager:
                 
         return class_names
     
+    def _detect_dataset_structure(self) -> Dict[str, Dict[str, Path]]:
+        """detect YOLO dataset structure with support for standard train/val/test layout"""
+        structure = {}
+        
+        # check for standard YOLO structure (train/val/test with images/labels)
+        for split in ['train', 'val', 'test']:
+            split_dir = self.dataset_path / split
+            if split_dir.exists():
+                images_dir = split_dir / 'images'
+                labels_dir = split_dir / 'labels'
+                
+                # check if images directory exists with actual image files
+                if images_dir.exists():
+                    image_files = self.find_images(images_dir)
+                    if image_files:
+                        # labels directory is optional (may contain unlabeled images)
+                        if not labels_dir.exists():
+                            logger.info(f"creating missing labels directory: {labels_dir}")
+                            labels_dir.mkdir(parents=True, exist_ok=True)
+                        
+                        structure[split] = {'images': images_dir, 'labels': labels_dir}
+                        logger.info(f"found {split} split: {len(image_files)} images in {images_dir}")
+        
+        # if we found standard YOLO structure, return it
+        if structure:
+            logger.info(f"detected standard YOLO structure with splits: {', '.join(structure.keys())}")
+            return structure
+        
+        # fallback: check for direct images/labels structure
+        logger.info("checking for flat images/labels structure...")
+        images_dir = self.dataset_path / 'images'
+        labels_dir = self.dataset_path / 'labels'
+        
+        if images_dir.exists():
+            image_files = self.find_images(images_dir)
+            if image_files:
+                # labels directory is optional
+                if not labels_dir.exists():
+                    logger.info(f"creating missing labels directory: {labels_dir}")
+                    labels_dir.mkdir(parents=True, exist_ok=True)
+                
+                structure['main'] = {'images': images_dir, 'labels': labels_dir}
+                logger.info(f"detected flat structure: {len(image_files)} images in {images_dir}")
+                return structure
+        
+        logger.warning("no standard YOLO dataset structure detected")
+        return structure
+    
     @staticmethod
     def merge_yolo_datasets(sources: list, output_dir: str) -> str:
         """merge multiple standard YOLO-format datasets into a new dataset.
@@ -358,28 +406,47 @@ class DatasetManager:
         """analyze dataset and return comprehensive statistics"""
         logger.info("starting dataset analysis...")
         
+        # detect dataset structure first
+        dataset_structure = self._detect_dataset_structure()
+        logger.info(f"detected dataset structure: {list(dataset_structure.keys())}")
+        
         # determine directories
         if images_dir:
             images_path = Path(images_dir)
+        elif labels_dir:
+            # if labels_dir is specified but not images_dir, try to find corresponding images
+            labels_path = Path(labels_dir)
+            images_path = labels_path.parent / 'images' if labels_path.name == 'labels' else labels_path
         else:
-            # auto-detect images directory
-            images_path = self.dataset_path
-            for possible_dir in ['images', 'train/images', 'val/images']:
-                candidate = self.dataset_path / possible_dir
-                if candidate.exists() and self.find_images(candidate):
-                    images_path = candidate
-                    break
+            # auto-detect based on structure
+            images_path = None
+            if dataset_structure:
+                # prefer train split if available, otherwise use first available
+                split_key = 'train' if 'train' in dataset_structure else list(dataset_structure.keys())[0]
+                images_path = dataset_structure[split_key]['images']
+                logger.info(f"using {split_key} split for analysis")
+            else:
+                # fallback to manual detection
+                images_path = self.dataset_path
+                for possible_dir in ['images', 'train/images', 'val/images', 'test/images']:
+                    candidate = self.dataset_path / possible_dir
+                    if candidate.exists() and self.find_images(candidate):
+                        images_path = candidate
+                        break
         
         if labels_dir:
             labels_path = Path(labels_dir)
         else:
-            # auto-detect labels directory
-            labels_path = self.dataset_path
-            for possible_dir in ['labels', 'train/labels', 'val/labels']:
-                candidate = self.dataset_path / possible_dir
-                if candidate.exists():
-                    labels_path = candidate
-                    break
+            # auto-detect labels directory corresponding to images
+            if images_path and images_path.name == 'images':
+                labels_path = images_path.parent / 'labels'
+            else:
+                labels_path = self.dataset_path
+                for possible_dir in ['labels', 'train/labels', 'val/labels', 'test/labels']:
+                    candidate = self.dataset_path / possible_dir
+                    if candidate.exists():
+                        labels_path = candidate
+                        break
         
         logger.info(f"analyzing images in: {images_path}")
         logger.info(f"analyzing labels in: {labels_path}")
@@ -481,20 +548,40 @@ class DatasetManager:
         
         logger.info(f"starting dataset split with ratios - train: {train_ratio}, val: {val_ratio}, test: {test_ratio}")
         
+        # detect dataset structure first
+        dataset_structure = self._detect_dataset_structure()
+        
         # determine source directories
         if images_dir:
             source_images = Path(images_dir)
+        elif labels_dir:
+            # if labels_dir is specified but not images_dir, try to find corresponding images
+            labels_path = Path(labels_dir)
+            source_images = labels_path.parent / 'images' if labels_path.name == 'labels' else labels_path
         else:
-            source_images = self.dataset_path / "images"
-            if not source_images.exists():
-                source_images = self.dataset_path
+            # auto-detect based on structure
+            source_images = None
+            if dataset_structure:
+                # prefer train split if available, otherwise use first available
+                split_key = 'train' if 'train' in dataset_structure else list(dataset_structure.keys())[0]
+                source_images = dataset_structure[split_key]['images']
+                logger.info(f"using {split_key} split as source for splitting")
+            else:
+                # fallback to manual detection
+                source_images = self.dataset_path / "images"
+                if not source_images.exists():
+                    source_images = self.dataset_path
         
         if labels_dir:
             source_labels = Path(labels_dir)
         else:
-            source_labels = self.dataset_path / "labels"
-            if not source_labels.exists():
-                source_labels = self.dataset_path
+            # auto-detect labels directory corresponding to images
+            if source_images and source_images.name == 'images':
+                source_labels = source_images.parent / 'labels'
+            else:
+                source_labels = self.dataset_path / "labels"
+                if not source_labels.exists():
+                    source_labels = self.dataset_path
         
         # find all images
         image_files = self.find_images(source_images)

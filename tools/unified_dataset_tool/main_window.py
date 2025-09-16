@@ -2184,35 +2184,26 @@ class FormatConversionTab(QWidget):
     def _do_yolo_to_flat_conversion(self, input_dataset, output_dir, merge_splits, preserve_split_info):
         """
         Convert YOLO dataset to flat images+labels format.
-        Uses the standalone yolo_to_flat_converter.py implementation.
+        Directly calls the conversion function instead of subprocess.
         """
-        import os
-        import sys
-        import subprocess
-        
-        # Get the path to the yolo_to_flat_converter.py script
-        script_path = os.path.join(os.path.dirname(__file__), "yolo_to_flat_converter.py")
-        
-        if not os.path.exists(script_path):
-            raise FileNotFoundError(f"yolo_to_flat_converter.py not found at {script_path}")
-        
-        # Build command arguments
-        cmd = [sys.executable, script_path, input_dataset, output_dir]
-        
-        if merge_splits:
-            cmd.append("--merge-splits")
-        
-        if preserve_split_info:
-            cmd.append("--preserve-split-info")
-        
-        # Run the conversion script
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            return result.stdout
-        except subprocess.CalledProcessError as e:
-            raise Exception(f"Conversion script failed: {e.stderr}")
+            # Import the conversion function directly
+            from yolo_to_flat_converter import yolo_to_flat_conversion
+            
+            # Call the conversion function directly
+            result = yolo_to_flat_conversion(
+                input_dataset,
+                output_dir,
+                merge_splits=merge_splits,
+                preserve_split_info=preserve_split_info
+            )
+            
+            return result['summary']
+            
+        except ImportError as e:
+            raise Exception(f"Failed to import yolo_to_flat_converter: {str(e)}")
         except Exception as e:
-            raise Exception(f"Failed to run conversion script: {str(e)}")
+            raise Exception(f"YOLO to flat conversion failed: {str(e)}")
     
     def on_flat_conversion_complete(self, result):
         self.yolo_to_flat_btn.setEnabled(True)

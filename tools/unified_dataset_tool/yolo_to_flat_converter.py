@@ -13,24 +13,66 @@ import argparse
 from typing import List, Dict, Tuple, Optional
 
 def find_yolo_structure(dataset_path: Path) -> Dict[str, Dict[str, Path]]:
-    """detect YOLO dataset structure"""
+    """detect YOLO dataset structure with enhanced logic for standard formats"""
     structure = {}
     
-    # check for standard YOLO structure
+    print(f"detecting YOLO structure in: {dataset_path}")
+    
+    # check for standard YOLO structure (train/val/test with images/labels)
+    splits_found = []
     for split in ['train', 'val', 'test']:
         split_dir = dataset_path / split
         if split_dir.exists():
             images_dir = split_dir / 'images'
             labels_dir = split_dir / 'labels'
-            if images_dir.exists() and labels_dir.exists():
-                structure[split] = {'images': images_dir, 'labels': labels_dir}
+            
+            # check if images directory exists with actual image files
+            if images_dir.exists():
+                image_files = get_image_files(images_dir)
+                if image_files:
+                    # labels directory is optional (may contain unlabeled images)
+                    if not labels_dir.exists():
+                        labels_dir.mkdir(parents=True, exist_ok=True)
+                        print(f"created missing labels directory: {labels_dir}")
+                    
+                    structure[split] = {'images': images_dir, 'labels': labels_dir}
+                    splits_found.append(split)
+                    print(f"found {split} split: {len(image_files)} images in {images_dir}")
+    
+    # if we found standard YOLO structure, return it
+    if structure:
+        print(f"detected standard YOLO structure with splits: {', '.join(splits_found)}")
+        return structure
     
     # fallback: check for direct images/labels structure
-    if not structure:
+    print("checking for flat images/labels structure...")
+    images_dir = dataset_path / 'images'
+    labels_dir = dataset_path / 'labels'
+    
+    if images_dir.exists():
+        image_files = get_image_files(images_dir)
+        if image_files:
+            # labels directory is optional
+            if not labels_dir.exists():
+                labels_dir.mkdir(parents=True, exist_ok=True)
+                print(f"created missing labels directory: {labels_dir}")
+            
+            structure['main'] = {'images': images_dir, 'labels': labels_dir}
+            print(f"detected flat structure: {len(image_files)} images in {images_dir}")
+            return structure
+    
+    # final fallback: check if dataset_path itself contains images directly
+    print("checking if dataset path contains images directly...")
+    image_files = get_image_files(dataset_path)
+    if image_files:
+        # create images and labels subdirectories
         images_dir = dataset_path / 'images'
         labels_dir = dataset_path / 'labels'
-        if images_dir.exists() and labels_dir.exists():
-            structure['main'] = {'images': images_dir, 'labels': labels_dir}
+        
+        if not images_dir.exists():
+            print(f"images found directly in dataset path, but no images/ subdirectory")
+            print(f"this appears to be an unorganized dataset structure")
+            print(f"please organize images into an images/ subdirectory first")
     
     return structure
 
