@@ -259,7 +259,8 @@ type ModelResult struct {
 func ProcessFrameWithAsyncInference(frameData []byte, cameraConfig *CameraConfig, outputDir string) {
 	// Launch independent goroutines for each inference server
 	for _, binding := range cameraConfig.InferenceServerBindings {
-		server, exists := dataStore.InferenceServers[binding.ServerID]
+		// Use thread-safe access to get server information
+		server, exists := safeGetInferenceServer(binding.ServerID)
 		if !exists {
 			Warn(fmt.Sprintf("inference server %s not found for camera %s", binding.ServerID, cameraConfig.ID))
 			continue
@@ -556,8 +557,17 @@ func getClassIndexFromModelType(modelType string) int {
 }
 
 func SendAlertIfConfigured(imageData []byte, modelType, cameraName string, score, x1, y1, x2, y2 float64) error {
-	// Check if alert system is enabled and configured globally
-	if dataStore.AlertServer == nil || !dataStore.AlertServer.Enabled || dataStore.AlertServer.URL == "" {
+	// Check if alert system is enabled and configured globally using thread-safe access
+	var alertServerURL string
+	var alertEnabled bool
+	safeReadDataStore(func() {
+		if dataStore.AlertServer != nil {
+			alertEnabled = dataStore.AlertServer.Enabled
+			alertServerURL = dataStore.AlertServer.URL
+		}
+	})
+	
+	if !alertEnabled || alertServerURL == "" {
 		return nil // Alert system not enabled or not configured, silently skip
 	}
 
@@ -589,7 +599,7 @@ func SendAlertIfConfigured(imageData []byte, modelType, cameraName string, score
 
 	// Send request
 	resp, err := client.Post(
-		dataStore.AlertServer.URL,
+		alertServerURL,
 		"application/json",
 		bytes.NewBuffer(requestBody),
 	)

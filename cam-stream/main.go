@@ -65,17 +65,25 @@ func autoStartRunningCameras(rtspManager *RTSPManager) error {
 	var errors []string
 	runningCount := 0
 
-	for _, camera := range dataStore.Cameras {
-		if camera.Enabled && camera.Running {
-			runningCount++
-			Info(fmt.Sprintf("auto-starting camera: %s (%s)", camera.Name, camera.ID))
-			if err := rtspManager.StartCamera(camera); err != nil {
-				errorMsg := fmt.Sprintf("failed to restart camera %s (%s): %v", camera.Name, camera.ID, err)
-				Warn(errorMsg)
-				errors = append(errors, errorMsg)
-			} else {
-				Info(fmt.Sprintf("successfully restarted camera stream: %s (%s)", camera.Name, camera.ID))
+	// Use thread-safe access to iterate over cameras
+	var camerasToStart []*CameraConfig
+	safeReadDataStore(func() {
+		for _, camera := range dataStore.Cameras {
+			if camera.Enabled && camera.Running {
+				camerasToStart = append(camerasToStart, camera)
 			}
+		}
+	})
+
+	for _, camera := range camerasToStart {
+		runningCount++
+		Info(fmt.Sprintf("auto-starting camera: %s (%s)", camera.Name, camera.ID))
+		if err := rtspManager.StartCamera(camera); err != nil {
+			errorMsg := fmt.Sprintf("failed to restart camera %s (%s): %v", camera.Name, camera.ID, err)
+			Warn(errorMsg)
+			errors = append(errors, errorMsg)
+		} else {
+			Info(fmt.Sprintf("successfully restarted camera stream: %s (%s)", camera.Name, camera.ID))
 		}
 	}
 

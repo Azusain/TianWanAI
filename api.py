@@ -293,7 +293,6 @@ class TshirtDetectionService():
                     # filter out extreme aspect ratios (too wide or too tall)
                     # normal human upper body should have reasonable proportions
                     if aspect_ratio > 2.0 or aspect_ratio < 0.5:
-                        logger.debug(f"skipping detection with abnormal aspect ratio: {aspect_ratio:.2f} (width={width_px}, height={height_px})")
                         continue
                     
                     # crop upper body region

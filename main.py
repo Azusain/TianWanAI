@@ -161,7 +161,6 @@ def app():
             }
         
         persons = g_person_detector.detect_persons(img, conf_threshold=0.3)
-        logger.info(f"detected {len(persons)} persons")
         
         if not persons:
             return {
@@ -180,7 +179,6 @@ def app():
         for person_idx, person in enumerate(persons):
             person_bbox = person["bbox"]
             person_conf = person["confidence"]
-            logger.info(f"processing person {person_idx}: bbox={person_bbox}, conf={person_conf:.3f}")
             
             # crop person region from image with padding (like 9.3 project)
             x1, y1, x2, y2 = person_bbox
@@ -194,10 +192,8 @@ def app():
             
             # crop the person region
             person_crop = img[crop_y1:crop_y2, crop_x1:crop_x2]
-            logger.info(f"cropped person {person_idx} region: ({crop_x1},{crop_y1}) to ({crop_x2},{crop_y2})")
             
             if person_crop.size == 0:
-                logger.warning(f"empty crop for person {person_idx}, skipping")
                 continue
             
             # detect gestures in the cropped person region using unified model with gesture class (index 1)
@@ -235,17 +231,13 @@ def app():
                         }
                     })
                     
-                    logger.info(f"gesture detected in person {person_idx} with score {gesture_score}")
-                else:
-                    logger.debug(f"no gesture detected in person {person_idx}")
         
         # determine response status
         if len(gesture_results) > 0:
             errno = ServiceStatus.SUCCESS.value
-            logger.success(f"detected {len(gesture_results)} gesture(s) from {len(persons)} person(s)")
+            logger.success(f"[gesture] detected {len(gesture_results)} gesture(s) from {len(persons)} person(s)")
         else:
             errno = ServiceStatus.NO_OBJECT_DETECTED.value
-            logger.debug(f"no gestures detected from {len(persons)} person(s)")
             
         return {
             "log_id": uuid4(),
@@ -373,6 +365,7 @@ def app():
         # determine response status
         if len(helmet_results) > 0:
             errno = ServiceStatus.SUCCESS.value
+            logger.success(f"[helmet] detected {len(helmet_results)} person(s) with helmet safety issues")
         else:
             errno = ServiceStatus.NO_OBJECT_DETECTED.value
             
@@ -464,21 +457,15 @@ def app():
         g_images = shared_state.get_images_dict()
         g_images_lock = shared_state.get_images_lock()
         
-        logger.info(f"querying results for task_id: {task_id}")
         
         with g_images_lock:
-            logger.info(f"available task IDs in shared g_images: {list(g_images.keys())}")
-            logger.info(f"available task IDs in ResultHandler.g_images: {list(ResultHandler.g_images.keys())}")
             
             # try both shared state and module state for compatibility
             if task_id in g_images and len(g_images[task_id]) > 0:
-                logger.info(f"found {len(g_images[task_id])} results in shared state for task_id {task_id}")
                 images_dict = g_images
             elif task_id in ResultHandler.g_images and len(ResultHandler.g_images[task_id]) > 0:
-                logger.info(f"found {len(ResultHandler.g_images[task_id])} results in module state for task_id {task_id}")
                 images_dict = ResultHandler.g_images
             else:
-                logger.warning(f"result no found for {task_id} in either shared or module state")
                 return jsonify({"results": []})
             
             if limit is not None:
@@ -521,12 +508,10 @@ def app():
         # use new pose-based detection logic
         results = g_tshirt_service.Predict(img, g_pose_service, g_tshirt_classifier)
         
-        # log results
-        for result in results:
-            logger.success(f"detection score: {result['det_score']}, classification score: {result['cls_score']}")
 
         if len(results) > 0:
           errno = ServiceStatus.SUCCESS.value
+          logger.success(f"[tshirt] detected {len(results)} person(s) with inappropriate clothing")
         else:
           errno = ServiceStatus.NO_OBJECT_DETECTED.value
           
@@ -555,6 +540,8 @@ def app():
       batch_results = g_smoke_service.Inference([img])
       if len(batch_results) == 0:
         errno = ServiceStatus.NO_OBJECT_DETECTED
+      else:
+        logger.success(f"[smoke] detected {len(batch_results[0])} smoke instance(s)")
         
       return {
         "log_id": uuid4(),
