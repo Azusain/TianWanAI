@@ -1429,19 +1429,21 @@ func (ws *WebServer) handleAPIConfigImport(w http.ResponseWriter, r *http.Reques
 		fallDetectionTasks = make(map[string]*FallDetectionTaskState)
 	})
 
-	// Replace current dataStore with imported data
-	dataStore = &importedData
+	// Replace current dataStore with imported data using thread-safe access
+	safeUpdateDataStore(func() {
+		dataStore = &importedData
 
-	// Ensure max_threshold field is set for existing bindings without it
-	for _, camera := range dataStore.Cameras {
-		for i := range camera.InferenceServerBindings {
-			binding := &camera.InferenceServerBindings[i]
-			if binding.MaxThreshold == 0 {
-				// Set default max threshold to 1.0 if not specified
-				binding.MaxThreshold = 1.0
+		// Ensure max_threshold field is set for existing bindings without it
+		for _, camera := range dataStore.Cameras {
+			for i := range camera.InferenceServerBindings {
+				binding := &camera.InferenceServerBindings[i]
+				if binding.MaxThreshold == 0 {
+					// Set default max threshold to 1.0 if not specified
+					binding.MaxThreshold = 1.0
+				}
 			}
 		}
-	}
+	})
 
 	// Save the imported configuration
 	if err := saveDataStore(); err != nil {
@@ -1455,35 +1457,49 @@ func (ws *WebServer) handleAPIConfigImport(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Start imported cameras
+	// Start imported cameras using thread-safe access
 	if ws.rtspManager != nil {
-		for _, camera := range dataStore.Cameras {
-			if camera.Enabled && camera.Running {
-				if err := ws.rtspManager.StartCamera(camera); err != nil {
-					Warn(fmt.Sprintf("failed to start imported camera %s: %v", camera.ID, err))
+		var camerasToStart []*CameraConfig
+		safeReadDataStore(func() {
+			for _, camera := range dataStore.Cameras {
+				if camera.Enabled && camera.Running {
+					camerasToStart = append(camerasToStart, camera)
 				}
+			}
+		})
 
-				// Start fall detection tasks for fall detection servers
-				for _, binding := range camera.InferenceServerBindings {
-					server, serverExists := dataStore.InferenceServers[binding.ServerID]
-					if serverExists && server.Enabled && server.ModelType == string(ModelTypeFall) {
-						ws.startFallDetectionTask(camera, server)
-					}
+		for _, camera := range camerasToStart {
+			if err := ws.rtspManager.StartCamera(camera); err != nil {
+				Warn(fmt.Sprintf("failed to start imported camera %s: %v", camera.ID, err))
+			}
+
+			// Start fall detection tasks for fall detection servers
+			for _, binding := range camera.InferenceServerBindings {
+				server, serverExists := safeGetInferenceServer(binding.ServerID)
+				if serverExists && server.Enabled && server.ModelType == string(ModelTypeFall) {
+					ws.startFallDetectionTask(camera, server)
 				}
 			}
 		}
 	}
 
+	// Get counts using thread-safe access
+	var camerasCount, serversCount int
+	safeReadDataStore(func() {
+		camerasCount = len(dataStore.Cameras)
+		serversCount = len(dataStore.InferenceServers)
+	})
+
 	Info(fmt.Sprintf("configuration imported successfully: %d cameras, %d inference servers", 
-		len(dataStore.Cameras), len(dataStore.InferenceServers)))
+		camerasCount, serversCount))
 
 	response := APIResponse{
 		Success: true,
 		Message: fmt.Sprintf("Configuration imported successfully: %d cameras, %d inference servers", 
-			len(dataStore.Cameras), len(dataStore.InferenceServers)),
+			camerasCount, serversCount),
 		Data: map[string]interface{}{
-			"cameras_count":          len(dataStore.Cameras),
-			"inference_servers_count": len(dataStore.InferenceServers),
+			"cameras_count":          camerasCount,
+			"inference_servers_count": serversCount,
 		},
 	}
 	json.NewEncoder(w).Encode(response)
