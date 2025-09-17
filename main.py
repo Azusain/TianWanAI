@@ -4,7 +4,8 @@ import sys
 # git submodule.
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '__SmokeFire')))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '__Fall')))
-from __Fall import FallDetector, ResultHandler
+import FallDetector
+import ResultHandler
 import shared_state
 from __SmokeFire.smoke import SmokeFileDetector
 from flask import Flask, request
