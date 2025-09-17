@@ -310,25 +310,47 @@ func loadDataStore() error {
 		return fmt.Errorf("failed to read data file: %v", err)
 	}
 
-	if err := json.Unmarshal(data, dataStore); err != nil {
+	// Parse the JSON data first to validate it
+	var tempStore DataStore
+	if err := json.Unmarshal(data, &tempStore); err != nil {
 		return fmt.Errorf("failed to parse data file: %v", err)
 	}
 
-	if dataStore.Cameras == nil {
-		dataStore.Cameras = make(map[string]*CameraConfig)
-	}
-	if dataStore.InferenceServers == nil {
-		dataStore.InferenceServers = make(map[string]*InferenceServer)
-	}
+	// Use thread-safe access to update dataStore with parsed data
+	safeUpdateDataStore(func() {
+		// Assign the parsed data
+		*dataStore = tempStore
 
-	Info(fmt.Sprintf("loaded %d cameras and %d inference servers from storage", len(dataStore.Cameras), len(dataStore.InferenceServers)))
+		if dataStore.Cameras == nil {
+			dataStore.Cameras = make(map[string]*CameraConfig)
+		}
+		if dataStore.InferenceServers == nil {
+			dataStore.InferenceServers = make(map[string]*InferenceServer)
+		}
+	})
+
+	var camerasCount, serversCount int
+	var alertConfigured bool
+	var alertEnabled bool
+	var alertURL string
+	safeReadDataStore(func() {
+		camerasCount = len(dataStore.Cameras)
+		serversCount = len(dataStore.InferenceServers)
+		if dataStore.AlertServer != nil {
+			alertConfigured = true
+			alertEnabled = dataStore.AlertServer.Enabled
+			alertURL = dataStore.AlertServer.URL
+		}
+	})
+
+	Info(fmt.Sprintf("loaded %d cameras and %d inference servers from storage", camerasCount, serversCount))
 
 	// Log alert server configuration status
-	if dataStore.AlertServer != nil {
-		if dataStore.AlertServer.Enabled {
-			Info(fmt.Sprintf("alert server configured and enabled: %s", dataStore.AlertServer.URL))
+	if alertConfigured {
+		if alertEnabled {
+			Info(fmt.Sprintf("alert server configured and enabled: %s", alertURL))
 		} else {
-			Info(fmt.Sprintf("alert server configured but disabled: %s", dataStore.AlertServer.URL))
+			Info(fmt.Sprintf("alert server configured but disabled: %s", alertURL))
 		}
 	} else {
 		Info("alert server not configured - alerts disabled")
@@ -342,7 +364,15 @@ func saveDataStore() error {
 		return fmt.Errorf("failed to create data directory: %v", err)
 	}
 
-	data, err := json.MarshalIndent(dataStore, "", "  ")
+	var data []byte
+	var err error
+	var camerasCount, serversCount int
+	safeReadDataStore(func() {
+		data, err = json.MarshalIndent(dataStore, "", "  ")
+		camerasCount = len(dataStore.Cameras)
+		serversCount = len(dataStore.InferenceServers)
+	})
+
 	if err != nil {
 		return fmt.Errorf("failed to marshal data: %v", err)
 	}
@@ -351,7 +381,7 @@ func saveDataStore() error {
 		return fmt.Errorf("failed to write data file: %v", err)
 	}
 
-	Info(fmt.Sprintf("saved data store with %d cameras and %d inference servers", len(dataStore.Cameras), len(dataStore.InferenceServers)))
+	Info(fmt.Sprintf("saved data store with %d cameras and %d inference servers", camerasCount, serversCount))
 	return nil
 }
 
@@ -1334,10 +1364,19 @@ func (ws *WebServer) stopFallDetectionTasksForCamera(cameraID, serverID string) 
 // handleAPIConfigExport exports the current camera configuration as JSON
 func (ws *WebServer) handleAPIConfigExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Disposition", "attachment; filename=cameras.json")
+	
+	// Generate filename with timestamp
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	filename := fmt.Sprintf("cameras_%s.json", timestamp)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
 
-	// Export current dataStore as JSON
-	data, err := json.MarshalIndent(dataStore, "", "  ")
+	// Export current dataStore as JSON using thread-safe access
+	var data []byte
+	var err error
+	safeReadDataStore(func() {
+		data, err = json.MarshalIndent(dataStore, "", "  ")
+	})
+	
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		response := APIResponse{

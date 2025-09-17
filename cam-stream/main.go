@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -96,12 +97,28 @@ func autoStartRunningCameras(rtspManager *RTSPManager) error {
 	return nil
 }
 
-func main() {
-	// AV_LOG_QUIET = 24
-	os.Setenv("OPENCV_FFMPEG_LOGLEVEL", "24")
-	os.Setenv("AV_LOG_FORCE_NOCOLOR", "1")
+// recoverFromPanic handles panic recovery and logging
+func recoverFromPanic() {
+	if r := recover(); r != nil {
+		// Get stack trace
+		buf := make([]byte, 4096)
+		n := runtime.Stack(buf, false)
+		stackTrace := string(buf[:n])
+		
+		// Log panic details
+		Warn(fmt.Sprintf("🚨 PANIC RECOVERED: %v", r))
+		Warn(fmt.Sprintf("stack trace:\n%s", stackTrace))
+		
+		// Give some time for logs to flush
+		time.Sleep(1 * time.Second)
+	}
+}
 
-	Info("starting Multi-Camera Stream Platform (API Focus)")
+// runApplication contains the main application logic that can be restarted
+func runApplication() error {
+	defer recoverFromPanic()
+	
+	Info("initializing Multi-Camera Stream Platform (API Focus)")
 
 	// Initialize frame rate configuration from environment
 	initializeFrameRate()
@@ -111,8 +128,7 @@ func main() {
 
 	// Load persistent data store
 	if err := loadDataStore(); err != nil {
-		Info(fmt.Sprintf("failed to load data store: %v", err))
-		os.Exit(1)
+		return fmt.Errorf("failed to load data store: %v", err)
 	}
 
 	// Load configuration
@@ -132,6 +148,15 @@ func main() {
 
 	// Create RTSP manager using gortsplib (pure Go implementation)
 	rtspManager := NewRTSPManager()
+	
+	// Ensure cleanup on exit
+	defer func() {
+		defer recoverFromPanic()
+		Info("cleaning up resources...")
+		if rtspManager != nil {
+			rtspManager.StopAll()
+		}
+	}()
 
 	// Auto-start cameras that were running before shutdown
 	if err := autoStartRunningCameras(rtspManager); err != nil {
@@ -146,27 +171,81 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start web server
+	// Channel to receive server errors that should trigger restart
+	errorChan := make(chan error, 1)
+
+	// Start web server with panic recovery
 	go func() {
+		defer recoverFromPanic()
 		if err := webServer.Start(); err != nil {
-			Info(fmt.Sprintf("web server error: %v", err))
+			Warn(fmt.Sprintf("web server error: %v", err))
+			errorChan <- err
 		}
 	}()
 
-	// Wait for exit signal
+	// Wait for exit signal or error
 	Info("multi-camera platform is running. Press Ctrl+C to stop.")
 	Info(fmt.Sprintf("camera Management: http://localhost:%d/cameras", webPort))
 	Info(fmt.Sprintf("image Viewer: http://localhost:%d", webPort))
 	Info(fmt.Sprintf("API Debug: http://localhost:%d/api/debug", webPort))
-	<-sigChan
+	
+	select {
+	case <-sigChan:
+		Info("received shutdown signal, stopping...")
+		return nil // Normal shutdown, don't restart
+	case err := <-errorChan:
+		Warn(fmt.Sprintf("application error occurred: %v", err))
+		return err // Return error to trigger restart
+	}
+}
 
-	Info("received shutdown signal, stopping...")
-
-	// Stop all cameras
-	rtspManager.StopAll()
-
-	// Close async logger
+// cleanup performs final cleanup operations
+func cleanup() {
+	defer recoverFromPanic()
+	
+	// Close async logger to ensure all logs are flushed
 	CloseGlobalAsyncLogger()
+}
 
-	Info("multi-camera platform stopped")
+func main() {
+	// Set up environment variables
+	os.Setenv("OPENCV_FFMPEG_LOGLEVEL", "24") // AV_LOG_QUIET = 24
+	os.Setenv("AV_LOG_FORCE_NOCOLOR", "1")
+	
+	Info("🚀 starting Multi-Camera Stream Platform with auto-restart capability")
+	
+	// Maximum number of restart attempts
+	const maxRestartAttempts = 10
+	restartCount := 0
+	
+	for {
+		// Run the application
+		err := runApplication()
+		
+		// If no error, it was a normal shutdown
+		if err == nil {
+			Info("application shutdown normally")
+			break
+		}
+		
+		// Check restart attempts
+		restartCount++
+		if restartCount >= maxRestartAttempts {
+			Warn(fmt.Sprintf("maximum restart attempts (%d) reached, giving up", maxRestartAttempts))
+			break
+		}
+		
+		// Log restart attempt
+		Warn(fmt.Sprintf("🔄 restart attempt %d/%d in 5 seconds due to error: %v", 
+			restartCount, maxRestartAttempts, err))
+		
+		// Wait before restart to avoid rapid restart loops
+		time.Sleep(5 * time.Second)
+		
+		Info("🔄 restarting application...")
+	}
+	
+	// Final cleanup
+	cleanup()
+	Info("🛑 multi-camera platform stopped")
 }

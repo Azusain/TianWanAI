@@ -168,6 +168,9 @@
         padding: 16px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         transition: box-shadow 0.2s;
+        display: flex;
+        flex-direction: column;
+        min-height: 280px;
       }
 
       .camera-card:hover {
@@ -213,6 +216,7 @@
       .camera-actions {
         display: flex;
         gap: 8px;
+        margin-top: auto;
       }
 
       .camera-actions .btn {
@@ -221,11 +225,16 @@
         font-size: 12px;
       }
 
-      /* 推理服务器两列布局 */
+      /* 推理服务器网格布局 */
       .inference-servers-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 12px;
+      }
+
+      /* 在添加摄像头表单中，推理服务器列表使用五列布局 */
+      #inferenceServersList.inference-servers-grid {
+        grid-template-columns: repeat(5, 1fr);
       }
 
       .server-item {
@@ -233,6 +242,15 @@
         border: 1px solid #eee;
         border-radius: 6px;
         background: #fafafa;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+
+      .server-item:hover {
+        border-color: #3498db;
+        background: #f8f9fa;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(52, 152, 219, 0.15);
       }
 
       .server-header {
@@ -262,6 +280,11 @@
         font-size: 10px;
       }
 
+      /* Checkbox和Range Input指针样式 */
+      input[type="checkbox"], input[type="range"] {
+        cursor: pointer;
+      }
+
       /* 双端滑块样式 */
       .range-slider {
         position: relative;
@@ -285,6 +308,7 @@
         background: transparent;
         appearance: none;
         pointer-events: none;
+        cursor: pointer;
       }
 
       .range-slider input[type="range"]::-webkit-slider-thumb {
@@ -310,6 +334,32 @@
         box-shadow: 0 2px 6px rgba(0,0,0,0.2);
       }
 
+      /* 推理服务器卡片删除按钮样式 */
+      .server-delete-btn {
+        position: absolute;
+        bottom: 12px;
+        right: 16px;
+        width: auto;
+        height: 20px;
+        background: #e74c3c;
+        color: white;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 10px;
+        font-weight: 500;
+        line-height: 1;
+        padding: 0 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background-color 0.2s;
+      }
+
+      .server-delete-btn:hover {
+        background: #c0392b;
+      }
+
       .range-values {
         display: flex;
         justify-content: space-between;
@@ -320,9 +370,15 @@
 
       /* 大型Modal样式 */
       .large-modal {
-        width: 95%;
-        max-width: 1000px;
-        max-height: 90vh;
+        width: 90%;
+        max-width: 1800px;
+        max-height: 95vh;
+        min-width: 1400px;
+      }
+      
+      /* 编辑对话框中的推理服务器网格布局 */
+      #editInferenceServersList.inference-servers-grid {
+        grid-template-columns: repeat(5, 1fr) !important;
       }
 
       /* 响应式设计 */
@@ -433,7 +489,7 @@
           <div style="display: flex; gap: 10px; align-items: center">
             <button
               class="btn"
-              onclick="exportConfig()"
+              onclick="importConfig()"
               style="
                 background: #27ae60;
                 color: white;
@@ -445,7 +501,7 @@
             </button>
             <button
               class="btn"
-              onclick="importConfig()"
+              onclick="exportConfig()"
               style="
                 background: #f39c12;
                 color: white;
@@ -574,15 +630,6 @@
               >直接输入完整的推理服务器地址，包括端点路径</small
             >
           </div>
-          <div class="form-group">
-            <label for="serverDescription">描述</label>
-            <input
-              type="text"
-              id="serverDescription"
-              class="form-control"
-              placeholder="可选：服务器描述"
-            />
-          </div>
           <button type="submit" class="btn btn-primary">添加服务器</button>
         </form>
       </div>
@@ -597,22 +644,7 @@
           <h4>暂无推理服务器</h4>
           <p>请使用上面的表单添加第一个推理服务器</p>
         </div>
-        <div id="serversTable" style="display: none">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>名称</th>
-                <th>URL</th>
-                <th>模型类型</th>
-                <th>状态</th>
-                <th>描述</th>
-                <th>创建时间</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody id="serversTableBody"></tbody>
-          </table>
-        </div>
+        <div id="serversGrid" class="inference-servers-grid" style="display: none; grid-template-columns: repeat(4, 1fr);"></div>
       </div>
     </div>
 
@@ -754,58 +786,56 @@
           container.innerHTML = servers
             .map(
               (server) => `
-                    <div style="margin-bottom: 12px; padding: 8px; border: 1px solid #eee; border-radius: 6px; background: #fafafa;">
-                        <div style="display: flex; align-items: center; margin-bottom: 8px;">
-                            <label style="display: flex; align-items: center; cursor: pointer; flex: 1;">
-                                <input type="checkbox" name="inferenceServer" value="${
-                                  server.id
-                                }" style="margin-right: 8px;" onchange="toggleThresholdInput('${
-                server.id
-              }')">
-                                <span style="font-weight: 500;">${this.escapeHtml(
-                                  server.name
-                                )}</span>
-                                <span style="background: #e8f4fd; color: #1e88e5; padding: 1px 6px; border-radius: 8px; font-size: 10px; margin-left: 8px;">
-                                    ${this.escapeHtml(server.model_type)}
-                                </span>
-                                ${
-                                  !server.enabled
-                                    ? '<span style="color: #e74c3c; font-size: 10px; margin-left: 8px;">(禁用)</span>'
-                                    : ""
-                                }
-                            </label>
+                    <div style="margin-bottom: 12px; padding: 8px; border: 1px solid #eee; border-radius: 6px; background: #fafafa; position: relative;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+                            <div style="font-size: 12px; color: #333; font-weight: 500;">
+                                ${this.escapeHtml(server.name)}
+                            </div>
+                            <input type="checkbox" name="inferenceServer" value="${
+                              server.id
+                            }" style="margin: 0;" onchange="toggleThresholdInput('${
+              server.id
+            }')">
+                        </div>
+                        <div style="font-size: 11px; color: #999; background: #f8f9fa; padding: 2px 4px; border-radius: 3px;">
+                            ${this.escapeHtml(server.url)}
                         </div>
                         <div id="threshold-${
                           server.id
                         }" style="display: none; margin-left: 24px;">
-                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                <label style="font-size: 12px; color: #666; min-width: 80px;">最低阈值:</label>
-                                <input type="range" name="threshold-${
+                            <div style="margin-bottom: 8px;">
+                                <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">置信度区间: <span id="threshold-range-${
                                   server.id
-                                }" min="0" max="100" value="50" style="flex: 1;" oninput="updateThresholdValue('${
+                                }">50% - 100%</span></label>
+                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                    <label style="font-size: 11px; color: #666; min-width: 30px;">最小:</label>
+                                    <input type="range" name="threshold-${
+                                      server.id
+                                    }" min="0" max="100" value="50" 
+                                           style="flex: 1;" 
+                                           oninput="updateThresholdRange('${
                 server.id
-              }', this.value)">
-                                <span id="threshold-value-${
-                                  server.id
-                                }" style="font-size: 12px; color: #333; min-width: 40px;">50%</span>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <label style="font-size: 12px; color: #666; min-width: 80px;">最高阈值:</label>
-                                <input type="range" name="max-threshold-${
-                                  server.id
-                                }" min="0" max="100" value="100" style="flex: 1;" oninput="updateMaxThresholdValue('${
+              }')">
+                                    <span style="font-size: 11px; color: #666; min-width: 40px;" id="threshold-min-${
+                                      server.id
+                                    }">50%</span>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <label style="font-size: 11px; color: #666; min-width: 30px;">最大:</label>
+                                    <input type="range" name="max-threshold-${
+                                      server.id
+                                    }" min="0" max="100" value="100" 
+                                           style="flex: 1;" 
+                                           oninput="updateThresholdRange('${
                 server.id
-              }', this.value)">
-                                <span id="max-threshold-value-${
-                                  server.id
-                                }" style="font-size: 12px; color: #333; min-width: 40px;">100%</span>
+              }')">
+                                    <span style="font-size: 11px; color: #666; min-width: 40px;" id="threshold-max-${
+                                      server.id
+                                    }">100%</span>
+                                </div>
                             </div>
-                            <div style="font-size: 11px; color: #999; margin-top: 4px;">
-                                ${
-                                  server.model_type === "fall"
-                                    ? "跌倒检测不使用阈值"
-                                    : "检测置信度在此范围内时保存图片 (0表示无最高限制)"
-                                }
+                            <div style="font-size: 11px; color: #999;">
+                                检测置信度在此区间内时保存图片
                             </div>
                         </div>
                     </div>
@@ -942,7 +972,7 @@
                             </div>
                             <div class="form-group">
                                 <label>推理服务器绑定</label>
-                                <div id="editInferenceServersList" class="inference-servers-grid" style="border: 1px solid #ddd; border-radius: 6px; padding: 10px; max-height: 600px; overflow-y: auto;">
+                                <div id="editInferenceServersList" class="inference-servers-grid" style="border: 1px solid #ddd; border-radius: 6px; padding: 10px; height: 420px; overflow-y: auto; overflow-x: hidden;">
                                     <div style="color: #7f8c8d; font-size: 14px; grid-column: 1 / -1; text-align: center;">加载中...</div>
                                 </div>
                             </div>
@@ -1002,7 +1032,7 @@
 
           if (servers.length === 0) {
             container.innerHTML = `
-                        <div style="color: #7f8c8d; font-size: 14px;">暂无可用的推理服务器</div>
+                        <div style="color: #7f8c8d; font-size: 14px; grid-column: 1 / -1; text-align: center;">暂无可用的推理服务器</div>
                     `;
             return;
           }
@@ -1029,67 +1059,71 @@
                   : 100;
 
               return `
-                        <div style="margin-bottom: 12px; padding: 8px; border: 1px solid #eee; border-radius: 6px; background: #fafafa;">
-                            <div style="display: flex; align-items: center; margin-bottom: 8px;">
-                                <label style="display: flex; align-items: center; cursor: pointer; flex: 1;">
-                                    <input type="checkbox" name="editInferenceServer" value="${
-                                      server.id
-                                    }" 
-                                           ${isSelected ? "checked" : ""} 
-                                           style="margin-right: 8px;" 
-                                           onchange="toggleEditThresholdInput('${
-                                             server.id
-                                           }')">
-                                    <span style="font-weight: 500;">${this.escapeHtml(
-                                      server.name
-                                    )}</span>
-                                    <span style="background: #e8f4fd; color: #1e88e5; padding: 1px 6px; border-radius: 8px; font-size: 10px; margin-left: 8px;">
-                                        ${this.escapeHtml(server.model_type)}
-                                    </span>
-                                    ${
-                                      !server.enabled
-                                        ? '<span style="color: #e74c3c; font-size: 10px; margin-left: 8px;">(禁用)</span>'
-                                        : ""
-                                    }
-                                </label>
+                        <div style="
+                            margin-bottom: 12px; 
+                            padding: 8px; 
+                            border: 1px solid #eee; 
+                            border-radius: 6px; 
+                            background: #fafafa;
+                            height: 180px;
+                            display: flex;
+                            flex-direction: column;
+                            position: relative;
+                        ">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+                                <div style="font-size: 12px; color: #333; font-weight: 500;">
+                                    ${this.escapeHtml(server.name)}
+                                </div>
+                                <input type="checkbox" name="editInferenceServer" value="${
+                                  server.id
+                                }" 
+                                       ${isSelected ? "checked" : ""} 
+                                       style="margin: 0;" 
+                                       onchange="toggleEditThresholdInput('${
+                                         server.id
+                                       }')">
+                            </div>
+                            <div style="font-size: 11px; color: #999; background: #f8f9fa; padding: 2px 4px; border-radius: 3px; margin-bottom: 8px;">
+                                ${this.escapeHtml(server.url)}
                             </div>
                             <div id="edit-threshold-${
                               server.id
                             }" style="display: ${
                 isSelected ? "block" : "none"
-              }; margin-left: 24px;">
-                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                    <label style="font-size: 12px; color: #666; min-width: 80px;">最低阈值:</label>
-                                    <input type="range" name="edit-threshold-${
+              }; flex: 1; overflow: hidden;">
+                                <div style="margin-bottom: 8px;">
+                                    <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">置信度区间: <span id="edit-threshold-range-${
                                       server.id
-                                    }" min="0" max="100" value="${threshold}" 
-                                           style="flex: 1;" 
-                                           oninput="updateEditThresholdValue('${
-                                             server.id
-                                           }', this.value)">
-                                    <span id="edit-threshold-value-${
-                                      server.id
-                                    }" style="font-size: 12px; color: #333; min-width: 40px;">${threshold}%</span>
+                                    }">${threshold}% - ${maxThreshold}%</span></label>
+                                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                        <label style="font-size: 11px; color: #666; min-width: 30px;">最小:</label>
+                                        <input type="range" name="edit-threshold-${
+                                          server.id
+                                        }" min="0" max="100" value="${threshold}" 
+                                               style="flex: 1;" 
+                                               oninput="updateEditThresholdRange('${
+                  server.id
+                }')">
+                                        <span style="font-size: 11px; color: #666; min-width: 40px;" id="edit-threshold-min-${
+                                          server.id
+                                        }">${threshold}%</span>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <label style="font-size: 11px; color: #666; min-width: 30px;">最大:</label>
+                                        <input type="range" name="edit-max-threshold-${
+                                          server.id
+                                        }" min="0" max="100" value="${maxThreshold}" 
+                                               style="flex: 1;" 
+                                               oninput="updateEditThresholdRange('${
+                  server.id
+                }')">
+                                        <span style="font-size: 11px; color: #666; min-width: 40px;" id="edit-threshold-max-${
+                                          server.id
+                                        }">${maxThreshold}%</span>
+                                    </div>
                                 </div>
-                                <div style="display: flex; align-items: center; gap: 8px;">
-                                    <label style="font-size: 12px; color: #666; min-width: 80px;">最高阈值:</label>
-                                    <input type="range" name="edit-max-threshold-${
-                                      server.id
-                                    }" min="0" max="100" value="${maxThreshold}" 
-                                           style="flex: 1;" 
-                                           oninput="updateEditMaxThresholdValue('${
-                                             server.id
-                                           }', this.value)">
-                                    <span id="edit-max-threshold-value-${
-                                      server.id
-                                    }" style="font-size: 12px; color: #333; min-width: 40px;">${maxThreshold}%</span>
-                                </div>
-                                <div style="font-size: 11px; color: #999; margin-top: 4px;">
-                                    ${
-                                      server.model_type === "fall"
-                                        ? "跌倒检测不使用阈值"
-                                        : "检测置信度在此范围内时保存图片 (100%表示无最高限制)"
-                                    }
+                                <div style="font-size: 11px; color: #999;">
+                                    检测置信度在此区间内时保存图片
                                 </div>
                             </div>
                         </div>
@@ -1226,17 +1260,12 @@
             return camera.inference_server_bindings
               .map((binding) => {
                 const name = this.serverMap[binding.server_id];
-                const displayText = name
-                  ? `${name} (${binding.server_id})`
-                  : binding.server_id;
+                const serverName = name || binding.server_id;
+                const minThreshold = Math.round(binding.threshold * 100);
+                const maxThreshold = binding.max_threshold > 0 ? Math.round(binding.max_threshold * 100) : 100;
                 return `
-                        <div style="margin-bottom: 4px; font-size: 11px;">
-                            <span style="background: #e8f5e8; color: #2d7d2d; padding: 1px 6px; border-radius: 12px;">
-                                ${this.escapeHtml(displayText)}
-                            </span>
-                            <span style="color: #666; margin-left: 6px;">
-                                阈值 ${Math.round(binding.threshold * 100)}%
-                            </span>
+                        <div style="margin-bottom: 4px; font-size: 12px; color: #666;">
+                            ${this.escapeHtml(serverName)} (${minThreshold}% - ${maxThreshold}%)
                         </div>
                     `;
               })
@@ -1250,6 +1279,7 @@
             return `<span style="color: #95a5a6; font-size: 12px;">未设置</span>`;
           }
         }
+
       }
 
       class InferenceServerManager {
@@ -1275,52 +1305,49 @@
         }
 
         displayServers(servers) {
-          const tbody = document.getElementById("serversTableBody");
+          const grid = document.getElementById("serversGrid");
           const emptyState = document.getElementById("serversEmpty");
-          const table = document.getElementById("serversTable");
 
           if (servers.length === 0) {
             emptyState.style.display = "block";
-            table.style.display = "none";
+            grid.style.display = "none";
             return;
           }
 
           emptyState.style.display = "none";
-          table.style.display = "block";
+          grid.style.display = "grid";
 
-          tbody.innerHTML = servers
+          grid.innerHTML = servers
             .map(
               (server) => `
-                    <tr>
-                        <td>${this.escapeHtml(server.name)}</td>
-                        <td>
-                            <code style="font-size: 11px; background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">
-                                ${this.escapeHtml(server.url)}
-                            </code>
-                        </td>
-                        <td>
-                            <span style="background: #e8f4fd; color: #1e88e5; padding: 2px 8px; border-radius: 12px; font-size: 11px;">
+                    <div class="camera-card" style="position: relative; background: white; border: 1px solid #e1e8ed; border-radius: 8px; padding: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: box-shadow 0.2s;">
+                        <button class="server-delete-btn" onclick="serverManager.deleteServer('${
+                          server.id
+                        }')">删除</button>
+                        <div class="camera-header" style="display: flex; align-items: center; margin-bottom: 12px;">
+                            <div class="camera-name" style="font-weight: 600; font-size: 16px; color: #2c3e50; margin-right: 12px; flex: 1;">
+                                ${this.escapeHtml(server.name)}
+                            </div>
+                            <div class="camera-status" style="display: flex; align-items: center; font-size: 12px; color: #666;">
+                                <span class="status-indicator status-running"></span>
+                                启用
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 12px;">
+                            <span style="background: #e8f4fd; color: #1e88e5; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 500;">
                                 ${this.escapeHtml(server.model_type)}
                             </span>
-                        </td>
-                        <td>
-                            <span class="status-indicator ${
-                              server.enabled
-                                ? "status-running"
-                                : "status-stopped"
-                            }"></span>
-                            ${server.enabled ? "启用" : "禁用"}
-                        </td>
-                        <td>${server.description || "-"}</td>
-                        <td>${this.formatDate(server.created_at)}</td>
-                        <td>
-                            <button class="btn btn-danger" onclick="serverManager.deleteServer('${
-                              server.id
-                            }')">
-                                删除
-                            </button>
-                        </td>
-                    </tr>
+                        </div>
+                        <div style="font-size: 11px; color: #999; margin-bottom: 8px;">
+                            <code style="background: #f0f0f0; padding: 2px 4px; border-radius: 3px; font-family: monospace;">${server.id}</code>
+                        </div>
+                        <div class="camera-rtsp" style="font-size: 11px; color: #666; background: #f8f9fa; padding: 4px 8px; border-radius: 4px; margin-bottom: 12px; word-break: break-all;">
+                            ${this.escapeHtml(server.url)}
+                        </div>
+                        <div style="font-size: 11px; color: #999; margin-bottom: 12px;">
+                            创建于 ${this.formatDate(server.created_at)}
+                        </div>
+                    </div>
                 `
             )
             .join("");
@@ -1329,10 +1356,6 @@
         async addServer() {
           const name = document.getElementById("serverName").value.trim();
           const url = document.getElementById("serverUrlInput").value.trim();
-          const description = document
-            .getElementById("serverDescription")
-            .value.trim();
-
           if (!name || !url) {
             alert("请填写服务器名称和地址字段");
             return;
@@ -1345,14 +1368,26 @@
             return;
           }
 
-          // 从 URL 中提取模型类型（端点路径）
+          // 解析URL并处理modeltype查询参数
           let modelType = "auto";
+          let cleanUrl = url;
           try {
             const urlObj = new URL(url);
-            const pathParts = urlObj.pathname.split("/").filter((part) => part);
-            // TODO: this is not so elegant.
-            if (pathParts.length > 0) {
-              modelType = pathParts[pathParts.length - 1]; // 使用最后一个路径段作为模型类型
+            
+            // 检查是否有modeltype查询参数
+            const modelTypeParam = urlObj.searchParams.get("modeltype");
+            if (modelTypeParam) {
+              // 使用查询参数中的modeltype
+              modelType = modelTypeParam;
+              // 移除查询参数，生成干净的URL
+              urlObj.searchParams.delete("modeltype");
+              cleanUrl = urlObj.toString();
+            } else {
+              // 没有查询参数，使用路径的最后一段作为modeltype
+              const pathParts = urlObj.pathname.split("/").filter((part) => part);
+              if (pathParts.length > 0) {
+                modelType = pathParts[pathParts.length - 1];
+              }
             }
           } catch (error) {
             console.log("URL解析失败，使用默认的 auto 类型");
@@ -1360,10 +1395,8 @@
 
           const serverData = {
             name: name,
-            url: url,
+            url: cleanUrl, // 使用处理后的干净URL
             model_type: modelType,
-            description: description,
-            enabled: true,
           };
 
           try {
@@ -1526,18 +1559,64 @@
         }
       }
 
+      // 区间滑块更新函数
+      function updateThresholdRange(serverId) {
+        const minInput = document.querySelector(`input[name="threshold-${serverId}"]`);
+        const maxInput = document.querySelector(`input[name="max-threshold-${serverId}"]`);
+        const rangeSpan = document.getElementById(`threshold-range-${serverId}`);
+        const minSpan = document.getElementById(`threshold-min-${serverId}`);
+        const maxSpan = document.getElementById(`threshold-max-${serverId}`);
+        
+        if (minInput && maxInput && rangeSpan) {
+          const minValue = parseInt(minInput.value);
+          const maxValue = parseInt(maxInput.value);
+          
+          // Ensure min <= max
+          if (minValue > maxValue) {
+            maxInput.value = minValue;
+          }
+          
+          rangeSpan.textContent = `${minInput.value}% - ${maxInput.value}%`;
+          if (minSpan) minSpan.textContent = `${minInput.value}%`;
+          if (maxSpan) maxSpan.textContent = `${maxInput.value}%`;
+        }
+      }
+
+      function updateEditThresholdRange(serverId) {
+        const minInput = document.querySelector(`input[name="edit-threshold-${serverId}"]`);
+        const maxInput = document.querySelector(`input[name="edit-max-threshold-${serverId}"]`);
+        const rangeSpan = document.getElementById(`edit-threshold-range-${serverId}`);
+        const minSpan = document.getElementById(`edit-threshold-min-${serverId}`);
+        const maxSpan = document.getElementById(`edit-threshold-max-${serverId}`);
+        
+        if (minInput && maxInput && rangeSpan) {
+          const minValue = parseInt(minInput.value);
+          const maxValue = parseInt(maxInput.value);
+          
+          // Ensure min <= max
+          if (minValue > maxValue) {
+            maxInput.value = minValue;
+          }
+          
+          rangeSpan.textContent = `${minInput.value}% - ${maxInput.value}%`;
+          if (minSpan) minSpan.textContent = `${minInput.value}%`;
+          if (maxSpan) maxSpan.textContent = `${maxInput.value}%`;
+        }
+      }
+
       // 配置导入导出功能
-      function exportConfig() {
+      function importConfig() {
         // 点击文件输入按钮进行导入
         document.getElementById("configFileInput").click();
       }
 
-      function importConfig() {
+      function exportConfig() {
         // 导出配置到文件
         const apiBase = "/api";
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').substring(0, 19);
         const link = document.createElement("a");
         link.href = `${apiBase}/config/export`;
-        link.download = "cameras_config.json";
+        link.download = `cameras_${timestamp}.json`;
         link.click();
       }
 
