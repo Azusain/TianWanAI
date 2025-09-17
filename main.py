@@ -75,9 +75,7 @@ def initialize_models():
     logger.info("starting model initialization...")
     
     try:
-        # Initialize separate unified YOLO detection models for each endpoint to avoid concurrency issues
-        # TODO: update with your actual unified model path
-        unified_model_path = "models/unified/weights/unified_model.pt"
+        unified_model_path = "models/all_v1.pt"
         
         logger.info("loading unified gesture detection model...")
         g_gesture_service = YoloDetectionService(unified_model_path, 640)
