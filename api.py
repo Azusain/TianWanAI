@@ -177,6 +177,21 @@ class YoloDetectionService():
             errno = ServiceStatus.NO_OBJECT_DETECTED.value
               
         err_msg = ServiceStatus.stringify(errno)
+        
+        # Convert tensor to native Python type if it's a tensor
+        if score is not None:
+            if hasattr(score, 'cpu'):
+                score = score.cpu()
+            if hasattr(score, 'numpy'):
+                score = score.numpy()
+            if hasattr(score, 'tolist'):
+                score = score.tolist()
+            # If it's a single item list/array, take the first element
+            if isinstance(score, (list, np.ndarray)) and len(score) == 1:
+                score = float(score[0])
+            elif not isinstance(score, (float, int)):
+                score = float(score)
+        
         if errno != 0:
             logger.error(err_msg)
         else:
@@ -184,11 +199,20 @@ class YoloDetectionService():
         
         left, top, width, height = None, None, None, None
         if score is not None and xyxyn is not None:
-            xyxyn = xyxyn[0].tolist() 
-            left    = xyxyn[0]
-            top     = xyxyn[1]
-            width   = xyxyn[2] - xyxyn[0]
-            height  = xyxyn[3] - xyxyn[1]
+            # Convert xyxyn to native Python types if it's a tensor
+            if hasattr(xyxyn, 'cpu'):
+                xyxyn = xyxyn.cpu()
+            
+            # Get first detection coordinates and convert to list
+            if hasattr(xyxyn[0], 'tolist'):
+                xyxyn = xyxyn[0].tolist()
+            else:
+                xyxyn = xyxyn[0]
+                
+            left    = float(xyxyn[0])
+            top     = float(xyxyn[1])
+            width   = float(xyxyn[2] - xyxyn[0])
+            height  = float(xyxyn[3] - xyxyn[1])
             
         return {
             "log_id": uuid4(),
