@@ -16,7 +16,6 @@ tools/
 mediamtx/
 docs/
 .github/
-.git/
 build.bat
 README.md
 version
