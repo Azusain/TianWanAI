@@ -8,7 +8,6 @@ import (
 	"image/jpeg"
 	"log"
 	"os"
-	"strings"
 	"sync"
 	"time"
 )
@@ -188,7 +187,11 @@ func (m *RTSPManager) rawFrameToJPEG(frame *RawFrame) ([]byte, error) {
 }
 
 func (m *RTSPManager) processFrame(stream *CameraStream, frameData []byte) {
-	cameraConfig := getCameraConfig(stream.ID)
+	cameraConfig, exists := safeGetCamera(stream.ID)
+	if !exists || cameraConfig == nil {
+		Warn(fmt.Sprintf("camera config not available for stream %s (%s), skipping frame processing", stream.ID, stream.Name))
+		return
+	}
 
 	stream.mutex.Lock()
 	stream.lastFrame = make([]byte, len(frameData))
@@ -196,13 +199,9 @@ func (m *RTSPManager) processFrame(stream *CameraStream, frameData []byte) {
 	stream.lastUpdate = time.Now()
 	stream.mutex.Unlock()
 
-	if cameraConfig != nil && len(cameraConfig.InferenceServerBindings) > 0 {
-		modelResults, err := ProcessFrameWithMultipleInference(frameData, cameraConfig, m)
-		if err != nil {
-			Warn(fmt.Sprintf("inference failed for camera %s: %v", stream.ID, err))
-		} else if modelResults != nil {
-			go m.saveResultsByModel(stream.Name, modelResults)
-		}
+	if len(cameraConfig.InferenceServerBindings) > 0 {
+		// Launch async inference processing - no waiting, no blocking
+		ProcessFrameWithAsyncInference(frameData, cameraConfig, m.outputDir)
 	}
 }
 
@@ -255,150 +254,3 @@ func (m *RTSPManager) GetCameraStatus(cameraID string) (bool, time.Time) {
 	return false, time.Time{}
 }
 
-func (m *RTSPManager) saveResultsByModel(cameraName string, modelResults map[string]*ModelResult) {
-	for modelType, result := range modelResults {
-		if len(result.Detections) == 0 {
-			continue
-		}
-
-		// For fall detection, ensure each ModelResult contains exactly one detection
-		if modelType == "fall" && len(result.Detections) != 1 {
-			Warn(fmt.Sprintf("fall detection ModelResult should contain exactly one detection, got %d detections, skipping", len(result.Detections)))
-			continue
-		}
-
-		// Generate filename and paths first
-		timestamp := time.Now().Format("20060102_150405")
-		filename := fmt.Sprintf("%s_%s_detection.jpg", timestamp, modelType)
-
-		// Perform IO operations asynchronously to avoid blocking
-		go func(result *ModelResult, filename, modelType, cameraName string) {
-			serverDir := fmt.Sprintf("%s/%s", m.outputDir, result.ServerID)
-			if err := os.MkdirAll(serverDir, 0755); err != nil {
-				Warn(fmt.Sprintf("failed to create directory for server %s: %v", result.ServerID, err))
-				return
-			}
-			filePath := fmt.Sprintf("%s/%s", serverDir, filename)
-			if err := os.WriteFile(filePath, result.DisplayDebugImage, 0644); err != nil {
-				Warn(fmt.Sprintf("failed to save detection image for model %s: %v", modelType, err))
-				return
-			}
-			Info(fmt.Sprintf("saved detection image for camera %s, model %s to %s (detections: %d)",
-				cameraName, modelType, filePath, len(result.Detections)))
-			// if env DEBUG=1.
-			m.saveDebugData(result, filename, modelType)
-		}(result, filename, modelType, cameraName)
-
-		go sendDetectionAlerts(result.DisplayResultImage, result.Detections, cameraName, modelType)
-	}
-}
-
-// saveDebugData saves original image and YOLO labels for DEBUG mode
-func (m *RTSPManager) saveDebugData(result *ModelResult, filename, modelType string) {
-	if !globalDebugMode || result.OriginalImage == nil {
-		return
-	}
-
-	// Create debug server directory
-	debugServerDir := fmt.Sprintf("%s/%s", DebugDir, result.ServerID)
-	if err := os.MkdirAll(debugServerDir, 0755); err != nil {
-		Warn(fmt.Sprintf("failed to create debug directory for server %s: %v", result.ServerID, err))
-		return
-	}
-
-	// Save original image
-	debugFilePath := fmt.Sprintf("%s/%s", debugServerDir, filename)
-	if err := os.WriteFile(debugFilePath, result.OriginalImage, 0644); err != nil {
-		Warn(fmt.Sprintf("failed to save debug original image: %v", err))
-		return
-	}
-
-	Info(fmt.Sprintf("saved debug original image to %s", debugFilePath))
-
-	// Save YOLO format labels if there are detections
-	if len(result.Detections) > 0 {
-		m.saveYoloLabels(result, debugServerDir, filename, modelType)
-	}
-}
-
-// saveYoloLabels saves YOLO format label file
-func (m *RTSPManager) saveYoloLabels(result *ModelResult, debugDir, filename, modelType string) {
-	// Get image dimensions for normalization
-	imgCfg, err := jpeg.DecodeConfig(bytes.NewReader(result.OriginalImage))
-	if err != nil {
-		Warn(fmt.Sprintf("failed to decode image config for yolo label: %v", err))
-		return
-	}
-
-	w := float64(imgCfg.Width)
-	h := float64(imgCfg.Height)
-	classIdx := getClassIndexFromModelType(modelType)
-
-	// Build YOLO format lines
-	lines := make([]string, 0, len(result.Detections))
-	for _, det := range result.Detections {
-		// Convert pixel coordinates to normalized YOLO format
-		cx := (float64(det.X1) + float64(det.X2)) / 2.0 / w
-		cy := (float64(det.Y1) + float64(det.Y2)) / 2.0 / h
-		bw := (float64(det.X2) - float64(det.X1)) / w
-		bh := (float64(det.Y2) - float64(det.Y1)) / h
-
-		// Clamp values between 0 and 1
-		if cx < 0 {
-			cx = 0
-		} else if cx > 1 {
-			cx = 1
-		}
-		if cy < 0 {
-			cy = 0
-		} else if cy > 1 {
-			cy = 1
-		}
-		if bw < 0 {
-			bw = 0
-		} else if bw > 1 {
-			bw = 1
-		}
-		if bh < 0 {
-			bh = 0
-		} else if bh > 1 {
-			bh = 1
-		}
-
-		lines = append(lines, fmt.Sprintf("%d %.6f %.6f %.6f %.6f", classIdx, cx, cy, bw, bh))
-	}
-
-	// Save label file
-	baseName := strings.TrimSuffix(filename, ".jpg")
-	labelPath := fmt.Sprintf("%s/%s.txt", debugDir, baseName)
-	labelContent := strings.Join(lines, "\n")
-
-	if err := os.WriteFile(labelPath, []byte(labelContent), 0644); err != nil {
-		Warn(fmt.Sprintf("failed to save yolo label: %v", err))
-	} else {
-		Info(fmt.Sprintf("saved yolo label to %s", labelPath))
-	}
-}
-
-func sendDetectionAlerts(imageData []byte, detections []Detection, cameraName, modelType string) {
-	// get the real size of the image.
-	img, err := jpeg.DecodeConfig(bytes.NewReader(imageData))
-	if err != nil {
-		Warn(fmt.Sprintf("failed to decode image config for alerts: %v", err))
-		return
-	}
-
-	for _, detection := range detections {
-		// normalization.
-		x1 := float64(detection.X1) / float64(img.Width)
-		y1 := float64(detection.Y1) / float64(img.Height)
-		x2 := float64(detection.X2) / float64(img.Width)
-		y2 := float64(detection.Y2) / float64(img.Height)
-
-		if err := SendAlertIfConfigured(imageData, modelType, cameraName, detection.Confidence, x1, y1, x2, y2); err != nil {
-			Warn(fmt.Sprintf("failed to send alert for detection %s: %v", detection.Class, err))
-		} else {
-			Info(fmt.Sprintf("sent alert for detection %s (confidence: %.3f) from camera %s", detection.Class, detection.Confidence, cameraName))
-		}
-	}
-}

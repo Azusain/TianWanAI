@@ -153,10 +153,202 @@
         background: #95a5a6;
       }
 
+      /* 摄像头网格布局 */
+      .cameras-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 20px;
+        padding: 20px 0;
+      }
+
+      .camera-card {
+        background: white;
+        border: 1px solid #e1e8ed;
+        border-radius: 8px;
+        padding: 16px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        transition: box-shadow 0.2s;
+      }
+
+      .camera-card:hover {
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+      }
+
+      .camera-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .camera-name {
+        font-weight: 600;
+        font-size: 16px;
+        color: #2c3e50;
+        margin-right: 12px;
+        flex: 1;
+      }
+
+      .camera-status {
+        display: flex;
+        align-items: center;
+        font-size: 12px;
+        color: #666;
+      }
+
+      .camera-rtsp {
+        font-size: 11px;
+        color: #666;
+        background: #f8f9fa;
+        padding: 4px 8px;
+        border-radius: 4px;
+        margin-bottom: 12px;
+        word-break: break-all;
+      }
+
+      .camera-servers {
+        margin-bottom: 12px;
+        min-height: 40px;
+      }
+
+      .camera-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .camera-actions .btn {
+        flex: 1;
+        padding: 8px 12px;
+        font-size: 12px;
+      }
+
+      /* 推理服务器两列布局 */
+      .inference-servers-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .server-item {
+        padding: 12px;
+        border: 1px solid #eee;
+        border-radius: 6px;
+        background: #fafafa;
+      }
+
+      .server-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+
+      .server-checkbox {
+        margin-right: 8px;
+      }
+
+      .server-info {
+        flex: 1;
+      }
+
+      .server-name {
+        font-weight: 500;
+        margin-right: 8px;
+      }
+
+      .server-type {
+        background: #e8f4fd;
+        color: #1e88e5;
+        padding: 2px 6px;
+        border-radius: 8px;
+        font-size: 10px;
+      }
+
+      /* 双端滑块样式 */
+      .range-slider {
+        position: relative;
+        height: 6px;
+        background: #ddd;
+        border-radius: 3px;
+        margin: 15px 0;
+      }
+
+      .range-slider .track {
+        position: absolute;
+        height: 100%;
+        background: #3498db;
+        border-radius: 3px;
+      }
+
+      .range-slider input[type="range"] {
+        position: absolute;
+        width: 100%;
+        height: 6px;
+        background: transparent;
+        appearance: none;
+        pointer-events: none;
+      }
+
+      .range-slider input[type="range"]::-webkit-slider-thumb {
+        appearance: none;
+        width: 18px;
+        height: 18px;
+        background: #3498db;
+        border-radius: 50%;
+        pointer-events: all;
+        cursor: pointer;
+        border: 2px solid white;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+      }
+
+      .range-slider input[type="range"]::-moz-range-thumb {
+        width: 18px;
+        height: 18px;
+        background: #3498db;
+        border-radius: 50%;
+        pointer-events: all;
+        cursor: pointer;
+        border: 2px solid white;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+      }
+
+      .range-values {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        color: #666;
+        margin-top: 8px;
+      }
+
+      /* 大型Modal样式 */
+      .large-modal {
+        width: 95%;
+        max-width: 1000px;
+        max-height: 90vh;
+      }
+
       /* 响应式设计 */
+      @media (max-width: 1200px) {
+        .cameras-grid {
+          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        }
+      }
+
       @media (max-width: 768px) {
         body {
-          padding: 20px;
+          padding: 15px;
+        }
+        
+        .cameras-grid {
+          grid-template-columns: 1fr;
+          gap: 15px;
+        }
+        
+        .inference-servers-grid {
+          grid-template-columns: 1fr;
+        }
+        
+        .large-modal {
+          width: 98%;
+          max-height: 95vh;
         }
 
         .table {
@@ -305,6 +497,7 @@
             <label for="inferenceServers">推理服务器</label>
             <div
               id="inferenceServersList"
+              class="inference-servers-grid"
               style="
                 border: 1px solid #ddd;
                 border-radius: 6px;
@@ -348,21 +541,7 @@
           <h4>暂无摄像头</h4>
           <p>请使用上面的表单添加第一个摄像头</p>
         </div>
-        <div id="camerasTable" style="display: none">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>名称</th>
-                <th>RTSP地址</th>
-                <th>推理服务器</th>
-                <th>状态</th>
-                <th>创建时间</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody id="camerasTableBody"></tbody>
-          </table>
-        </div>
+        <div id="camerasGrid" class="cameras-grid" style="display: none"></div>
       </div>
     </div>
 
@@ -479,45 +658,46 @@
         }
 
         displayCameras(cameras) {
-          const tbody = document.getElementById("camerasTableBody");
+          const grid = document.getElementById("camerasGrid");
           const emptyState = document.getElementById("camerasEmpty");
-          const table = document.getElementById("camerasTable");
 
           if (cameras.length === 0) {
             emptyState.style.display = "block";
-            table.style.display = "none";
+            grid.style.display = "none";
             return;
           }
 
           emptyState.style.display = "none";
-          table.style.display = "block";
+          grid.style.display = "grid";
 
-          tbody.innerHTML = cameras
+          grid.innerHTML = cameras
             .map(
               (camera) => `
-                    <tr>
-                        <td>${this.escapeHtml(camera.name)}</td>
-                        <td>
-                            <code style="font-size: 12px; background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">
-                                ${this.escapeHtml(camera.rtsp_url)}
-                            </code>
-                        </td>
-                        <td>
+                    <div class="camera-card">
+                        <div class="camera-header">
+                            <div class="camera-name">${this.escapeHtml(camera.name)}</div>
+                            <div class="camera-status">
+                                <span class="status-indicator ${
+                                  camera.running
+                                    ? "status-running"
+                                    : "status-stopped"
+                                }"></span>
+                                ${camera.running ? "运行中" : "已停止"}
+                            </div>
+                        </div>
+                        <div class="camera-rtsp">
+                            ${this.escapeHtml(camera.rtsp_url)}
+                        </div>
+                        <div class="camera-servers">
                             ${this.renderInferenceServerBindings(camera)}
-                        </td>
-                        <td>
-                            <span class="status-indicator ${
-                              camera.running
-                                ? "status-running"
-                                : "status-stopped"
-                            }"></span>
-                            ${camera.running ? "运行中" : "已停止"}
-                        </td>
-                        <td>${this.formatDate(camera.created_at)}</td>
-                        <td>
+                        </div>
+                        <div style="font-size: 11px; color: #999; margin-bottom: 12px;">
+                            创建于 ${this.formatDate(camera.created_at)}
+                        </div>
+                        <div class="camera-actions">
                             <button class="btn btn-primary" onclick="cameraManager.editCamera('${
                               camera.id
-                            }')" style="margin-right: 5px;">
+                            }')">
                                 编辑
                             </button>
                             <button class="btn btn-danger" onclick="cameraManager.deleteCamera('${
@@ -525,8 +705,8 @@
                             }')">
                                 删除
                             </button>
-                        </td>
-                    </tr>
+                        </div>
+                    </div>
                 `
             )
             .join("");
@@ -564,10 +744,10 @@
 
           if (servers.length === 0) {
             container.innerHTML = `
-                        <div style="color: #7f8c8d; font-size: 14px;">
+                        <div style="color: #7f8c8d; font-size: 14px; grid-column: 1 / -1; text-align: center;">
                             暂无可用的推理服务器，请先在"推理服务器"标签页中添加
                         </div>
-                    `;
+                    `
             return;
           }
 
@@ -743,7 +923,7 @@
                 `;
 
           dialog.innerHTML = `
-                    <div style="background: white; padding: 30px; border-radius: 12px; width: 90%; max-width: 600px; max-height: 80vh; overflow-y: auto;">
+                    <div class="large-modal" style="background: white; padding: 30px; border-radius: 12px; overflow-y: auto;">
                         <h3 style="margin-bottom: 20px; color: #2c3e50;">编辑摄像头: ${this.escapeHtml(
                           camera.name
                         )}</h3>
@@ -762,8 +942,8 @@
                             </div>
                             <div class="form-group">
                                 <label>推理服务器绑定</label>
-                                <div id="editInferenceServersList" style="border: 1px solid #ddd; border-radius: 6px; padding: 10px; max-height: 600px; overflow-y: auto;">
-                                    <div style="color: #7f8c8d; font-size: 14px;">加载中...</div>
+                                <div id="editInferenceServersList" class="inference-servers-grid" style="border: 1px solid #ddd; border-radius: 6px; padding: 10px; max-height: 600px; overflow-y: auto;">
+                                    <div style="color: #7f8c8d; font-size: 14px; grid-column: 1 / -1; text-align: center;">加载中...</div>
                                 </div>
                             </div>
                             <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
@@ -772,7 +952,7 @@
                             </div>
                         </form>
                     </div>
-                `;
+                `
 
           document.body.appendChild(dialog);
 

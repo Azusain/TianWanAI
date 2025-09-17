@@ -8,6 +8,8 @@ import (
 	"image/jpeg"
 	"io/ioutil"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -171,24 +173,23 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 		}
 
 		// TODO: this is really weird.
-		if modelType == "smoke" && *className == "fire" {
-			Warn("filter out the class `fire` from the smokexfire inference server.")
+		if modelType == string(ModelTypeSmoke) && *className == string(ModelTypeFire) {
+			Warn("filtering out fire class from smoke detection server")
 			continue
 		}
-		if modelType == "fire" && *className == "smoke" {
-			Warn("filter out the class `smoke` from the smokexfire inference server.")
+		if modelType == string(ModelTypeFire) && *className == string(ModelTypeSmoke) {
+			Warn("filtering out smoke class from fire detection server")
 			continue
 		}
 
 		confidence := 0.0
 		// TODO: use enumerate instead.
-		validRegularScore := modelType != "tshirt" && result.Score > 0 && result.Location.Left > 0
-		validTshirtScore := modelType == "tshirt" && result.DetScore != nil && result.ClsScore != nil && *result.DetScore > 0 && *result.ClsScore > 0
+		validRegularScore := modelType != string(ModelTypeTshirt) && result.Score > 0 && result.Location.Left > 0
+		validTshirtScore := modelType == string(ModelTypeTshirt) && result.DetScore != nil && result.ClsScore != nil && *result.DetScore > 0 && *result.ClsScore > 0
 		if validTshirtScore {
-			// TODO: better algorithm.
-			// confidence = math.Exp(math.Log(*result.DetScore) + math.Log(*result.ClsScore))
+			// Use classification score for tshirt detection confidence
 			confidence = *result.ClsScore
-			Info(fmt.Sprintf("det: %f , cls: %f", *result.DetScore, *result.ClsScore))
+			Info(fmt.Sprintf("tshirt detection scores - det: %.3f, cls: %.3f", *result.DetScore, *result.ClsScore))
 		} else if validRegularScore {
 			confidence = result.Score
 		} else {
@@ -252,19 +253,11 @@ type ModelResult struct {
 	Error             error  `json:"-"`
 }
 
-// ProcessFrameWithMultipleInference processes a frame with multiple inference servers concurrently
-func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraConfig, manager *RTSPManager) (map[string]*ModelResult, error) {
-	results := make(map[string]*ModelResult)
-
-	// Prepare channel for collecting results
-	type inferenceResult struct {
-		modelType string
-		result    *ModelResult
-	}
-	resultChan := make(chan inferenceResult, len(cameraConfig.InferenceServerBindings))
-	var goroutineCount int
-
-	// Launch goroutines for each inference server
+// ProcessFrameWithAsyncInference processes a frame with multiple inference servers asynchronously
+// This function launches each inference server processing in its own goroutine and returns immediately
+// Each goroutine handles the entire pipeline: inference -> draw -> save -> alert
+func ProcessFrameWithAsyncInference(frameData []byte, cameraConfig *CameraConfig, outputDir string) {
+	// Launch independent goroutines for each inference server
 	for _, binding := range cameraConfig.InferenceServerBindings {
 		server, exists := dataStore.InferenceServers[binding.ServerID]
 		if !exists {
@@ -277,67 +270,195 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 		}
 
 		// For fall detection, skip frame-based processing since we now use active polling
-		// The polling mechanism handles result retrieval independently
-		if server.ModelType == "fall" {
-			// Skip - results are handled by polling goroutine in webserver
+		if server.ModelType == string(ModelTypeFall) {
 			continue
 		}
 
-		// Other models: launch concurrent inference
-		goroutineCount++
-		go func(s *InferenceServer, b InferenceServerBinding) {
-			// Create frame data copy for this goroutine
-			// TODO: shit codes.
-			frameDataCopy := make([]byte, len(frameData))
-			copy(frameDataCopy, frameData)
-			frameDataCopy2 := make([]byte, len(frameData))
-			copy(frameDataCopy2, frameData)
+		// Launch independent async processing for each server
+		go processInferenceServerAsync(frameData, server, &binding, cameraConfig, outputDir)
+	}
+}
 
-			// Process inference
-			detections := processInferenceServer(frameDataCopy, s, &b, cameraConfig.ID)
+// processInferenceServerAsync handles the complete pipeline for a single inference server asynchronously
+func processInferenceServerAsync(frameData []byte, server *InferenceServer, binding *InferenceServerBinding, cameraConfig *CameraConfig, outputDir string) {
+	// Create frame data copies for this goroutine to avoid race conditions
+	frameDataCopy := make([]byte, len(frameData))
+	copy(frameDataCopy, frameData)
+	frameDataCopy2 := make([]byte, len(frameData))
+	copy(frameDataCopy2, frameData)
 
-			// Draw detections on image copy (without confidence labels, without camera name overlay)
-			displayedImage, err := DrawDetectionsWithServerInfo(frameDataCopy, detections, cameraConfig.Name, false, s.Name)
-			if err != nil {
-				Warn(fmt.Sprintf("failed to draw results for model %q: %v", s.ModelType, err))
-			}
-			// with confidence labels and server info
-			debugImage, err := DrawDetectionsWithServerInfo(frameDataCopy2, detections, cameraConfig.Name, true, s.Name)
-			if err != nil {
-				Warn(fmt.Sprintf("failed to draw debug image for model %q: %v", s.ModelType, err))
-			}
+	// Process inference
+	detections := processInferenceServer(frameDataCopy, server, binding, cameraConfig.ID)
 
-			// Store original image copy for DEBUG mode
-			var originalImageCopy []byte
-			if globalDebugMode {
-				originalImageCopy = make([]byte, len(frameDataCopy))
-				copy(originalImageCopy, frameDataCopy)
-			}
-
-			modelResult := &ModelResult{
-				ModelType:          s.ModelType,
-				ServerID:           b.ServerID,
-				Detections:         detections,
-				DisplayResultImage: displayedImage,
-				DisplayDebugImage:  debugImage,
-				OriginalImage:      originalImageCopy,
-				Error:              nil,
-			}
-
-			resultChan <- inferenceResult{modelType: s.ModelType, result: modelResult}
-		}(server, binding)
+	// If no detections, return early
+	if len(detections) == 0 {
+		return
 	}
 
-	// Collect all results
-	// TODO: Stupid sync.
-	for i := 0; i < goroutineCount; i++ {
-		result := <-resultChan
-		if result.result != nil {
-			results[result.modelType] = result.result
+	// Draw detections on image copy (without confidence labels)
+	displayedImage, err := DrawDetectionsWithServerInfo(frameDataCopy, detections, cameraConfig.Name, false, server.Name)
+	if err != nil {
+		Warn(fmt.Sprintf("failed to draw results for model %q: %v", server.ModelType, err))
+		return
+	}
+	
+	// Draw debug image with confidence labels and server info
+	debugImage, err := DrawDetectionsWithServerInfo(frameDataCopy2, detections, cameraConfig.Name, true, server.Name)
+	if err != nil {
+		Warn(fmt.Sprintf("failed to draw debug image for model %q: %v", server.ModelType, err))
+		return
+	}
+
+	// Store original image copy for DEBUG mode
+	var originalImageCopy []byte
+	if globalDebugMode {
+		originalImageCopy = make([]byte, len(frameDataCopy))
+		copy(originalImageCopy, frameDataCopy)
+	}
+
+	// Create model result
+	modelResult := &ModelResult{
+		ModelType:          server.ModelType,
+		ServerID:           binding.ServerID,
+		Detections:         detections,
+		DisplayResultImage: displayedImage,
+		DisplayDebugImage:  debugImage,
+		OriginalImage:      originalImageCopy,
+		Error:              nil,
+	}
+
+	// Launch independent async operations for better performance
+	// 1. Save results to file (async)
+	go func() {
+		saveModelResult(cameraConfig.Name, modelResult, outputDir)
+	}()
+	
+	// 2. Send detection alerts (async)
+	go func() {
+		// Create image data copy for alert sending
+		alertImageData := make([]byte, len(modelResult.DisplayResultImage))
+		copy(alertImageData, modelResult.DisplayResultImage)
+		
+		sendDetectionAlerts(alertImageData, modelResult.Detections, cameraConfig.Name, modelResult.ModelType)
+	}()
+}
+
+// saveModelResult saves a single model result to file
+func saveModelResult(cameraName string, result *ModelResult, outputDir string) {
+	// For fall detection, ensure exactly one detection
+	if result.ModelType == string(ModelTypeFall) && len(result.Detections) != 1 {
+		Warn(fmt.Sprintf("fall detection ModelResult should contain exactly one detection, got %d detections, skipping", len(result.Detections)))
+		return
+	}
+
+	// Generate filename and paths
+	timestamp := time.Now().Format("20060102_150405")
+	filename := fmt.Sprintf("%s_%s_detection.jpg", timestamp, result.ModelType)
+	serverDir := fmt.Sprintf("%s/%s", outputDir, result.ServerID)
+	
+	if err := os.MkdirAll(serverDir, 0755); err != nil {
+		Warn(fmt.Sprintf("failed to create directory for server %s: %v", result.ServerID, err))
+		return
+	}
+	
+	filePath := fmt.Sprintf("%s/%s", serverDir, filename)
+	if err := os.WriteFile(filePath, result.DisplayDebugImage, 0644); err != nil {
+		Warn(fmt.Sprintf("failed to save detection image for model %s: %v", result.ModelType, err))
+		return
+	}
+	
+	Info(fmt.Sprintf("saved detection image for camera %s, model %s to %s (detections: %d)",
+		cameraName, result.ModelType, filePath, len(result.Detections)))
+				
+	// Save debug data if enabled
+	saveDebugDataAsync(result, filename, outputDir)
+}
+
+// saveDebugDataAsync saves original image and YOLO labels for DEBUG mode
+func saveDebugDataAsync(result *ModelResult, filename, outputDir string) {
+	if !globalDebugMode || result.OriginalImage == nil {
+		return
+	}
+
+	// Create debug server directory
+	debugServerDir := fmt.Sprintf("%s/%s", DebugDir, result.ServerID)
+	if err := os.MkdirAll(debugServerDir, 0755); err != nil {
+		Warn(fmt.Sprintf("failed to create debug directory for server %s: %v", result.ServerID, err))
+		return
+	}
+
+	// Save original image
+	debugFilePath := fmt.Sprintf("%s/%s", debugServerDir, filename)
+	if err := os.WriteFile(debugFilePath, result.OriginalImage, 0644); err != nil {
+		Warn(fmt.Sprintf("failed to save debug original image: %v", err))
+		return
+	}
+
+	Info(fmt.Sprintf("saved debug original image to %s", debugFilePath))
+
+	// Save YOLO format labels if there are detections
+	if len(result.Detections) > 0 {
+		saveYoloLabelsAsync(result, debugServerDir, filename)
+	}
+}
+
+// saveYoloLabelsAsync saves YOLO format label file
+func saveYoloLabelsAsync(result *ModelResult, debugDir, filename string) {
+	// Get image dimensions for normalization
+	imgCfg, err := jpeg.DecodeConfig(bytes.NewReader(result.OriginalImage))
+	if err != nil {
+		Warn(fmt.Sprintf("failed to decode image config for yolo label: %v", err))
+		return
+	}
+
+	w := float64(imgCfg.Width)
+	h := float64(imgCfg.Height)
+	classIdx := getClassIndexFromModelType(result.ModelType)
+
+	// Build YOLO format lines
+	lines := make([]string, 0, len(result.Detections))
+	for _, det := range result.Detections {
+		// Convert pixel coordinates to normalized YOLO format
+		cx := (float64(det.X1) + float64(det.X2)) / 2.0 / w
+		cy := (float64(det.Y1) + float64(det.Y2)) / 2.0 / h
+		bw := (float64(det.X2) - float64(det.X1)) / w
+		bh := (float64(det.Y2) - float64(det.Y1)) / h
+
+		// Clamp values between 0 and 1
+		if cx < 0 {
+			cx = 0
+		} else if cx > 1 {
+			cx = 1
 		}
+		if cy < 0 {
+			cy = 0
+		} else if cy > 1 {
+			cy = 1
+		}
+		if bw < 0 {
+			bw = 0
+		} else if bw > 1 {
+			bw = 1
+		}
+		if bh < 0 {
+			bh = 0
+		} else if bh > 1 {
+			bh = 1
+		}
+
+		lines = append(lines, fmt.Sprintf("%d %.6f %.6f %.6f %.6f", classIdx, cx, cy, bw, bh))
 	}
 
-	return results, nil
+	// Save label file
+	baseName := strings.TrimSuffix(filename, ".jpg")
+	labelPath := fmt.Sprintf("%s/%s.txt", debugDir, baseName)
+	labelContent := strings.Join(lines, "\n")
+
+	if err := os.WriteFile(labelPath, []byte(labelContent), 0644); err != nil {
+		Warn(fmt.Sprintf("failed to save yolo label: %v", err))
+	} else {
+		Info(fmt.Sprintf("saved yolo label to %s", labelPath))
+	}
 }
 
 // This function never returns nil !!!
@@ -352,7 +473,7 @@ func processInferenceServer(frameData []byte, server *InferenceServer, binding *
 
 	// Process based on model type
 	// TODO: enum instead of hardcoding.
-	if server.ModelType == "fall" {
+	if server.ModelType == string(ModelTypeFall) {
 		// Fall detection is handled separately in ProcessFrameWithMultipleInference
 		return []Detection{}
 	} else {
@@ -388,6 +509,24 @@ type AlertRequest struct {
 	Timestamp string  `json:"timestamp"`
 }
 
+// ModelType represents supported model types
+type ModelType string
+
+// Supported model types as constants
+const (
+	ModelTypeOther     ModelType = "other"
+	ModelTypeGesture   ModelType = "gesture"
+	ModelTypePonding   ModelType = "ponding"
+	ModelTypeSmoke     ModelType = "smoke"
+	ModelTypeMouse     ModelType = "mouse"
+	ModelTypeTshirt    ModelType = "tshirt"
+	ModelTypeCigar     ModelType = "cigar"
+	ModelTypeHelmet    ModelType = "helmet"
+	ModelTypeFire      ModelType = "fire"
+	ModelTypeFall      ModelType = "fall"
+	ModelTypeSafetybelt ModelType = "safetybelt"
+)
+
 // SendAlertIfConfigured sends detection alert to management platform using global configuration
 // getClassIndexFromModelType maps modelType to YOLO class index
 // This function is used to generate YOLO format labels in DEBUG mode
@@ -395,14 +534,17 @@ func getClassIndexFromModelType(modelType string) int {
 	// class index mapping for YOLO dataset labels
 	// based on the user's requirement: other, gesture, ponding, mouse, tshirt, cigar
 	classMap := map[string]int{
-		"other":   0,
-		"gesture": 1,
-		"ponding": 2,
-		"smoke":   3,
-		"mouse":   4,
-		"tshirt":  5,
-		"cigar":   6,
-		"helmet":  7,
+		"other":     0,
+		"gesture":   1,
+		"ponding":   2,
+		"smoke":     3,
+		"mouse":     4,
+		"tshirt":    5,
+		"cigar":     6,
+		"helmet":    7,
+		"fire":      8,
+		"fall":      9,
+		"safetybelt": 10,
 	}
 
 	if classIndex, exists := classMap[modelType]; exists {
@@ -466,4 +608,28 @@ func SendAlertIfConfigured(imageData []byte, modelType, cameraName string, score
 		cameraName, modelType, score))
 
 	return nil
+}
+
+// sendDetectionAlerts sends alerts for all detections in the result
+func sendDetectionAlerts(imageData []byte, detections []Detection, cameraName, modelType string) {
+	// Get the real size of the image
+	img, err := jpeg.DecodeConfig(bytes.NewReader(imageData))
+	if err != nil {
+		Warn(fmt.Sprintf("failed to decode image config for alerts: %v", err))
+		return
+	}
+
+	for _, detection := range detections {
+		// Normalize coordinates
+		x1 := float64(detection.X1) / float64(img.Width)
+		y1 := float64(detection.Y1) / float64(img.Height)
+		x2 := float64(detection.X2) / float64(img.Width)
+		y2 := float64(detection.Y2) / float64(img.Height)
+
+		if err := SendAlertIfConfigured(imageData, modelType, cameraName, detection.Confidence, x1, y1, x2, y2); err != nil {
+			Warn(fmt.Sprintf("failed to send alert for detection %s: %v", detection.Class, err))
+		} else {
+			Info(fmt.Sprintf("sent alert for detection %s (confidence: %.3f) from camera %s", detection.Class, detection.Confidence, cameraName))
+		}
+	}
 }

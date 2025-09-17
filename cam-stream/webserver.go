@@ -12,8 +12,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
 
@@ -234,10 +236,6 @@ type DataStore struct {
 	Cameras          map[string]*CameraConfig    `json:"cameras"`
 	InferenceServers map[string]*InferenceServer `json:"inference_servers"`
 	AlertServer      *AlertServerConfig          `json:"alert_server,omitempty"` // Global alert server config
-	Counters         struct {
-		Camera          int `json:"camera"`
-		InferenceServer int `json:"inference_server"`
-	} `json:"counters"`
 }
 
 const (
@@ -251,8 +249,51 @@ var dataStore = &DataStore{
 	InferenceServers: make(map[string]*InferenceServer),
 }
 
+// Global mutex to protect dataStore concurrent access
+var dataStoreMutex sync.RWMutex
+
 // Runtime-only fall detection task tracking (not persisted)
 var fallDetectionTasks = make(map[string]*FallDetectionTaskState)
+var fallDetectionTasksMutex sync.RWMutex
+
+// Thread-safe helper functions
+func safeGetCamera(id string) (*CameraConfig, bool) {
+	dataStoreMutex.RLock()
+	defer dataStoreMutex.RUnlock()
+	camera, exists := dataStore.Cameras[id]
+	return camera, exists
+}
+
+func safeGetInferenceServer(id string) (*InferenceServer, bool) {
+	dataStoreMutex.RLock()
+	defer dataStoreMutex.RUnlock()
+	server, exists := dataStore.InferenceServers[id]
+	return server, exists
+}
+
+func safeUpdateDataStore(fn func()) {
+	dataStoreMutex.Lock()
+	defer dataStoreMutex.Unlock()
+	fn()
+}
+
+func safeReadDataStore(fn func()) {
+	dataStoreMutex.RLock()
+	defer dataStoreMutex.RUnlock()
+	fn()
+}
+
+func safeUpdateTasks(fn func()) {
+	fallDetectionTasksMutex.Lock()
+	defer fallDetectionTasksMutex.Unlock()
+	fn()
+}
+
+func safeReadTasks(fn func()) {
+	fallDetectionTasksMutex.RLock()
+	defer fallDetectionTasksMutex.RUnlock()
+	fn()
+}
 
 // Data persistence functions
 func loadDataStore() error {
@@ -315,13 +356,19 @@ func saveDataStore() error {
 }
 
 func generateCameraID() string {
-	dataStore.Counters.Camera++
-	return fmt.Sprintf("cam_%d", dataStore.Counters.Camera)
+	// Use full UUID to ensure uniqueness, remove dashes for cleaner look
+	return "cam_" + strings.ReplaceAll(uuid.New().String(), "-", "")
 }
 
-func generateInferenceServerID() string {
-	dataStore.Counters.InferenceServer++
-	return fmt.Sprintf("inf_%d", dataStore.Counters.InferenceServer)
+func generateInferenceServerID(modelType string) string {
+	// Sanitize model type for ID (replace spaces and special chars with underscore)
+	sanitizedModelType := strings.ReplaceAll(strings.ToLower(modelType), " ", "_")
+	sanitizedModelType = strings.ReplaceAll(sanitizedModelType, "-", "_")
+	
+	// Use full UUID to ensure uniqueness
+	// Generate ID format: inf_<model_type>_<full_uuid>
+	uuidPart := strings.ReplaceAll(uuid.New().String(), "-", "")
+	return fmt.Sprintf("inf_%s_%s", sanitizedModelType, uuidPart)
 }
 
 // API Handlers
@@ -331,9 +378,11 @@ func (ws *WebServer) handleAPICameras(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 		var cameraList []*CameraConfig
-		for _, camera := range dataStore.Cameras {
-			cameraList = append(cameraList, camera)
-		}
+		safeReadDataStore(func() {
+			for _, camera := range dataStore.Cameras {
+				cameraList = append(cameraList, camera)
+			}
+		})
 
 		response := APIResponse{
 			Success: true,
@@ -375,7 +424,9 @@ func (ws *WebServer) handleAPICameras(w http.ResponseWriter, r *http.Request) {
 		newCamera.Running = true
 		newCamera.Enabled = true
 
-		dataStore.Cameras[newCamera.ID] = &newCamera
+		safeUpdateDataStore(func() {
+			dataStore.Cameras[newCamera.ID] = &newCamera
+		})
 
 		if err := saveDataStore(); err != nil {
 			Warn(fmt.Sprintf("failed to save data store: %v", err))
@@ -391,8 +442,8 @@ func (ws *WebServer) handleAPICameras(w http.ResponseWriter, r *http.Request) {
 
 		// Start fall detection tasks for any bound fall detection servers
 		for _, binding := range newCamera.InferenceServerBindings {
-			server, serverExists := dataStore.InferenceServers[binding.ServerID]
-			if serverExists && server.Enabled && server.ModelType == "fall" {
+			server, serverExists := safeGetInferenceServer(binding.ServerID)
+			if serverExists && server.Enabled && server.ModelType == string(ModelTypeFall) {
 				ws.startFallDetectionTask(&newCamera, server)
 			}
 		}
@@ -416,7 +467,7 @@ func (ws *WebServer) handleAPICameraByID(w http.ResponseWriter, r *http.Request)
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	camera, exists := dataStore.Cameras[id]
+	camera, exists := safeGetCamera(id)
 	if !exists {
 		response := APIResponse{
 			Success: false,
@@ -453,7 +504,9 @@ func (ws *WebServer) handleAPICameraByID(w http.ResponseWriter, r *http.Request)
 		updatedCamera.CreatedAt = camera.CreatedAt
 		updatedCamera.UpdatedAt = time.Now()
 
-		dataStore.Cameras[id] = &updatedCamera
+		safeUpdateDataStore(func() {
+			dataStore.Cameras[id] = &updatedCamera
+		})
 
 		if err := saveDataStore(); err != nil {
 			Warn(fmt.Sprintf("failed to save data store: %v", err))
@@ -478,13 +531,15 @@ func (ws *WebServer) handleAPICameraByID(w http.ResponseWriter, r *http.Request)
 
 		// Stop fall detection tasks for this camera
 		for _, binding := range camera.InferenceServerBindings {
-			server, serverExists := dataStore.InferenceServers[binding.ServerID]
-			if serverExists && server.ModelType == "fall" {
+			server, serverExists := safeGetInferenceServer(binding.ServerID)
+			if serverExists && server.ModelType == string(ModelTypeFall) {
 				ws.stopFallDetectionTasksForCamera(camera.ID, server.ID)
 			}
 		}
 
-		delete(dataStore.Cameras, id)
+		safeUpdateDataStore(func() {
+			delete(dataStore.Cameras, id)
+		})
 
 		if err := saveDataStore(); err != nil {
 			Warn(fmt.Sprintf("failed to save data store: %v", err))
@@ -505,15 +560,19 @@ func (ws *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 
 	runningCount := 0
 	enabledCount := 0
+	totalCameras := 0
 
-	for _, camera := range dataStore.Cameras {
-		if camera.Running {
-			runningCount++
+	safeReadDataStore(func() {
+		totalCameras = len(dataStore.Cameras)
+		for _, camera := range dataStore.Cameras {
+			if camera.Running {
+				runningCount++
+			}
+			if camera.Enabled {
+				enabledCount++
+			}
 		}
-		if camera.Enabled {
-			enabledCount++
-		}
-	}
+	})
 
 	response := APIResponse{
 		Success: true,
@@ -521,9 +580,9 @@ func (ws *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 		Data: map[string]interface{}{
 			"manager_running":    true,
 			"running_cameras":    runningCount,
-			"total_cameras":      len(dataStore.Cameras),
+			"total_cameras":      totalCameras,
 			"enabled_cameras":    enabledCount,
-			"disabled_cameras":   len(dataStore.Cameras) - enabledCount,
+			"disabled_cameras":   totalCameras - enabledCount,
 			"persistent_storage": true,
 			"data_file":          DataFile,
 		},
@@ -536,16 +595,20 @@ func (ws *WebServer) handleAPIDebug(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var cameraIDs []string
-	for id := range dataStore.Cameras {
-		cameraIDs = append(cameraIDs, id)
-	}
+	totalCameras := 0
+	safeReadDataStore(func() {
+		totalCameras = len(dataStore.Cameras)
+		for id := range dataStore.Cameras {
+			cameraIDs = append(cameraIDs, id)
+		}
+	})
 
 	debugInfo := map[string]interface{}{
 		"message":            "Debug route is working!",
 		"timestamp":          time.Now().Format(time.RFC3339),
 		"routes_registered":  "API routes are properly registered",
 		"cors_enabled":       true,
-		"total_cameras":      len(dataStore.Cameras),
+		"total_cameras":      totalCameras,
 		"camera_ids":         cameraIDs,
 		"persistent_storage": true,
 		"data_file_exists":   fileExists(DataFile),
@@ -562,38 +625,27 @@ func (ws *WebServer) handleAPIDebug(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// getCommandVersion gets the version string from a command like ffmpeg or ffprobe
+func getCommandVersion(command string) string {
+	if cmd := exec.Command(command, "-version"); cmd != nil {
+		if output, err := cmd.Output(); err == nil {
+			lines := strings.Split(string(output), "\n")
+			if len(lines) > 0 {
+				return strings.TrimSpace(lines[0])
+			}
+		}
+	}
+	return "unknown"
+}
+
 // handleAPIPing returns basic liveness and FFmpeg version info
 func (ws *WebServer) handleAPIPing(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// get FFmpeg version
-	ffmpegVersion := "unknown"
-	if cmd := exec.Command("ffmpeg", "-version"); cmd != nil {
-		if output, err := cmd.Output(); err == nil {
-			// extract first line which contains version info
-			lines := strings.Split(string(output), "\n")
-			if len(lines) > 0 {
-				ffmpegVersion = strings.TrimSpace(lines[0])
-			}
-		}
-	}
-
-	// get ffprobe version
-	ffprobeVersion := "unknown"
-	if cmd := exec.Command("ffprobe", "-version"); cmd != nil {
-		if output, err := cmd.Output(); err == nil {
-			// extract first line which contains version info
-			lines := strings.Split(string(output), "\n")
-			if len(lines) > 0 {
-				ffprobeVersion = strings.TrimSpace(lines[0])
-			}
-		}
-	}
-
 	info := map[string]interface{}{
 		"timestamp":       time.Now().Format(time.RFC3339),
-		"ffmpeg_version":  ffmpegVersion,
-		"ffprobe_version": ffprobeVersion,
+		"ffmpeg_version":  getCommandVersion("ffmpeg"),
+		"ffprobe_version": getCommandVersion("ffprobe"),
 	}
 
 	resp := APIResponse{
@@ -684,8 +736,9 @@ func (ws *WebServer) handleAPIImageServers(w http.ResponseWriter, r *http.Reques
 		if e.IsDir() {
 			id := e.Name()
 			// only include servers that exist in dataStore (not deleted)
-			if s, ok := dataStore.InferenceServers[id]; ok && s != nil {
-				name := s.Name
+			server, exists := safeGetInferenceServer(id)
+			if exists && server != nil {
+				name := server.Name
 				if name == "" {
 					name = id // fallback to id if name is empty
 				}
@@ -760,9 +813,11 @@ func (ws *WebServer) handleAPIInferenceServers(w http.ResponseWriter, r *http.Re
 	switch r.Method {
 	case "GET":
 		var serverList []*InferenceServer
-		for _, server := range dataStore.InferenceServers {
-			serverList = append(serverList, server)
-		}
+		safeReadDataStore(func() {
+			for _, server := range dataStore.InferenceServers {
+				serverList = append(serverList, server)
+			}
+		})
 
 		response := APIResponse{
 			Success: true,
@@ -796,19 +851,20 @@ func (ws *WebServer) handleAPIInferenceServers(w http.ResponseWriter, r *http.Re
 
 		// Set default model type if not provided
 		if newServer.ModelType == "" {
-			// TODO: wtf is this?
-			newServer.ModelType = "auto"
+			newServer.ModelType = string(ModelTypeOther)
 		}
 
 		if newServer.ID == "" {
-			newServer.ID = generateInferenceServerID()
+			newServer.ID = generateInferenceServerID(newServer.ModelType)
 		}
 
 		newServer.CreatedAt = time.Now()
 		newServer.UpdatedAt = time.Now()
 		newServer.Enabled = true
 
-		dataStore.InferenceServers[newServer.ID] = &newServer
+		safeUpdateDataStore(func() {
+			dataStore.InferenceServers[newServer.ID] = &newServer
+		})
 
 		if err := saveDataStore(); err != nil {
 			Warn(fmt.Sprintf("failed to save data store: %v", err))
@@ -833,7 +889,7 @@ func (ws *WebServer) handleAPIInferenceServerByID(w http.ResponseWriter, r *http
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	server, exists := dataStore.InferenceServers[id]
+	server, exists := safeGetInferenceServer(id)
 	if !exists {
 		response := APIResponse{
 			Success: false,
@@ -870,7 +926,9 @@ func (ws *WebServer) handleAPIInferenceServerByID(w http.ResponseWriter, r *http
 		updatedServer.CreatedAt = server.CreatedAt
 		updatedServer.UpdatedAt = time.Now()
 
-		dataStore.InferenceServers[id] = &updatedServer
+		safeUpdateDataStore(func() {
+			dataStore.InferenceServers[id] = &updatedServer
+		})
 
 		if err := saveDataStore(); err != nil {
 			Warn(fmt.Sprintf("failed to save data store: %v", err))
@@ -886,17 +944,19 @@ func (ws *WebServer) handleAPIInferenceServerByID(w http.ResponseWriter, r *http
 		json.NewEncoder(w).Encode(response)
 
 	case "DELETE":
-		for _, camera := range dataStore.Cameras {
-			for i, serverBinding := range camera.InferenceServerBindings {
-				if serverBinding.ServerID == id {
-					camera.InferenceServerBindings = append(camera.InferenceServerBindings[:i], camera.InferenceServerBindings[i+1:]...)
-					camera.UpdatedAt = time.Now()
-					break
+		safeUpdateDataStore(func() {
+			for _, camera := range dataStore.Cameras {
+				for i, serverBinding := range camera.InferenceServerBindings {
+					if serverBinding.ServerID == id {
+						camera.InferenceServerBindings = append(camera.InferenceServerBindings[:i], camera.InferenceServerBindings[i+1:]...)
+						camera.UpdatedAt = time.Now()
+						break
+					}
 				}
 			}
-		}
 
-		delete(dataStore.InferenceServers, id)
+			delete(dataStore.InferenceServers, id)
+		})
 
 		if err := saveDataStore(); err != nil {
 			Warn(fmt.Sprintf("failed to save data store: %v", err))
@@ -920,16 +980,18 @@ func (ws *WebServer) handleAPIAlertServer(w http.ResponseWriter, r *http.Request
 	case "GET":
 		// Return current alert server configuration
 		var alertConfig *AlertServerConfig
-		if dataStore.AlertServer != nil {
-			alertConfig = dataStore.AlertServer
-		} else {
-			// Return default/empty configuration
-			alertConfig = &AlertServerConfig{
-				URL:       "",
-				Enabled:   false,
-				UpdatedAt: time.Now(),
+		safeReadDataStore(func() {
+			if dataStore.AlertServer != nil {
+				alertConfig = dataStore.AlertServer
+			} else {
+				// Return default/empty configuration
+				alertConfig = &AlertServerConfig{
+					URL:       "",
+					Enabled:   false,
+					UpdatedAt: time.Now(),
+				}
 			}
-		}
+		})
 
 		response := APIResponse{
 			Success: true,
@@ -953,7 +1015,9 @@ func (ws *WebServer) handleAPIAlertServer(w http.ResponseWriter, r *http.Request
 		}
 
 		updatedConfig.UpdatedAt = time.Now()
-		dataStore.AlertServer = &updatedConfig
+		safeUpdateDataStore(func() {
+			dataStore.AlertServer = &updatedConfig
+		})
 
 		if err := saveDataStore(); err != nil {
 			Warn(fmt.Sprintf("failed to save data store: %v", err))
@@ -990,6 +1054,12 @@ func (ws *WebServer) startFallDetectionResultPolling(task *FallDetectionTaskStat
 		Info(fmt.Sprintf("started fall detection result polling for task %s (camera: %s, server: %s)", task.TaskID, camera.Name, server.Name))
 
 		for {
+			// Safety check for ticker before accessing it
+			if task.pollTicker == nil {
+				Info(fmt.Sprintf("ticker is nil for task %s, stopping polling goroutine", task.TaskID))
+				return
+			}
+			
 			select {
 			case <-task.pollTicker.C:
 				// Fetch fall detection results
@@ -1110,13 +1180,24 @@ func (ws *WebServer) processFallResultsFromPolling(results []FallDetectionResult
 			},
 		}
 
-		// Save this single fall detection result immediately
-		if ws.rtspManager != nil {
-			ws.rtspManager.saveResultsByModel(camera.Name, singleModelResult)
-			Info(fmt.Sprintf("saved fall detection result: confidence=%.2f, camera=%s", confidence, camera.Name))
-		} else {
-			Warn("rtspManager is nil, cannot save fall detection result")
-		}
+		// Launch independent async operations for fall detection result
+		modelResult := singleModelResult[server.ModelType]
+		
+		// 1. Save fall detection result (async)
+		go func() {
+			saveModelResult(camera.Name, modelResult, ws.rtspManager.outputDir)
+		}()
+		
+		// 2. Send fall detection alert (async)
+		go func() {
+			// Create image data copy for alert sending
+			alertImageData := make([]byte, len(modelResult.DisplayResultImage))
+			copy(alertImageData, modelResult.DisplayResultImage)
+			
+			sendDetectionAlerts(alertImageData, modelResult.Detections, camera.Name, modelResult.ModelType)
+		}()
+		
+		Info(fmt.Sprintf("processed fall detection result: confidence=%.2f, camera=%s", confidence, camera.Name))
 	}
 }
 
@@ -1136,11 +1217,18 @@ func (ws *WebServer) stopFallDetectionResultPolling(task *FallDetectionTaskState
 // startFallDetectionTask starts a fall detection task for a camera with a fall detection server
 func (ws *WebServer) startFallDetectionTask(camera *CameraConfig, server *InferenceServer) {
 	// Check if there's already a running task for this camera-server combination
-	for _, task := range fallDetectionTasks {
-		if task.CameraID == camera.ID && task.ServerID == server.ID && task.Status == "running" {
-			Info(fmt.Sprintf("fall detection task already running for camera %s with server %s (task: %s)", camera.ID, server.ID, task.TaskID))
-			return
+	var existingTaskFound bool
+	safeReadTasks(func() {
+		for _, task := range fallDetectionTasks {
+			if task.CameraID == camera.ID && task.ServerID == server.ID && task.Status == "running" {
+				Info(fmt.Sprintf("fall detection task already running for camera %s with server %s (task: %s)", camera.ID, server.ID, task.TaskID))
+				existingTaskFound = true
+				return
+			}
 		}
+	})
+	if existingTaskFound {
+		return
 	}
 
 	// Start the fall detection task
@@ -1148,15 +1236,17 @@ func (ws *WebServer) startFallDetectionTask(camera *CameraConfig, server *Infere
 	if err != nil {
 		Warn(fmt.Sprintf("failed to start fall detection task for camera %s with server %s: %v", camera.ID, server.ID, err))
 		// Create error task state
-		fallDetectionTasks["error_"+camera.ID+"_"+server.ID] = &FallDetectionTaskState{
-			TaskID:    "",
-			CameraID:  camera.ID,
-			ServerID:  server.ID,
-			Status:    "error",
-			StartedAt: time.Now(),
-			UpdatedAt: time.Now(),
-			ErrorMsg:  err.Error(),
-		}
+		safeUpdateTasks(func() {
+			fallDetectionTasks["error_"+camera.ID+"_"+server.ID] = &FallDetectionTaskState{
+				TaskID:    "",
+				CameraID:  camera.ID,
+				ServerID:  server.ID,
+				Status:    "error",
+				StartedAt: time.Now(),
+				UpdatedAt: time.Now(),
+				ErrorMsg:  err.Error(),
+			}
+		})
 		return
 	}
 
@@ -1169,7 +1259,9 @@ func (ws *WebServer) startFallDetectionTask(camera *CameraConfig, server *Infere
 		StartedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	fallDetectionTasks[taskID] = task
+	safeUpdateTasks(func() {
+		fallDetectionTasks[taskID] = task
+	})
 
 	// Start independent result polling for this task
 	ws.startFallDetectionResultPolling(task, server, camera)
@@ -1182,18 +1274,20 @@ func (ws *WebServer) stopFallDetectionTasksForCamera(cameraID, serverID string) 
 	var tasksToStop []string
 
 	// Find all running tasks for this camera-server combination
-	for taskID, task := range fallDetectionTasks {
-		if task.CameraID == cameraID && task.ServerID == serverID && task.Status == "running" {
-			tasksToStop = append(tasksToStop, taskID)
+	safeReadTasks(func() {
+		for taskID, task := range fallDetectionTasks {
+			if task.CameraID == cameraID && task.ServerID == serverID && task.Status == "running" {
+				tasksToStop = append(tasksToStop, taskID)
+			}
 		}
-	}
+	})
 
 	if len(tasksToStop) == 0 {
 		Info(fmt.Sprintf("no running fall detection tasks found for camera %s with server %s", cameraID, serverID))
 		return
 	}
 
-	server, serverExists := dataStore.InferenceServers[serverID]
+	server, serverExists := safeGetInferenceServer(serverID)
 	if !serverExists {
 		Warn(fmt.Sprintf("inference server %s not found when stopping fall detection tasks", serverID))
 		return
@@ -1201,23 +1295,36 @@ func (ws *WebServer) stopFallDetectionTasksForCamera(cameraID, serverID string) 
 
 	// Stop each task
 	for _, taskID := range tasksToStop {
-		task := fallDetectionTasks[taskID]
+		var task *FallDetectionTaskState
+		safeReadTasks(func() {
+			task = fallDetectionTasks[taskID]
+		})
 
-		// Stop the result polling first
-		ws.stopFallDetectionResultPolling(task)
+		if task != nil {
+			// Stop the result polling first
+			ws.stopFallDetectionResultPolling(task)
 
-		err := StopFallDetection(server, taskID)
-		if err != nil {
-			Warn(fmt.Sprintf("failed to stop fall detection task %s: %v", taskID, err))
-			// Update task state to error
-			task.Status = "error"
-			task.ErrorMsg = err.Error()
-			task.UpdatedAt = time.Now()
-		} else {
-			// Update task state to stopped
-			task.Status = "stopped"
-			task.UpdatedAt = time.Now()
-			Info(fmt.Sprintf("stopped fall detection task %s with polling for camera %s with server %s", taskID, cameraID, serverID))
+			err := StopFallDetection(server, taskID)
+			if err != nil {
+				Warn(fmt.Sprintf("failed to stop fall detection task %s: %v", taskID, err))
+				// Update task state to error
+				safeUpdateTasks(func() {
+					if t, exists := fallDetectionTasks[taskID]; exists {
+						t.Status = "error"
+						t.ErrorMsg = err.Error()
+						t.UpdatedAt = time.Now()
+					}
+				})
+			} else {
+				// Update task state to stopped
+				safeUpdateTasks(func() {
+					if t, exists := fallDetectionTasks[taskID]; exists {
+						t.Status = "stopped"
+						t.UpdatedAt = time.Now()
+					}
+				})
+				Info(fmt.Sprintf("stopped fall detection task %s with polling for camera %s with server %s", taskID, cameraID, serverID))
+			}
 		}
 	}
 }
@@ -1297,16 +1404,30 @@ func (ws *WebServer) handleAPIConfigImport(w http.ResponseWriter, r *http.Reques
 
 	// Stop all running cameras and fall detection tasks before import
 	if ws.rtspManager != nil {
-		for cameraID := range dataStore.Cameras {
+		var cameraIDs []string
+		safeReadDataStore(func() {
+			for cameraID := range dataStore.Cameras {
+				cameraIDs = append(cameraIDs, cameraID)
+			}
+		})
+		for _, cameraID := range cameraIDs {
 			ws.rtspManager.StopCamera(cameraID)
 		}
 	}
 
 	// Stop all fall detection tasks
-	for _, task := range fallDetectionTasks {
+	var tasksToStop []*FallDetectionTaskState
+	safeReadTasks(func() {
+		for _, task := range fallDetectionTasks {
+			tasksToStop = append(tasksToStop, task)
+		}
+	})
+	for _, task := range tasksToStop {
 		ws.stopFallDetectionResultPolling(task)
 	}
-	fallDetectionTasks = make(map[string]*FallDetectionTaskState)
+	safeUpdateTasks(func() {
+		fallDetectionTasks = make(map[string]*FallDetectionTaskState)
+	})
 
 	// Replace current dataStore with imported data
 	dataStore = &importedData
@@ -1345,7 +1466,7 @@ func (ws *WebServer) handleAPIConfigImport(w http.ResponseWriter, r *http.Reques
 				// Start fall detection tasks for fall detection servers
 				for _, binding := range camera.InferenceServerBindings {
 					server, serverExists := dataStore.InferenceServers[binding.ServerID]
-					if serverExists && server.Enabled && server.ModelType == "fall" {
+					if serverExists && server.Enabled && server.ModelType == string(ModelTypeFall) {
 						ws.startFallDetectionTask(camera, server)
 					}
 				}
