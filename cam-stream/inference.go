@@ -296,13 +296,13 @@ func ProcessFrameWithMultipleInference(frameData []byte, cameraConfig *CameraCon
 			// Process inference
 			detections := processInferenceServer(frameDataCopy, s, &b, cameraConfig.ID)
 
-			// Draw detections on image copy
-			displayedImage, err := DrawDetections(frameDataCopy, detections, cameraConfig.Name, false)
+			// Draw detections on image copy (without confidence labels, without camera name overlay)
+			displayedImage, err := DrawDetectionsWithServerInfo(frameDataCopy, detections, cameraConfig.Name, false, s.Name)
 			if err != nil {
 				Warn(fmt.Sprintf("failed to draw results for model %q: %v", s.ModelType, err))
 			}
-			// without conf label.
-			debugImage, err := DrawDetections(frameDataCopy2, detections, cameraConfig.Name, true)
+			// with confidence labels and server info
+			debugImage, err := DrawDetectionsWithServerInfo(frameDataCopy2, detections, cameraConfig.Name, true, s.Name)
 			if err != nil {
 				Warn(fmt.Sprintf("failed to draw debug image for model %q: %v", s.ModelType, err))
 			}

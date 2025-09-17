@@ -14,6 +14,11 @@ import (
 
 // DrawDetections draws detection boxes on the image
 func DrawDetections(imageData []byte, detections []Detection, cameraName string, saveConfidenceLabel bool) ([]byte, error) {
+	return DrawDetectionsWithServerInfo(imageData, detections, cameraName, saveConfidenceLabel, "")
+}
+
+// DrawDetectionsWithServerInfo draws detection boxes on the image with server info in confidence labels
+func DrawDetectionsWithServerInfo(imageData []byte, detections []Detection, cameraName string, saveConfidenceLabel bool, serverID string) ([]byte, error) {
 	// Decode JPEG
 	img, err := jpeg.Decode(bytes.NewReader(imageData))
 	if err != nil {
@@ -32,11 +37,11 @@ func DrawDetections(imageData []byte, detections []Detection, cameraName string,
 		if !saveConfidenceLabel {
 			continue
 		}
-		drawConfidenceLabel(rgbaImg, det)
+		drawConfidenceLabelWithServerInfo(rgbaImg, det, serverID)
 	}
 
-	// Add timestamp and camera name overlay with clear text
-	addClearOverlay(rgbaImg, cameraName, len(detections))
+	// Skip camera name overlay - no longer draw it on image
+	// addClearOverlay(rgbaImg, cameraName, len(detections))
 
 	// Encode back to JPEG
 	var buf bytes.Buffer
@@ -84,8 +89,18 @@ func drawThickRectangle(img *image.RGBA, x1, y1, x2, y2 int, col color.RGBA, thi
 
 // drawConfidenceLabel draws confidence score label near the detection box
 func drawConfidenceLabel(img *image.RGBA, det Detection) {
-	// Format confidence as percentage with one decimal place
-	confidenceText := fmt.Sprintf("%.1f%%", det.Confidence*100)
+	drawConfidenceLabelWithServerInfo(img, det, "")
+}
+
+// drawConfidenceLabelWithServerInfo draws confidence score label with server info
+func drawConfidenceLabelWithServerInfo(img *image.RGBA, det Detection, serverID string) {
+	// Format confidence as percentage with server info
+	var confidenceText string
+	if serverID != "" {
+		confidenceText = fmt.Sprintf("%.1f%% [%s]", det.Confidence*100, serverID)
+	} else {
+		confidenceText = fmt.Sprintf("%.1f%%", det.Confidence*100)
+	}
 
 	// Position label above the detection box with some padding
 	labelX := det.X1 + 5
