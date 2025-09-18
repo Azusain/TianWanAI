@@ -70,7 +70,7 @@ func NewFFmpegStreamProxy(rtspURL string) *FFmpegStreamProxy {
 
 // detectResolution uses C++ stream detector to get actual resolution
 func (fsp *FFmpegStreamProxy) detectResolution() error {
-	width, height, err := fsp.detectResolutionWithCpp()
+	width, height, err := GetResolution(fsp.originalRTSP)
 	if err != nil {
 		return fmt.Errorf("failed to detect stream resolution: %v", err)
 	}
@@ -81,11 +81,6 @@ func (fsp *FFmpegStreamProxy) detectResolution() error {
 
 	Info(fmt.Sprintf("detected resolution: %dx%d", width, height))
 	return nil
-}
-
-// detectResolutionWithCpp calls the CGO stream detector function
-func (fsp *FFmpegStreamProxy) detectResolutionWithCpp() (int, int, error) {
-	return detectStreamResolutionCGO(fsp.originalRTSP)
 }
 
 // Start starts the FFmpeg proxy process

@@ -304,7 +304,7 @@ func processInferenceServerAsync(frameData []byte, server *InferenceServer, bind
 	frameDataCopy2 := make([]byte, len(frameData))
 	copy(frameDataCopy2, frameData)
 
-	detections := getResultFromInferenceServer(frameDataCopy, server, binding, cameraConfig.ID)
+	detections := getResultFromInferenceServer(frameDataCopy, server, binding)
 	if len(detections) == 0 {
 		return
 	}
@@ -377,11 +377,11 @@ func saveModelResult(cameraName string, result *ModelResult, outputDir string) {
 		cameraName, result.ModelType, filePath, len(result.Detections)))
 
 	// Save debug data if enabled
-	saveDebugDataAsync(result, filename, outputDir)
+	saveDebugDataAsync(result, filename)
 }
 
 // saveDebugDataAsync saves original image and YOLO labels for DEBUG mode
-func saveDebugDataAsync(result *ModelResult, filename, outputDir string) {
+func saveDebugDataAsync(result *ModelResult, filename string) {
 	if !globalDebugMode || result.OriginalImage == nil {
 		return
 	}
@@ -468,23 +468,21 @@ func saveYoloLabelsAsync(result *ModelResult, debugDir, filename string) {
 }
 
 // This function never returns nil !!!
-func getResultFromInferenceServer(frameData []byte, server *InferenceServer, binding *InferenceServerBinding, cameraID string) []Detection {
+func getResultFromInferenceServer(frameData []byte, server *InferenceServer, binding *InferenceServerBinding) []Detection {
 	client, err := NewInferenceClient(server.URL)
 	if err != nil {
 		Warn(fmt.Sprintf("failed to create client for server %s: %v", server.Name, err))
 		return []Detection{}
 	}
-	detections := []Detection{}
 
 	// Process based on model type
 	if server.ModelType == string(ModelTypeFall) {
 		return []Detection{}
-	} else {
-		detections, err = client.DetectObjects(frameData, server.ModelType)
-		if err != nil {
-			Warn(fmt.Sprintf("inference failed for server %s: %v", server.Name, err))
-			return detections
-		}
+	}
+	detections, err := client.DetectObjects(frameData, server.ModelType)
+	if err != nil {
+		Warn(fmt.Sprintf("inference failed for server %s: %v", server.Name, err))
+		return detections
 	}
 
 	// Check if any detection meets threshold

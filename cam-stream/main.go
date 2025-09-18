@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	ConfigFile          = "configs/config.json"
 	OutputDir           = "output"
 	DebugDir            = "debug"
 	DefaultWebPort uint = 8080
