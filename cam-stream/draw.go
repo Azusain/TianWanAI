@@ -19,7 +19,6 @@ func DrawDetections(imageData []byte, detections []Detection, cameraName string,
 
 // DrawDetectionsWithServerInfo draws detection boxes on the image with server info in confidence labels
 func DrawDetectionsWithServerInfo(imageData []byte, detections []Detection, cameraName string, saveConfidenceLabel bool, serverID string) ([]byte, error) {
-	// Decode JPEG
 	img, err := jpeg.Decode(bytes.NewReader(imageData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode JPEG: %v", err)
@@ -39,9 +38,6 @@ func DrawDetectionsWithServerInfo(imageData []byte, detections []Detection, came
 		}
 		drawConfidenceLabelWithServerInfo(rgbaImg, det, serverID)
 	}
-
-	// Skip camera name overlay - no longer draw it on image
-	// addClearOverlay(rgbaImg, cameraName, len(detections))
 
 	// Encode back to JPEG
 	var buf bytes.Buffer

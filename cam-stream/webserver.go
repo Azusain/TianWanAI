@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -30,7 +30,7 @@ type HTMLTemplates struct {
 // WebServer handles web interface
 type WebServer struct {
 	outputDir   string
-	port        int
+	port        uint
 	rtspManager *RTSPManager
 	templates   *HTMLTemplates
 }
@@ -41,28 +41,28 @@ func loadHTMLTemplates() (*HTMLTemplates, error) {
 
 	templatesDir := "templates"
 	// Load index.html
-	if data, err := ioutil.ReadFile(filepath.Join(templatesDir, "index.html")); err != nil {
+	if data, err := os.ReadFile(filepath.Join(templatesDir, "index.html")); err != nil {
 		return nil, fmt.Errorf("failed to load index.html: %v", err)
 	} else {
 		templates.index = data
 	}
 
 	// Load camera_management.html
-	if data, err := ioutil.ReadFile(filepath.Join(templatesDir, "camera_management.html")); err != nil {
+	if data, err := os.ReadFile(filepath.Join(templatesDir, "camera_management.html")); err != nil {
 		return nil, fmt.Errorf("failed to load camera_management.html: %v", err)
 	} else {
 		templates.cameraManagement = data
 	}
 
 	// Load image_viewer.html
-	if data, err := ioutil.ReadFile(filepath.Join(templatesDir, "image_viewer.html")); err != nil {
+	if data, err := os.ReadFile(filepath.Join(templatesDir, "image_viewer.html")); err != nil {
 		return nil, fmt.Errorf("failed to load image_viewer.html: %v", err)
 	} else {
 		templates.imageViewer = data
 	}
 
 	// Load alerts.html
-	if data, err := ioutil.ReadFile(filepath.Join(templatesDir, "alerts.html")); err != nil {
+	if data, err := os.ReadFile(filepath.Join(templatesDir, "alerts.html")); err != nil {
 		return nil, fmt.Errorf("failed to load alerts.html: %v", err)
 	} else {
 		templates.alerts = data
@@ -73,7 +73,7 @@ func loadHTMLTemplates() (*HTMLTemplates, error) {
 }
 
 // NewWebServer creates a new web server
-func NewWebServer(outputDir string, port int) *WebServer {
+func NewWebServer(outputDir string, port uint, rtspManager *RTSPManager) *WebServer {
 	templates, err := loadHTMLTemplates()
 	if err != nil {
 		Warn(fmt.Sprintf("failed to load HTML templates: %v", err))
@@ -82,15 +82,11 @@ func NewWebServer(outputDir string, port int) *WebServer {
 	}
 
 	return &WebServer{
-		outputDir: outputDir,
-		port:      port,
-		templates: templates,
+		outputDir:   outputDir,
+		port:        port,
+		templates:   templates,
+		rtspManager: rtspManager,
 	}
-}
-
-// SetRTSPManager sets the RTSP manager for camera operations
-func (ws *WebServer) SetRTSPManager(manager *RTSPManager) {
-	ws.rtspManager = manager
 }
 
 // Start starts the web server
@@ -296,12 +292,12 @@ func safeReadTasks(fn func()) {
 }
 
 // Data persistence functions
-func loadDataStore() error {
+func LoadDataStore() error {
 	if err := os.MkdirAll(DataDir, 0755); err != nil {
 		return fmt.Errorf("failed to create data directory: %v", err)
 	}
 
-	data, err := ioutil.ReadFile(DataFile)
+	data, err := os.ReadFile(DataFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			Info("data file not found, starting with empty store")
@@ -310,17 +306,13 @@ func loadDataStore() error {
 		return fmt.Errorf("failed to read data file: %v", err)
 	}
 
-	// Parse the JSON data first to validate it
 	var tempStore DataStore
 	if err := json.Unmarshal(data, &tempStore); err != nil {
 		return fmt.Errorf("failed to parse data file: %v", err)
 	}
 
-	// Use thread-safe access to update dataStore with parsed data
 	safeUpdateDataStore(func() {
-		// Assign the parsed data
 		*dataStore = tempStore
-
 		if dataStore.Cameras == nil {
 			dataStore.Cameras = make(map[string]*CameraConfig)
 		}
@@ -345,7 +337,6 @@ func loadDataStore() error {
 
 	Info(fmt.Sprintf("loaded %d cameras and %d inference servers from storage", camerasCount, serversCount))
 
-	// Log alert server configuration status
 	if alertConfigured {
 		if alertEnabled {
 			Info(fmt.Sprintf("alert server configured and enabled: %s", alertURL))
@@ -377,7 +368,7 @@ func saveDataStore() error {
 		return fmt.Errorf("failed to marshal data: %v", err)
 	}
 
-	if err := ioutil.WriteFile(DataFile, data, 0644); err != nil {
+	if err := os.WriteFile(DataFile, data, 0644); err != nil {
 		return fmt.Errorf("failed to write data file: %v", err)
 	}
 
@@ -394,7 +385,7 @@ func generateInferenceServerID(modelType string) string {
 	// Sanitize model type for ID (replace spaces and special chars with underscore)
 	sanitizedModelType := strings.ReplaceAll(strings.ToLower(modelType), " ", "_")
 	sanitizedModelType = strings.ReplaceAll(sanitizedModelType, "-", "_")
-	
+
 	// Use full UUID to ensure uniqueness
 	// Generate ID format: inf_<model_type>_<full_uuid>
 	uuidPart := strings.ReplaceAll(uuid.New().String(), "-", "")
@@ -706,38 +697,43 @@ type ImageServer struct {
 	Name string `json:"name"`
 }
 
-// getImagesFromDirectory reads all JPEG images from a directory and returns their info
 func getImagesFromDirectory(dir string) ([]ImageInfo, error) {
 	var images []ImageInfo
 
 	// Check if directory exists
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return images, nil // Return empty slice, not an error
+	if _, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			return images, nil
+		}
+		return nil, fmt.Errorf("failed to stat dir: %w", err)
 	}
 
-	// Read directory
-	files, err := ioutil.ReadDir(dir)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read directory: %v", err)
 	}
 
-	// Filter and collect JPEG files
-	for _, file := range files {
-		if file.IsDir() {
+	for _, entry := range entries {
+		if entry.IsDir() {
 			continue
 		}
 
-		// Check if it's a JPEG file
-		filename := file.Name()
+		filename := entry.Name()
 		lowerName := strings.ToLower(filename)
 		if !strings.HasSuffix(lowerName, ".jpg") && !strings.HasSuffix(lowerName, ".jpeg") {
 			continue
 		}
 
+		path := filepath.Join(dir, filename)
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("stat %s: %w", path, err)
+		}
+
 		images = append(images, ImageInfo{
 			Filename:  filename,
-			Size:      file.Size(),
-			CreatedAt: file.ModTime(),
+			Size:      info.Size(),
+			CreatedAt: info.ModTime(),
 		})
 	}
 
@@ -754,7 +750,7 @@ func (ws *WebServer) handleAPIImageServers(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 
 	// read directories in outputDir
-	entries, err := ioutil.ReadDir(ws.outputDir)
+	entries, err := os.ReadDir(ws.outputDir)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(APIResponse{Success: false, Message: "failed to read output directory", Error: err.Error()})
@@ -792,6 +788,7 @@ func (ws *WebServer) handleAPIServerImages(w http.ResponseWriter, r *http.Reques
 	serverId := vars["serverId"]
 
 	// parse pagination
+	// TODO: hard coding
 	page := 1
 	limit := 24
 	if p := r.URL.Query().Get("page"); p != "" {
@@ -1089,7 +1086,7 @@ func (ws *WebServer) startFallDetectionResultPolling(task *FallDetectionTaskStat
 				Info(fmt.Sprintf("ticker is nil for task %s, stopping polling goroutine", task.TaskID))
 				return
 			}
-			
+
 			select {
 			case <-task.pollTicker.C:
 				// Fetch fall detection results
@@ -1212,21 +1209,21 @@ func (ws *WebServer) processFallResultsFromPolling(results []FallDetectionResult
 
 		// Launch independent async operations for fall detection result
 		modelResult := singleModelResult[server.ModelType]
-		
+
 		// 1. Save fall detection result (async)
 		go func() {
 			saveModelResult(camera.Name, modelResult, ws.rtspManager.outputDir)
 		}()
-		
+
 		// 2. Send fall detection alert (async)
 		go func() {
 			// Create image data copy for alert sending
 			alertImageData := make([]byte, len(modelResult.DisplayResultImage))
 			copy(alertImageData, modelResult.DisplayResultImage)
-			
+
 			sendDetectionAlerts(alertImageData, modelResult.Detections, camera.Name, modelResult.ModelType)
 		}()
-		
+
 		Info(fmt.Sprintf("processed fall detection result: confidence=%.2f, camera=%s", confidence, camera.Name))
 	}
 }
@@ -1364,7 +1361,7 @@ func (ws *WebServer) stopFallDetectionTasksForCamera(cameraID, serverID string) 
 // handleAPIConfigExport exports the current camera configuration as JSON
 func (ws *WebServer) handleAPIConfigExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	// Generate filename with timestamp
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
 	filename := fmt.Sprintf("cameras_%s.json", timestamp)
@@ -1376,7 +1373,7 @@ func (ws *WebServer) handleAPIConfigExport(w http.ResponseWriter, r *http.Reques
 	safeReadDataStore(func() {
 		data, err = json.MarshalIndent(dataStore, "", "  ")
 	})
-	
+
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		response := APIResponse{
@@ -1408,7 +1405,7 @@ func (ws *WebServer) handleAPIConfigImport(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Read the uploaded JSON data
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		response := APIResponse{
@@ -1529,15 +1526,15 @@ func (ws *WebServer) handleAPIConfigImport(w http.ResponseWriter, r *http.Reques
 		serversCount = len(dataStore.InferenceServers)
 	})
 
-	Info(fmt.Sprintf("configuration imported successfully: %d cameras, %d inference servers", 
+	Info(fmt.Sprintf("configuration imported successfully: %d cameras, %d inference servers",
 		camerasCount, serversCount))
 
 	response := APIResponse{
 		Success: true,
-		Message: fmt.Sprintf("Configuration imported successfully: %d cameras, %d inference servers", 
+		Message: fmt.Sprintf("Configuration imported successfully: %d cameras, %d inference servers",
 			camerasCount, serversCount),
 		Data: map[string]interface{}{
-			"cameras_count":          camerasCount,
+			"cameras_count":           camerasCount,
 			"inference_servers_count": serversCount,
 		},
 	}

@@ -66,7 +66,14 @@ func StartFallDetection(server *InferenceServer, camera *CameraConfig) (string, 
 	}
 
 	url := fmt.Sprintf("%s/start", server.URL)
-	resp, err := client.Post(url, "application/json", bytes.NewBuffer(reqBody))
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Connection", "close")
+	
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to send start request: %v", err)
 	}
@@ -109,7 +116,14 @@ func StopFallDetection(server *InferenceServer, taskID string) error {
 	}
 
 	url := fmt.Sprintf("%s/stop", server.URL)
-	resp, err := client.Post(url, "application/json", bytes.NewBuffer(reqBody))
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Connection", "close")
+	
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send stop request: %v", err)
 	}
@@ -140,7 +154,14 @@ func GetFallDetectionResults(server *InferenceServer, taskID string, limit *int)
 	}
 
 	url := fmt.Sprintf("%s/result", server.URL)
-	resp, err := client.Post(url, "application/json", bytes.NewBuffer(reqBody))
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Connection", "close")
+	
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send result request: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/jpeg"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -14,6 +15,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+)
+
+const (
+	// TODO: make it configurable.
+	DefaultHttpTimeoutSecs int = 15
 )
 
 // InferenceClient handles communication with inference server
@@ -69,15 +75,22 @@ type Location struct {
 	Height float64 `json:"height"`
 }
 
-// NewInferenceClient creates a new inference client
-func NewInferenceClient(serverURL string) (*InferenceClient, error) {
-	if serverURL == "" {
+func NewInferenceClient(serverUrl string) (*InferenceClient, error) {
+	if serverUrl == "" {
 		return nil, errors.New("server url should not be empty")
 	}
+	// TODO: this may waste a lot of time.
+	// But it will be replaced by gRPC.
+	transport := &http.Transport{
+		DisableKeepAlives: true,
+		MaxIdleConns:      0,
+		IdleConnTimeout:   0,
+	}
 	return &InferenceClient{
-		serverURL: serverURL,
+		serverURL: serverUrl,
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Transport: transport,
+			Timeout:   time.Duration(DefaultHttpTimeoutSecs) * time.Second,
 		},
 	}, nil
 }
@@ -102,11 +115,14 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 	url := ic.serverURL
 
 	// Send request to inference server
-	resp, err := ic.client.Post(
-		url,
-		"application/json",
-		bytes.NewBuffer(requestBody),
-	)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Connection", "close")
+
+	resp, err := ic.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request to inference server: %v", err)
 	}
@@ -114,7 +130,7 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 
 	// Check HTTP status
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		if len(body) > 0 && body[0] == '<' {
 			return nil, fmt.Errorf("inference server returned HTML (status %d) - check if service is running at %s", resp.StatusCode, url)
 		}
@@ -122,7 +138,7 @@ func (ic *InferenceClient) DetectObjects(imageData []byte, modelType string) ([]
 	}
 
 	// Read response
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %v", err)
 	}
@@ -288,10 +304,7 @@ func processInferenceServerAsync(frameData []byte, server *InferenceServer, bind
 	frameDataCopy2 := make([]byte, len(frameData))
 	copy(frameDataCopy2, frameData)
 
-	// Process inference
-	detections := processInferenceServer(frameDataCopy, server, binding, cameraConfig.ID)
-
-	// If no detections, return early
+	detections := getResultFromInferenceServer(frameDataCopy, server, binding, cameraConfig.ID)
 	if len(detections) == 0 {
 		return
 	}
@@ -302,22 +315,20 @@ func processInferenceServerAsync(frameData []byte, server *InferenceServer, bind
 		Warn(fmt.Sprintf("failed to draw results for model %q: %v", server.ModelType, err))
 		return
 	}
-	
 	// Draw debug image with confidence labels and server info
-	debugImage, err := DrawDetectionsWithServerInfo(frameDataCopy2, detections, cameraConfig.Name, true, server.Name)
+	// TODO: temporarily controlled by `globalDebugMode`.
+	debugImage, err := DrawDetectionsWithServerInfo(frameDataCopy2, detections, cameraConfig.Name, globalDebugMode, server.Name)
 	if err != nil {
 		Warn(fmt.Sprintf("failed to draw debug image for model %q: %v", server.ModelType, err))
 		return
 	}
 
-	// Store original image copy for DEBUG mode
 	var originalImageCopy []byte
 	if globalDebugMode {
 		originalImageCopy = make([]byte, len(frameDataCopy))
 		copy(originalImageCopy, frameDataCopy)
 	}
 
-	// Create model result
 	modelResult := &ModelResult{
 		ModelType:          server.ModelType,
 		ServerID:           binding.ServerID,
@@ -328,20 +339,14 @@ func processInferenceServerAsync(frameData []byte, server *InferenceServer, bind
 		Error:              nil,
 	}
 
-	// Launch independent async operations for better performance
-	// 1. Save results to file (async)
+	// save result and send alerts at the same time.
 	go func() {
 		saveModelResult(cameraConfig.Name, modelResult, outputDir)
-	}()
-	
-	// 2. Send detection alerts (async)
-	go func() {
-		// Create image data copy for alert sending
 		alertImageData := make([]byte, len(modelResult.DisplayResultImage))
 		copy(alertImageData, modelResult.DisplayResultImage)
-		
 		sendDetectionAlerts(alertImageData, modelResult.Detections, cameraConfig.Name, modelResult.ModelType)
 	}()
+
 }
 
 // saveModelResult saves a single model result to file
@@ -356,21 +361,21 @@ func saveModelResult(cameraName string, result *ModelResult, outputDir string) {
 	timestamp := time.Now().Format("20060102_150405")
 	filename := fmt.Sprintf("%s_%s_detection.jpg", timestamp, result.ModelType)
 	serverDir := fmt.Sprintf("%s/%s", outputDir, result.ServerID)
-	
+
 	if err := os.MkdirAll(serverDir, 0755); err != nil {
 		Warn(fmt.Sprintf("failed to create directory for server %s: %v", result.ServerID, err))
 		return
 	}
-	
+
 	filePath := fmt.Sprintf("%s/%s", serverDir, filename)
 	if err := os.WriteFile(filePath, result.DisplayDebugImage, 0644); err != nil {
 		Warn(fmt.Sprintf("failed to save detection image for model %s: %v", result.ModelType, err))
 		return
 	}
-	
+
 	Info(fmt.Sprintf("saved detection image for camera %s, model %s to %s (detections: %d)",
 		cameraName, result.ModelType, filePath, len(result.Detections)))
-				
+
 	// Save debug data if enabled
 	saveDebugDataAsync(result, filename, outputDir)
 }
@@ -463,19 +468,16 @@ func saveYoloLabelsAsync(result *ModelResult, debugDir, filename string) {
 }
 
 // This function never returns nil !!!
-func processInferenceServer(frameData []byte, server *InferenceServer, binding *InferenceServerBinding, cameraID string) []Detection {
+func getResultFromInferenceServer(frameData []byte, server *InferenceServer, binding *InferenceServerBinding, cameraID string) []Detection {
 	client, err := NewInferenceClient(server.URL)
 	if err != nil {
 		Warn(fmt.Sprintf("failed to create client for server %s: %v", server.Name, err))
 		return []Detection{}
 	}
-
 	detections := []Detection{}
 
 	// Process based on model type
-	// TODO: enum instead of hardcoding.
 	if server.ModelType == string(ModelTypeFall) {
-		// Fall detection is handled separately in ProcessFrameWithMultipleInference
 		return []Detection{}
 	} else {
 		detections, err = client.DetectObjects(frameData, server.ModelType)
@@ -496,6 +498,7 @@ func processInferenceServer(frameData []byte, server *InferenceServer, binding *
 	return retDetections
 }
 
+// TODO: move these codes to alert.go.
 // AlertRequest represents the alert request format for management platform
 type AlertRequest struct {
 	Image     string  `json:"image"`
@@ -515,47 +518,42 @@ type ModelType string
 
 // Supported model types as constants
 const (
-	ModelTypeOther     ModelType = "other"
-	ModelTypeGesture   ModelType = "gesture"
-	ModelTypePonding   ModelType = "ponding"
-	ModelTypeSmoke     ModelType = "smoke"
-	ModelTypeMouse     ModelType = "mouse"
-	ModelTypeTshirt    ModelType = "tshirt"
-	ModelTypeCigar     ModelType = "cigar"
-	ModelTypeHelmet    ModelType = "helmet"
-	ModelTypeFire      ModelType = "fire"
-	ModelTypeFall      ModelType = "fall"
+	ModelTypeOther      ModelType = "other"
+	ModelTypeGesture    ModelType = "gesture"
+	ModelTypePonding    ModelType = "ponding"
+	ModelTypeSmoke      ModelType = "smoke"
+	ModelTypeMouse      ModelType = "mouse"
+	ModelTypeTshirt     ModelType = "tshirt"
+	ModelTypeCigar      ModelType = "cigar"
+	ModelTypeHelmet     ModelType = "helmet"
+	ModelTypeFire       ModelType = "fire"
+	ModelTypeFall       ModelType = "fall"
 	ModelTypeSafetybelt ModelType = "safetybelt"
 )
 
-// SendAlertIfConfigured sends detection alert to management platform using global configuration
 // getClassIndexFromModelType maps modelType to YOLO class index
 // This function is used to generate YOLO format labels in DEBUG mode
 func getClassIndexFromModelType(modelType string) int {
-	// class index mapping for YOLO dataset labels
-	// based on the user's requirement: other, gesture, ponding, mouse, tshirt, cigar
 	classMap := map[string]int{
-		"other":     0,
-		"gesture":   1,
-		"ponding":   2,
-		"smoke":     3,
-		"mouse":     4,
-		"tshirt":    5,
-		"cigar":     6,
-		"helmet":    7,
-		"fire":      8,
-		"fall":      9,
+		"other":      0,
+		"gesture":    1,
+		"ponding":    2,
+		"smoke":      3,
+		"mouse":      4,
+		"tshirt":     5,
+		"cigar":      6,
+		"helmet":     7,
+		"fire":       8,
+		"fall":       9,
 		"safetybelt": 10,
 	}
-
 	if classIndex, exists := classMap[modelType]; exists {
 		return classIndex
 	}
-
-	// default to 'other' category if model type not found
-	return 0
+	return classMap["other"]
 }
 
+// SendAlertIfConfigured sends detection alert to management platform using global configuration
 func SendAlertIfConfigured(imageData []byte, modelType, cameraName string, score, x1, y1, x2, y2 float64) error {
 	// Check if alert system is enabled and configured globally using thread-safe access
 	var alertServerURL string
@@ -566,7 +564,7 @@ func SendAlertIfConfigured(imageData []byte, modelType, cameraName string, score
 			alertServerURL = dataStore.AlertServer.URL
 		}
 	})
-	
+
 	if !alertEnabled || alertServerURL == "" {
 		return nil // Alert system not enabled or not configured, silently skip
 	}
@@ -594,15 +592,27 @@ func SendAlertIfConfigured(imageData []byte, modelType, cameraName string, score
 		return fmt.Errorf("failed to marshal alert request: %v", err)
 	}
 
-	// Create HTTP client
-	client := &http.Client{Timeout: 30 * time.Second}
+	// Create HTTP client (Connection: Close)
+	// TODO: this can be optimized by using keep-alive and reusing a global client.
+	// But I am a LAZY BONE.
+	client := &http.Client{
+		Timeout: time.Duration(DefaultHttpTimeoutSecs) * time.Second,
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			MaxIdleConns:      0,
+			IdleConnTimeout:   0,
+		},
+	}
 
 	// Send request
-	resp, err := client.Post(
-		alertServerURL,
-		"application/json",
-		bytes.NewBuffer(requestBody),
-	)
+	req, err := http.NewRequest("POST", alertServerURL, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return fmt.Errorf("failed to create alert request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Connection", "close")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send alert to platform: %v", err)
 	}

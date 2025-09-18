@@ -6,19 +6,19 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
-	"log"
 	"os"
 	"sync"
 	"time"
 )
 
 var (
-	globalFrameRate int
-	frameInterval   time.Duration
+	globalFrameRate     int
+	globalFrameInterval time.Duration
 )
 
 const (
-	RetryTimeSecond uint = 3
+	RetryTimeSecond        uint = 3
+	DefaultGetFrameTimeout uint = 3
 )
 
 type RTSPManager struct {
@@ -34,13 +34,11 @@ type CameraStream struct {
 	Name        string
 	isRunning   bool
 	stopChannel chan struct{}
-	lastFrame   []byte
-	lastUpdate  time.Time
 	mutex       sync.RWMutex
 }
 
 func NewRTSPManager() *RTSPManager {
-	outputDir := "output"
+	outputDir := OutputDir
 	os.MkdirAll(outputDir, 0755)
 
 	return &RTSPManager{
@@ -58,100 +56,107 @@ func (m *RTSPManager) StartCamera(camera *CameraConfig) error {
 		return fmt.Errorf("camera %s is already running", camera.ID)
 	}
 
-	Info(fmt.Sprintf("starting FFmpeg proxy for camera: %s", camera.Name))
-
 	stream := &CameraStream{
 		ID:          camera.ID,
 		URL:         camera.RTSPUrl,
 		Name:        camera.Name,
 		stopChannel: make(chan struct{}),
-		lastUpdate:  time.Now(),
 	}
 
-	go m.captureFramesWithProxy(stream)
-	m.cameras[camera.ID] = stream
+	Info(fmt.Sprintf("starting camera: %s", camera.Name))
 
-	return nil
-}
-
-// captureFramesWithProxy captures frames using FFmpeg proxy
-func (m *RTSPManager) captureFramesWithProxy(stream *CameraStream) {
-	stream.mutex.Lock()
-	stream.isRunning = true
-	stream.mutex.Unlock()
-
-	defer func() {
+	// start camera stream processing
+	go func() {
 		stream.mutex.Lock()
-		stream.isRunning = false
+		stream.isRunning = true
 		stream.mutex.Unlock()
-		// Stop the proxy for this camera
-		m.proxyMgr.StopProxy(stream.ID)
-		log.Printf("ffmpeg proxy stopped for camera: %s", stream.ID)
-	}()
 
-	for {
-		select {
-		case <-stream.stopChannel:
-			Info(fmt.Sprintf("stopping frame capture for camera: %s", stream.Name))
-			return
-		default:
-			if err := m.connectAndCaptureWithProxy(stream); err != nil {
-				Warn(fmt.Sprintf("proxy connection lost for camera %s: %v, retrying in %ds", stream.ID, err, RetryTimeSecond))
+		defer func() {
+			stream.mutex.Lock()
+			stream.isRunning = false
+			stream.mutex.Unlock()
+			m.proxyMgr.StopProxy(stream.ID)
+			Info(fmt.Sprintf("camera stopped: %s", stream.Name))
+		}()
 
+		// retry loop
+		for {
+			select {
+
+			case <-stream.stopChannel:
+				return
+
+			default:
+				err := m.connectAndCaptureWithProxy(stream)
+				if err == nil {
+					continue
+				}
+				Warn(fmt.Sprintf("camera %s connection lost: %v, retrying in %ds",
+					stream.ID, err, RetryTimeSecond))
 				select {
 				case <-stream.stopChannel:
 					return
 				case <-time.After(time.Duration(RetryTimeSecond) * time.Second):
 				}
+
 			}
 		}
-	}
+	}()
+
+	m.cameras[camera.ID] = stream
+	return nil
 }
 
 // connectAndCaptureWithProxy connects to FFmpeg proxy and captures frames
 func (m *RTSPManager) connectAndCaptureWithProxy(stream *CameraStream) error {
-	Info(fmt.Sprintf("starting FFmpeg proxy for camera: %s", stream.Name))
-
-	// Start FFmpeg proxy for this camera
+	// start FFmpeg proxy
 	proxy, err := m.proxyMgr.StartProxy(stream.ID, stream.URL)
 	if err != nil {
-		return fmt.Errorf("failed to start FFmpeg proxy for camera %s: %v", stream.ID, err)
+		return fmt.Errorf("failed to start FFmpeg proxy: %v", err)
 	}
 
-	Info(fmt.Sprintf("successfully started FFmpeg proxy for camera: %s", stream.Name))
-
-	// Frame rate control
+	Info(fmt.Sprintf("FFmpeg proxy started for camera: %s", stream.Name))
 	lastFrameTime := time.Now()
 
 	for {
 		select {
+
 		case <-stream.stopChannel:
-			Info(fmt.Sprintf("stopping frame capture for camera: %s", stream.Name))
 			return nil
+
 		default:
-			// Get frame from proxy with timeout
-			rawFrame, err := proxy.GetFrameTimeout(5 * time.Second)
+			// get frame data
+			rawFrame, err := proxy.GetFrameTimeout(time.Duration(DefaultGetFrameTimeout) * time.Second)
 			if err != nil {
-				return fmt.Errorf("failed to get frame from proxy: %v", err)
+				return fmt.Errorf("failed to get frame: %v", err)
 			}
 
-			// Frame rate control: check if we should process this frame
-			currentTime := time.Now()
-			if currentTime.Sub(lastFrameTime) < frameInterval {
-				// Skip this frame, continue to next
+			// frame rate control
+			if time.Since(lastFrameTime) < globalFrameInterval {
 				continue
 			}
-			lastFrameTime = currentTime
+			lastFrameTime = time.Now()
 
-			// Convert raw frame to JPEG for compatibility with existing code
+			// TODO: why cant we just process raw frame?
 			jpegData, err := m.rawFrameToJPEG(rawFrame)
 			if err != nil {
-				Warn(fmt.Sprintf("failed to convert frame to JPEG for camera %s: %v", stream.ID, err))
+				Warn(fmt.Sprintf("failed to convert frame for camera %s: %v", stream.ID, err))
 				continue
 			}
 
-			// Process frame data
-			m.processFrame(stream, jpegData)
+			// process a single frame.
+			cameraConfig, exists := safeGetCamera(stream.ID)
+			if !exists || cameraConfig == nil {
+				Warn(fmt.Sprintf("camera config not available for stream %s (%s), skipping frame processing", stream.ID, stream.Name))
+				continue
+			}
+
+			if len(cameraConfig.InferenceServerBindings) <= 0 {
+				continue
+			}
+
+			ProcessFrameWithAsyncInference(jpegData, cameraConfig, m.outputDir)
+
 		}
 	}
 }
@@ -167,11 +172,9 @@ func (m *RTSPManager) rawFrameToJPEG(frame *RawFrame) ([]byte, error) {
 			if dataIndex+2 >= len(frame.Data) {
 				return nil, fmt.Errorf("insufficient frame data: expected %d bytes, got %d", frame.Width*frame.Height*3, len(frame.Data))
 			}
-
 			r := frame.Data[dataIndex]
 			g := frame.Data[dataIndex+1]
 			b := frame.Data[dataIndex+2]
-
 			img.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 			dataIndex += 3
 		}
@@ -184,25 +187,6 @@ func (m *RTSPManager) rawFrameToJPEG(frame *RawFrame) ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
-}
-
-func (m *RTSPManager) processFrame(stream *CameraStream, frameData []byte) {
-	cameraConfig, exists := safeGetCamera(stream.ID)
-	if !exists || cameraConfig == nil {
-		Warn(fmt.Sprintf("camera config not available for stream %s (%s), skipping frame processing", stream.ID, stream.Name))
-		return
-	}
-
-	stream.mutex.Lock()
-	stream.lastFrame = make([]byte, len(frameData))
-	copy(stream.lastFrame, frameData)
-	stream.lastUpdate = time.Now()
-	stream.mutex.Unlock()
-
-	if len(cameraConfig.InferenceServerBindings) > 0 {
-		// Launch async inference processing - no waiting, no blocking
-		ProcessFrameWithAsyncInference(frameData, cameraConfig, m.outputDir)
-	}
 }
 
 func (m *RTSPManager) StopCamera(cameraID string) error {
@@ -241,16 +225,3 @@ func (m *RTSPManager) StopAll() {
 
 	m.cameras = make(map[string]*CameraStream)
 }
-
-func (m *RTSPManager) GetCameraStatus(cameraID string) (bool, time.Time) {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	if stream, exists := m.cameras[cameraID]; exists {
-		stream.mutex.RLock()
-		defer stream.mutex.RUnlock()
-		return stream.isRunning, stream.lastUpdate
-	}
-	return false, time.Time{}
-}
-
