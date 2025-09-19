@@ -1,4 +1,4 @@
-package main
+package log
 
 import (
 	"context"
@@ -245,7 +245,6 @@ func Error(msg string, fields ...map[string]interface{}) {
 
 // CloseGlobalAsyncLogger closes the global async logger
 func CloseGlobalAsyncLogger() {
-	defer recoverFromPanic()
 	if globalAsyncLogger != nil {
 		globalAsyncLogger.Close()
 	}

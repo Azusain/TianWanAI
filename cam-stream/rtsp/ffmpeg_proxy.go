@@ -1,7 +1,8 @@
-package main
+package rtsp
 
 import (
 	"bufio"
+	"cam-stream/common/log"
 	"context"
 	"fmt"
 	"io"
@@ -79,7 +80,7 @@ func (fsp *FFmpegStreamProxy) detectResolution() error {
 	fsp.frameHeight = height
 	fsp.bytesPerFrame = width * height * 3 // RGB24
 
-	Info(fmt.Sprintf("detected resolution: %dx%d", width, height))
+	log.Info(fmt.Sprintf("detected resolution: %dx%d", width, height))
 	return nil
 }
 

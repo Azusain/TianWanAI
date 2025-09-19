@@ -1,4 +1,4 @@
-package main
+package rtsp
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ func NewFFmpegProxyManager(config *FFmpegProxyConfig) *FFmpegProxyManager {
 	if config == nil {
 		config = DefaultFFmpegProxyConfig()
 	}
-	
+
 	return &FFmpegProxyManager{
 		proxies: make(map[string]*FFmpegStreamProxy),
 		config:  config,
@@ -28,7 +28,7 @@ func NewFFmpegProxyManager(config *FFmpegProxyConfig) *FFmpegProxyManager {
 func (fpm *FFmpegProxyManager) StartProxy(cameraID, rtspURL string) (*FFmpegStreamProxy, error) {
 	fpm.mutex.Lock()
 	defer fpm.mutex.Unlock()
-	
+
 	// Check if proxy already exists
 	if proxy, exists := fpm.proxies[cameraID]; exists {
 		if proxy.IsRunning() {
@@ -38,13 +38,13 @@ func (fpm *FFmpegProxyManager) StartProxy(cameraID, rtspURL string) (*FFmpegStre
 		proxy.Stop()
 		delete(fpm.proxies, cameraID)
 	}
-	
+
 	// Create and start new proxy (resolution auto-detected via ffprobe)
 	proxy := NewFFmpegStreamProxy(rtspURL)
 	if err := proxy.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start proxy for camera %s: %v", cameraID, err)
 	}
-	
+
 	fpm.proxies[cameraID] = proxy
 	return proxy, nil
 }
@@ -53,7 +53,7 @@ func (fpm *FFmpegProxyManager) StartProxy(cameraID, rtspURL string) (*FFmpegStre
 func (fpm *FFmpegProxyManager) GetProxy(cameraID string) (*FFmpegStreamProxy, bool) {
 	fpm.mutex.RLock()
 	defer fpm.mutex.RUnlock()
-	
+
 	proxy, exists := fpm.proxies[cameraID]
 	return proxy, exists
 }
@@ -62,12 +62,12 @@ func (fpm *FFmpegProxyManager) GetProxy(cameraID string) (*FFmpegStreamProxy, bo
 func (fpm *FFmpegProxyManager) StopProxy(cameraID string) error {
 	fpm.mutex.Lock()
 	defer fpm.mutex.Unlock()
-	
+
 	proxy, exists := fpm.proxies[cameraID]
 	if !exists {
 		return nil
 	}
-	
+
 	err := proxy.Stop()
 	delete(fpm.proxies, cameraID)
 	return err
@@ -77,7 +77,7 @@ func (fpm *FFmpegProxyManager) StopProxy(cameraID string) error {
 func (fpm *FFmpegProxyManager) StopAll() error {
 	fpm.mutex.Lock()
 	defer fpm.mutex.Unlock()
-	
+
 	var lastErr error
 	for cameraID, proxy := range fpm.proxies {
 		if err := proxy.Stop(); err != nil {
@@ -85,7 +85,7 @@ func (fpm *FFmpegProxyManager) StopAll() error {
 		}
 		delete(fpm.proxies, cameraID)
 	}
-	
+
 	return lastErr
 }
 
@@ -93,12 +93,12 @@ func (fpm *FFmpegProxyManager) StopAll() error {
 func (fpm *FFmpegProxyManager) GetAllProxies() map[string]*FFmpegStreamProxy {
 	fpm.mutex.RLock()
 	defer fpm.mutex.RUnlock()
-	
+
 	result := make(map[string]*FFmpegStreamProxy)
 	for cameraID, proxy := range fpm.proxies {
 		result[cameraID] = proxy
 	}
-	
+
 	return result
 }
 
@@ -106,6 +106,6 @@ func (fpm *FFmpegProxyManager) GetAllProxies() map[string]*FFmpegStreamProxy {
 func (fpm *FFmpegProxyManager) GetProxyCount() int {
 	fpm.mutex.RLock()
 	defer fpm.mutex.RUnlock()
-	
+
 	return len(fpm.proxies)
 }

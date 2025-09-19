@@ -1,4 +1,4 @@
-package main
+package common
 
 import (
 	"bytes"
@@ -10,6 +10,15 @@ import (
 
 	"github.com/fogleman/gg"
 )
+
+type Detection struct {
+	Class      string  `json:"class"`
+	Confidence float64 `json:"confidence"`
+	X1         int     `json:"x1"`
+	Y1         int     `json:"y1"`
+	X2         int     `json:"x2"`
+	Y2         int     `json:"y2"`
+}
 
 // DrawDetections draws detection boxes on the image
 func DrawDetections(imageData []byte, detections []Detection, cameraName string, saveConfidenceLabel bool) ([]byte, error) {

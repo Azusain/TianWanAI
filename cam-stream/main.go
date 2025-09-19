@@ -1,6 +1,10 @@
 package main
 
 import (
+	"cam-stream/common/config"
+	"cam-stream/common/log"
+	"cam-stream/common/store"
+	"cam-stream/service"
 	"fmt"
 	"os"
 	"os/signal"
@@ -10,22 +14,13 @@ import (
 	"time"
 )
 
-const (
-	OutputDir           = "output"
-	DebugDir            = "debug"
-	DefaultWebPort uint = 8080
-)
-
-// Readonly so we dont need to protect it with lock.
-var globalDebugMode bool
-
-func autoStartRunningCameras(rtspManager *RTSPManager) error {
-	var camerasToStart []*CameraConfig
+func autoStartRunningCameras(rtspManager *service.RTSPManager) error {
+	var camerasToStart []*store.CameraConfig
 	var errors []string
 	runningCount := 0
 
-	safeReadDataStore(func() {
-		for _, camera := range dataStore.Cameras {
+	store.SafeReadDataStore(func() {
+		for _, camera := range store.Data.Cameras {
 			if camera.Enabled && camera.Running {
 				camerasToStart = append(camerasToStart, camera)
 			}
@@ -34,14 +29,14 @@ func autoStartRunningCameras(rtspManager *RTSPManager) error {
 
 	for _, camera := range camerasToStart {
 		runningCount++
-		Info(fmt.Sprintf("auto-starting camera: %s (%s)", camera.Name, camera.ID))
+		log.Info(fmt.Sprintf("auto-starting camera: %s (%s)", camera.Name, camera.ID))
 		if err := rtspManager.StartCamera(camera); err != nil {
 			errorMsg := fmt.Sprintf("failed to restart camera %s (%s): %v", camera.Name, camera.ID, err)
-			Warn(errorMsg)
+			log.Warn(errorMsg)
 			errors = append(errors, errorMsg)
 			continue
 		}
-		Info(fmt.Sprintf("successfully restarted camera stream: %s (%s)", camera.Name, camera.ID))
+		log.Info(fmt.Sprintf("successfully restarted camera stream: %s (%s)", camera.Name, camera.ID))
 	}
 
 	if len(errors) > 0 {
@@ -57,8 +52,8 @@ func recoverFromPanic() {
 		buf := make([]byte, 4096)
 		n := runtime.Stack(buf, false)
 		stackTrace := string(buf[:n])
-		Warn(fmt.Sprintf("panic recovered: %v", r))
-		Warn(fmt.Sprintf("stack trace:\n%s", stackTrace))
+		log.Warn(fmt.Sprintf("panic recovered: %v", r))
+		log.Warn(fmt.Sprintf("stack trace:\n%s", stackTrace))
 		// Give some time for logs to flush
 		time.Sleep(1 * time.Second)
 	}
@@ -70,40 +65,40 @@ func runApplication() error {
 	// Initialize frame rate configuration from environment
 	frameRateStr := os.Getenv("FRAME_RATE")
 	if frameRateStr == "" {
-		globalFrameRate = 25
+		config.GlobalFrameRate = 25
 	} else if fps, err := strconv.Atoi(frameRateStr); err == nil && fps <= 120 && fps > 0 {
-		globalFrameRate = fps
+		config.GlobalFrameRate = fps
 	} else {
-		Error(fmt.Sprintf("invalid FRAME_RATE value '%s', using default 25 FPS", frameRateStr))
+		log.Error(fmt.Sprintf("invalid FRAME_RATE value '%s', using default 25 FPS", frameRateStr))
 		os.Exit(-1)
 	}
-	globalFrameInterval = time.Duration(1000/globalFrameRate) * time.Millisecond
-	Info(fmt.Sprintf("frame rate limit: %d FPS (interval: %v)", globalFrameRate, globalFrameInterval))
+	config.GlobalFrameInterval = time.Duration(1000/config.GlobalFrameRate) * time.Millisecond
+	log.Info(fmt.Sprintf("frame rate limit: %d FPS (interval: %v)", config.GlobalFrameRate, config.GlobalFrameInterval))
 
 	// DEBUG Mode.
 	debugStr := os.Getenv("DEBUG")
-	globalDebugMode = debugStr != "" && debugStr != "0" && debugStr != "false"
-	if globalDebugMode {
-		Info("🐛 DEBUG MODE ENABLED - Original images will be saved to debug directory")
-		if err := os.MkdirAll(DebugDir, 0755); err != nil {
-			Warn(fmt.Sprintf("failed to create debug directory: %v", err))
+	config.GlobalDebugMode = debugStr != "" && debugStr != "0" && debugStr != "false"
+	if config.GlobalDebugMode {
+		log.Info("🐛 DEBUG MODE ENABLED - Original images will be saved to debug directory")
+		if err := os.MkdirAll(config.DebugDir, 0755); err != nil {
+			log.Warn(fmt.Sprintf("failed to create debug directory: %v", err))
 		}
 	}
 
 	// Load persistent data store
-	if err := LoadDataStore(); err != nil {
+	if err := store.LoadDataStore(); err != nil {
 		return fmt.Errorf("failed to load data store: %v", err)
 	}
 
 	// TODO: load configuration from local file.
-	globalWebPort := DefaultWebPort
+	globalWebPort := config.DefaultWebPort
 
-	if err := os.MkdirAll(OutputDir, 0755); err != nil {
-		Error(fmt.Sprintf("failed to create output directory: %v", err))
+	if err := os.MkdirAll(config.OutputDir, 0755); err != nil {
+		log.Error(fmt.Sprintf("failed to create output directory: %v", err))
 		os.Exit(-1)
 	}
 
-	rtspManager := NewRTSPManager()
+	rtspManager := service.NewRTSPManager()
 
 	// cleanup function.
 	defer func() {
@@ -114,10 +109,10 @@ func runApplication() error {
 	}()
 
 	if err := autoStartRunningCameras(rtspManager); err != nil {
-		Warn(fmt.Sprintf("failed to auto-start some cameras: %v", err))
+		log.Warn(fmt.Sprintf("failed to auto-start some cameras: %v", err))
 	}
 
-	webServer := NewWebServer(OutputDir, globalWebPort, rtspManager)
+	webServer := service.NewWebServer(config.OutputDir, globalWebPort, rtspManager)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -125,7 +120,7 @@ func runApplication() error {
 	go func() {
 		defer recoverFromPanic()
 		if err := webServer.Start(); err != nil {
-			Warn(fmt.Sprintf("web server error: %v", err))
+			log.Warn(fmt.Sprintf("web server error: %v", err))
 			errorChan <- err
 		}
 	}()
@@ -133,10 +128,10 @@ func runApplication() error {
 	// block and wait for signals.
 	select {
 	case <-sigChan:
-		Info("received shutdown signal, stopping...")
+		log.Info("received shutdown signal, stopping...")
 		return nil
 	case err := <-errorChan:
-		Warn(fmt.Sprintf("application error occurred: %v", err))
+		log.Warn(fmt.Sprintf("application error occurred: %v", err))
 		return err
 	}
 
@@ -150,13 +145,13 @@ func main() {
 
 	for {
 		if err := runApplication(); err != nil {
-			Error(fmt.Sprintf("restart attempt due to error: %v", err))
+			log.Error(fmt.Sprintf("restart attempt due to error: %v", err))
 			continue
 		}
-		Info("application shutdown normally")
+		log.Info("application shutdown normally")
 		break
 	}
 
 	// release resource
-	CloseGlobalAsyncLogger()
+	log.CloseGlobalAsyncLogger()
 }

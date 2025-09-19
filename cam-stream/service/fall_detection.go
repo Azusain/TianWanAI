@@ -1,7 +1,9 @@
-package main
+package service
 
 import (
 	"bytes"
+	"cam-stream/common/log"
+	"cam-stream/common/store"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -52,7 +54,7 @@ type FallDetectionResultLocation struct {
 }
 
 // StartFallDetection starts fall detection for a camera using the specified inference server
-func StartFallDetection(server *InferenceServer, camera *CameraConfig) (string, error) {
+func StartFallDetection(server *store.InferenceServer, camera *store.CameraConfig) (string, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	// Send start request to tianwan service
@@ -72,7 +74,7 @@ func StartFallDetection(server *InferenceServer, camera *CameraConfig) (string, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Connection", "close")
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to send start request: %v", err)
@@ -97,12 +99,12 @@ func StartFallDetection(server *InferenceServer, camera *CameraConfig) (string, 
 		return "", fmt.Errorf("tianwan service error: %s", startResp.ErrMsg)
 	}
 
-	Info(fmt.Sprintf("started fall detection for camera: camera_name=%s camera_id=%s task_id=%s", camera.Name, camera.ID, startResp.TaskID))
+	log.Info(fmt.Sprintf("started fall detection for camera: camera_name=%s camera_id=%s task_id=%s", camera.Name, camera.ID, startResp.TaskID))
 	return startResp.TaskID, nil
 }
 
 // StopFallDetection stops a fall detection task
-func StopFallDetection(server *InferenceServer, taskID string) error {
+func StopFallDetection(server *store.InferenceServer, taskID string) error {
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	// Send stop request to tianwan service
@@ -122,7 +124,7 @@ func StopFallDetection(server *InferenceServer, taskID string) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Connection", "close")
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send stop request: %v", err)
@@ -134,12 +136,13 @@ func StopFallDetection(server *InferenceServer, taskID string) error {
 		return fmt.Errorf("tianwan service returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	Info(fmt.Sprintf("stopped fall detection: task_id=%s", taskID))
+	log.Info(fmt.Sprintf("stopped fall detection: task_id=%s", taskID))
 	return nil
 }
 
 // GetFallDetectionResults retrieves fall detection results from tianwan service
-func GetFallDetectionResults(server *InferenceServer, taskID string, limit *int) ([]FallDetectionResultItem, error) {
+func GetFallDetectionResults(server *store.InferenceServer, taskID string, limit *int) ([]FallDetectionResultItem, error) {
+	// TODO: this should be configurable.
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	// Send result request to tianwan service
@@ -160,7 +163,7 @@ func GetFallDetectionResults(server *InferenceServer, taskID string, limit *int)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Connection", "close")
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send result request: %v", err)
@@ -190,7 +193,7 @@ func GetFallDetectionResults(server *InferenceServer, taskID string, limit *int)
 	}
 
 	if len(response.Results) > 0 {
-		Info(fmt.Sprintf("got fall detection results: count=%d task_id=%s", len(response.Results), taskID))
+		log.Info(fmt.Sprintf("got fall detection results: count=%d task_id=%s", len(response.Results), taskID))
 	}
 
 	return response.Results, nil

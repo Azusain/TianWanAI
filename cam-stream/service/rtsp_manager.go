@@ -1,7 +1,11 @@
-package main
+package service
 
 import (
 	"bytes"
+	"cam-stream/common/config"
+	"cam-stream/common/log"
+	"cam-stream/common/store"
+	"cam-stream/rtsp"
 	"fmt"
 	"image"
 	"image/color"
@@ -11,21 +15,11 @@ import (
 	"time"
 )
 
-var (
-	globalFrameRate     int
-	globalFrameInterval time.Duration
-)
-
-const (
-	RetryTimeSecond        uint = 3
-	DefaultGetFrameTimeout uint = 3
-)
-
 type RTSPManager struct {
-	cameras   map[string]*CameraStream
-	mutex     sync.RWMutex
-	outputDir string
-	proxyMgr  *FFmpegProxyManager
+	Cameras   map[string]*CameraStream
+	Mutex     sync.RWMutex
+	OutputDir string
+	ProxyMgr  *rtsp.FFmpegProxyManager
 }
 
 type CameraStream struct {
@@ -38,21 +32,21 @@ type CameraStream struct {
 }
 
 func NewRTSPManager() *RTSPManager {
-	outputDir := OutputDir
+	outputDir := config.OutputDir
 	os.MkdirAll(outputDir, 0755)
 
 	return &RTSPManager{
-		cameras:   make(map[string]*CameraStream),
-		outputDir: outputDir,
-		proxyMgr:  NewFFmpegProxyManager(DefaultFFmpegProxyConfig()),
+		Cameras:   make(map[string]*CameraStream),
+		OutputDir: outputDir,
+		ProxyMgr:  rtsp.NewFFmpegProxyManager(rtsp.DefaultFFmpegProxyConfig()),
 	}
 }
 
-func (m *RTSPManager) StartCamera(camera *CameraConfig) error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+func (m *RTSPManager) StartCamera(camera *store.CameraConfig) error {
+	m.Mutex.Lock()
+	defer m.Mutex.Unlock()
 
-	if stream, exists := m.cameras[camera.ID]; exists && stream.isRunning {
+	if stream, exists := m.Cameras[camera.ID]; exists && stream.isRunning {
 		return fmt.Errorf("camera %s is already running", camera.ID)
 	}
 
@@ -63,7 +57,7 @@ func (m *RTSPManager) StartCamera(camera *CameraConfig) error {
 		stopChannel: make(chan struct{}),
 	}
 
-	Info(fmt.Sprintf("starting camera: %s", camera.Name))
+	log.Info(fmt.Sprintf("starting camera: %s", camera.Name))
 
 	// start camera stream processing
 	go func() {
@@ -75,8 +69,8 @@ func (m *RTSPManager) StartCamera(camera *CameraConfig) error {
 			stream.mutex.Lock()
 			stream.isRunning = false
 			stream.mutex.Unlock()
-			m.proxyMgr.StopProxy(stream.ID)
-			Info(fmt.Sprintf("camera stopped: %s", stream.Name))
+			m.ProxyMgr.StopProxy(stream.ID)
+			log.Info(fmt.Sprintf("camera stopped: %s", stream.Name))
 		}()
 
 		// retry loop
@@ -91,31 +85,31 @@ func (m *RTSPManager) StartCamera(camera *CameraConfig) error {
 				if err == nil {
 					continue
 				}
-				Warn(fmt.Sprintf("camera %s connection lost: %v, retrying in %ds",
-					stream.ID, err, RetryTimeSecond))
+				log.Warn(fmt.Sprintf("camera %s connection lost: %v, retrying in %ds",
+					stream.ID, err, config.RetryTimeSecond))
 				select {
 				case <-stream.stopChannel:
 					return
-				case <-time.After(time.Duration(RetryTimeSecond) * time.Second):
+				case <-time.After(time.Duration(config.RetryTimeSecond) * time.Second):
 				}
 
 			}
 		}
 	}()
 
-	m.cameras[camera.ID] = stream
+	m.Cameras[camera.ID] = stream
 	return nil
 }
 
 // connectAndCaptureWithProxy connects to FFmpeg proxy and captures frames
 func (m *RTSPManager) connectAndCaptureWithProxy(stream *CameraStream) error {
 	// start FFmpeg proxy
-	proxy, err := m.proxyMgr.StartProxy(stream.ID, stream.URL)
+	proxy, err := m.ProxyMgr.StartProxy(stream.ID, stream.URL)
 	if err != nil {
 		return fmt.Errorf("failed to start FFmpeg proxy: %v", err)
 	}
 
-	Info(fmt.Sprintf("FFmpeg proxy started for camera: %s", stream.Name))
+	log.Info(fmt.Sprintf("FFmpeg proxy started for camera: %s", stream.Name))
 	lastFrameTime := time.Now()
 
 	for {
@@ -126,13 +120,13 @@ func (m *RTSPManager) connectAndCaptureWithProxy(stream *CameraStream) error {
 
 		default:
 			// get frame data
-			rawFrame, err := proxy.GetFrameTimeout(time.Duration(DefaultGetFrameTimeout) * time.Second)
+			rawFrame, err := proxy.GetFrameTimeout(time.Duration(config.DefaultGetFrameTimeout) * time.Second)
 			if err != nil {
 				return fmt.Errorf("failed to get frame: %v", err)
 			}
 
 			// frame rate control
-			if time.Since(lastFrameTime) < globalFrameInterval {
+			if time.Since(lastFrameTime) < config.GlobalFrameInterval {
 				continue
 			}
 			lastFrameTime = time.Now()
@@ -140,14 +134,14 @@ func (m *RTSPManager) connectAndCaptureWithProxy(stream *CameraStream) error {
 			// TODO: why cant we just process raw frame?
 			jpegData, err := m.rawFrameToJPEG(rawFrame)
 			if err != nil {
-				Warn(fmt.Sprintf("failed to convert frame for camera %s: %v", stream.ID, err))
+				log.Warn(fmt.Sprintf("failed to convert frame for camera %s: %v", stream.ID, err))
 				continue
 			}
 
 			// process a single frame.
-			cameraConfig, exists := safeGetCamera(stream.ID)
+			cameraConfig, exists := store.SafeGetCamera(stream.ID)
 			if !exists || cameraConfig == nil {
-				Warn(fmt.Sprintf("camera config not available for stream %s (%s), skipping frame processing", stream.ID, stream.Name))
+				log.Warn(fmt.Sprintf("camera config not available for stream %s (%s), skipping frame processing", stream.ID, stream.Name))
 				continue
 			}
 
@@ -155,14 +149,14 @@ func (m *RTSPManager) connectAndCaptureWithProxy(stream *CameraStream) error {
 				continue
 			}
 
-			ProcessFrameWithAsyncInference(jpegData, cameraConfig, m.outputDir)
+			ProcessFrameWithAsyncInference(jpegData, cameraConfig, m.OutputDir)
 
 		}
 	}
 }
 
 // rawFrameToJPEG converts raw RGB24 frame to JPEG bytes
-func (m *RTSPManager) rawFrameToJPEG(frame *RawFrame) ([]byte, error) {
+func (m *RTSPManager) rawFrameToJPEG(frame *rtsp.RawFrame) ([]byte, error) {
 	// Create RGBA image from raw RGB24 data
 	img := image.NewRGBA(image.Rect(0, 0, frame.Width, frame.Height))
 
@@ -190,10 +184,10 @@ func (m *RTSPManager) rawFrameToJPEG(frame *RawFrame) ([]byte, error) {
 }
 
 func (m *RTSPManager) StopCamera(cameraID string) error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+	m.Mutex.Lock()
+	defer m.Mutex.Unlock()
 
-	stream, exists := m.cameras[cameraID]
+	stream, exists := m.Cameras[cameraID]
 	if !exists {
 		return fmt.Errorf("camera %s not found", cameraID)
 	}
@@ -203,25 +197,25 @@ func (m *RTSPManager) StopCamera(cameraID string) error {
 	}
 
 	close(stream.stopChannel)
-	delete(m.cameras, cameraID)
+	delete(m.Cameras, cameraID)
 
 	return nil
 }
 
 func (m *RTSPManager) StopAll() {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+	m.Mutex.Lock()
+	defer m.Mutex.Unlock()
 
 	// Close all stop channels to signal capture goroutines to exit
 	// The goroutines will handle stopping their individual FFmpeg proxies in defer
-	for _, stream := range m.cameras {
+	for _, stream := range m.Cameras {
 		if stream.isRunning {
 			close(stream.stopChannel)
 		}
 	}
 
 	// Also stop all proxies directly as a safety measure
-	m.proxyMgr.StopAll()
+	m.ProxyMgr.StopAll()
 
-	m.cameras = make(map[string]*CameraStream)
+	m.Cameras = make(map[string]*CameraStream)
 }

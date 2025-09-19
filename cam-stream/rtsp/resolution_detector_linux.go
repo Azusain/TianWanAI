@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package rtsp
 
 /*
 #cgo pkg-config: libavformat libavcodec libavutil
