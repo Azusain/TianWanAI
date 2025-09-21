@@ -1,0 +1,132 @@
+syntax = "proto3";
+
+package api.v1;
+
+option go_package = "github.com/api/v1/pb";
+
+service ModelInferenceService {
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  
+  rpc Inference(stream InferenceRequest) returns (stream InferenceResponse);
+}
+
+// normalized xyxyn format 
+message Location {
+  double left = 1;
+  double top = 2;
+  double width = 3;
+  double height = 4;
+}
+
+message DetectionResult {
+  double score = 1;
+  Location location = 2;
+  optional string class_name = 3;  // for models that return class names
+  optional int32 class_id = 4;     // for models that return class indices
+}
+
+enum ServiceStatus {
+  SERVICE_STATUS_UNSPECIFIED = 0;
+  SERVICE_STATUS_SUCCESS = 1;
+  SERVICE_STATUS_INVALID_CONTENT_TYPE = 2;
+  SERVICE_STATUS_MISSING_IMAGE_DATA = 3;
+  SERVICE_STATUS_INVALID_IMAGE_FORMAT = 4;
+  SERVICE_STATUS_NO_OBJECT_DETECTED = 5;
+  SERVICE_STATUS_MODEL_NOT_FOUND = 6;
+  SERVICE_STATUS_STREAM_ERROR = 7;
+}
+
+enum ModelType {
+  MODEL_TYPE_UNSPECIFIED = 0;
+  MODEL_TYPE_GESTURE = 1;
+  MODEL_TYPE_PONDING = 2;
+  MODEL_TYPE_SMOKE = 3;
+  MODEL_TYPE_MOUSE = 4;
+  MODEL_TYPE_TSHIRT = 5;
+  MODEL_TYPE_CIGAR = 6;
+  MODEL_TYPE_HELMET = 7;
+  MODEL_TYPE_FIRE = 8;
+  MODEL_TYPE_FALL = 9;
+  MODEL_TYPE_SAFETYBELT = 10;
+}
+
+message ModelInfo {
+  ModelType type = 1;
+  string name = 2;
+  string description = 3;
+  string version = 4;
+}
+
+// Streaming inference request
+message InferenceRequest {
+  // session identifier for stateful models like FALL
+  string session_id = 1;  
+  oneof request {
+    StreamInitRequest init = 2;
+    FrameData frame = 3;
+    StreamCloseRequest close = 4;
+  }
+}
+
+message StreamInitRequest {
+  ModelType model_type = 1;
+  // additional model-specific parameters
+  map<string, string> parameters = 2;  
+}
+
+message FrameData {
+  // raw image bytes (jpg/png encoded)
+  bytes image_data = 1;  
+}
+
+message StreamCloseRequest {
+  string reason = 1;
+}
+
+// Streaming inference response
+message InferenceResponse {
+  oneof response {
+    StreamInitResponse init = 1;
+    DetectionResponse detection = 2;
+    StreamErrorResponse error = 3;
+    StreamCloseResponse close = 4;
+  }
+}
+
+message StreamInitResponse {
+  string session_id = 1;
+  ServiceStatus status = 2;
+}
+
+message DetectionResponse {
+  string task_id = 1;
+  ServiceStatus status = 2;
+  string message = 3;
+  repeated DetectionResult results = 4;
+  int64 timestamp = 5;
+  string api_version = 6;
+  string model_version = 7;
+}
+
+message StreamErrorResponse {
+  string task_id = 1;
+  ServiceStatus status = 2;
+  string error_message = 3;
+}
+
+message StreamCloseResponse {
+  string task_id = 1;
+  string message = 2;
+}
+
+// List available models
+message ListModelsRequest {
+  // empty - returns all available models
+}
+
+message ListModelsResponse {
+  repeated ModelInfo models = 1;
+  string server_version = 2;
+}
+
+

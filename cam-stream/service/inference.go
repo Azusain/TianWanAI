@@ -21,7 +21,7 @@ import (
 
 const (
 	// TODO: make it configurable.
-	DefaultHttpTimeoutSecs int = 15
+	DefaultHttpTimeoutSecs int = 30
 )
 
 // InferenceClient handles communication with inference server

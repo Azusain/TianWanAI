@@ -1,0 +1,13 @@
+version: v2
+modules:
+  - path: .
+    name: buf.build/api/v1
+lint:
+  use:
+    - STANDARD
+  except:
+    - COMMENT_FIELD
+    - COMMENT_ENUM_VALUE
+breaking:
+  use:
+    - FILE

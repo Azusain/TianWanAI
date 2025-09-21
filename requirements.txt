@@ -1,12 +1,14 @@
 # dont forget pytorch-gpu
 ultralytics
 opencv-python
-flask
 loguru
-gunicorn
 transformers
 numpy
 av
+# gRPC dependencies
+grpcio
+grpcio-tools
+protobuf
 
 # Fall detection dependencies
 scipy
